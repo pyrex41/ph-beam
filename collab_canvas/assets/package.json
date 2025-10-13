@@ -1,0 +1,13 @@
+{
+  "name": "collab-canvas-assets",
+  "version": "1.0.0",
+  "description": "Frontend assets for CollabCanvas",
+  "private": true,
+  "scripts": {
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "dependencies": {
+    "pixi.js": "^7.4.2"
+  },
+  "devDependencies": {}
+}
