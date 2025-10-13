@@ -1,0 +1,92 @@
+graph TD
+    subgraph "Browser Client"
+        A[Alpine.js <br> UI Layer]
+        B[PixiJS <br> WebGL Canvas]
+        C[LiveView Socket <br> Real-time]
+        A -->|Reactive UI| B
+        B -->|Render Updates| C
+        C -->|WebSocket Events| B
+    end
+
+    subgraph "Phoenix LiveView Server"
+        D[Canvas LiveView Process <br> - Manages state <br> - Broadcasts updates <br> - Coordinates AI <br> - Enforces auth]
+        E[Phoenix.PubSub <br> Broadcasting]
+        F[Redis/Upstash <br> - Canvas state <br> - User data <br> - Presence]
+        G[Claude AI API <br> - Function calling <br> - NL to Actions]
+        H[Phoenix Presence <br> CRDT-backed tracking]
+        
+        D -->|Subscribe/Broadcast| E
+        D -->|Persist/Retrieve| F
+        D -->|AI Commands| G
+        D -->|Track Users/Cursors| H
+        E -->|PubSub Updates| D
+        H -->|Presence Diff| D
+    end
+
+    subgraph "Authentication"
+        I[Auth0 <br> - User auth <br> - Social login <br> - JWT management <br> - Session handling]
+    end
+
+    %% Connections between subgraphs
+    C ---|WebSocket <br> Phoenix Channel| D
+    D ---|OAuth Callback| I
+
+    %% Data Flow
+    style A fill:#f9f,stroke:#333
+    style B fill:#bbf,stroke:#333
+    style C fill:#fbf,stroke:#333
+    style D fill:#ff9,stroke:#333
+    style E fill:#9f9,stroke:#333
+    style F fill:#f99,stroke:#333
+    style G fill:#9ff,stroke:#333
+    style H fill:#ff9,stroke:#333
+    style I fill:#99f,stroke:#333
+
+    %% Additional Details from Tasks/PRD
+    subgraph "Key Modules"
+        J[Redis Connection Pool <br> 3 connections, SSL]
+        K[Accounts Context <br> Redis-backed users]
+        L[Canvases Context <br> Object CRUD, Presence]
+        M[Auth Controller/Plug <br> Ueberauth integration]
+        N[Canvas LiveView <br> Events, Broadcasts]
+        O[PixiJS Hook <br> CanvasManager.js]
+        P[AI Agent <br> execute_command]
+        Q[AI Tools <br> Schemas for functions]
+        
+        J --> F
+        K --> F
+        L --> F
+        M --> I
+        N --> D
+        O --> B
+        P --> G
+        Q --> P
+    end
+
+    %% Deployment
+    subgraph "Infrastructure"
+        R[Fly.io <br> Hosting]
+        S[Upstash Redis <br> Serverless]
+        
+        R -->|Deploys| D
+        S -->|Provides| F
+    end
+
+    %% Flow Arrows
+    UserAction[User Action] -->|Capture| A
+    UserAction -->|Interaction| B
+    B -->|Local Render| UserFeedback[Instant Feedback]
+    C -->|Send Event| D
+    D -->|Persist| F
+    E -->|Broadcast| C
+    C -->|Push Update| B
+    B -->|Sync Render| AllClients[All Clients]
+
+    %% AI Flow
+    AICommand[AI Command] -->|NL Input| N
+    N -->|Execute| P
+    P -->|API Call| G
+    G -->|Tool Calls| P
+    P -->|Canvas Ops| L
+    L -->|Update| F
+    F -->|Broadcast via PubSub| E
