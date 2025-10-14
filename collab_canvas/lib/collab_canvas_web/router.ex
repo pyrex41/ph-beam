@@ -14,6 +14,12 @@ defmodule CollabCanvasWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # Health check endpoint (no auth required)
+  scope "/", CollabCanvasWeb do
+    pipe_through :api
+    get "/health", HealthController, :index
+  end
+
   scope "/", CollabCanvasWeb do
     pipe_through :browser
 

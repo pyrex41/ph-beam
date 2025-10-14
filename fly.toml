@@ -7,7 +7,7 @@ app = 'ph-beam'
 primary_region = 'ord'
 
 [env]
-  DATABASE_PATH = '/data'
+  DATABASE_PATH = '/data/collab_canvas.db'
 
 [http_service]
   internal_port = 8080
