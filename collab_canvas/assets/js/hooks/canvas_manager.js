@@ -52,19 +52,13 @@ export default {
       autoDensity: true
     });
 
-    // Add canvas to DOM and ensure it's responsive
+    // Add canvas to DOM
     container.appendChild(this.app.view);
 
-    // Force canvas to be responsive by removing fixed dimensions
+    // Set canvas display and max-size to prevent overflow
     this.app.view.style.display = 'block';
-    this.app.view.style.width = '100%';
-    this.app.view.style.height = '100%';
     this.app.view.style.maxWidth = '100%';
     this.app.view.style.maxHeight = '100%';
-
-    // Remove any inline width/height attributes that PixiJS might set
-    this.app.view.removeAttribute('width');
-    this.app.view.removeAttribute('height');
 
     // Create main container for objects
     this.objectContainer = new PIXI.Container();
@@ -849,13 +843,6 @@ export default {
       // Only resize if we have valid dimensions
       if (width > 0 && height > 0) {
         this.app.renderer.resize(width, height);
-
-        // After resize, ensure canvas element doesn't have fixed attributes
-        // that would prevent further responsive behavior
-        this.app.view.removeAttribute('width');
-        this.app.view.removeAttribute('height');
-        this.app.view.style.width = '100%';
-        this.app.view.style.height = '100%';
       }
     });
   },

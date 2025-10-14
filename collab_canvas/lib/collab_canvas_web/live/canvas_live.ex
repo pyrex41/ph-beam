@@ -505,6 +505,7 @@ defmodule CollabCanvasWeb.CanvasLive do
           phx-hook="CanvasRenderer"
           phx-update="ignore"
           class="flex-1 bg-white overflow-hidden"
+          style="min-width: 0; min-height: 0;"
           data-objects={Jason.encode!(@objects)}
           data-presences={Jason.encode!(@presences)}
           data-user-id={@user_id}
