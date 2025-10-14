@@ -13,8 +13,11 @@ defmodule CollabCanvasWeb.CanvasLive do
   use CollabCanvasWeb, :live_view
 
   alias CollabCanvas.Canvases
+  alias CollabCanvas.AI.Agent
   alias CollabCanvasWeb.Presence
   alias CollabCanvasWeb.Plugs.Auth
+
+  require Logger
 
   @impl true
   def mount(%{"id" => canvas_id}, session, socket) do
@@ -214,10 +217,19 @@ defmodule CollabCanvasWeb.CanvasLive do
   def handle_event("execute_ai_command", %{"command" => command}, socket) do
     canvas_id = socket.assigns.canvas_id
 
-    # TODO: Integrate with actual AI service (Task 17)
-    # For now, create a placeholder response
-    case process_ai_command(command, canvas_id) do
-      {:ok, objects} ->
+    case Agent.execute_command(command, canvas_id) do
+      {:ok, results} ->
+        # Extract successfully created objects from results
+        objects =
+          results
+          |> Enum.map(fn result -> result.result end)
+          |> Enum.filter(fn
+            {:ok, object} when is_map(object) and is_map_key(object, :id) -> true
+            {:ok, %{object_ids: _ids}} -> false  # Component creation returns object_ids
+            _ -> false
+          end)
+          |> Enum.map(fn {:ok, object} -> object end)
+
         # Broadcast AI-generated objects to all clients
         Enum.each(objects, fn object ->
           Phoenix.PubSub.broadcast(
@@ -230,14 +242,44 @@ defmodule CollabCanvasWeb.CanvasLive do
         # Update local state
         updated_objects = objects ++ socket.assigns.objects
 
+        success_count = length(objects)
+        message = if success_count > 0 do
+          "AI created #{success_count} object(s) successfully"
+        else
+          "AI command processed (check canvas for results)"
+        end
+
         {:noreply,
          socket
          |> assign(:objects, updated_objects)
          |> assign(:ai_command, "")
-         |> put_flash(:info, "AI command executed successfully")}
+         |> put_flash(:info, message)}
+
+      {:error, :canvas_not_found} ->
+        {:noreply, put_flash(socket, :error, "Canvas not found")}
+
+      {:error, :missing_api_key} ->
+        {:noreply, put_flash(socket, :error, "AI API key not configured. Please set CLAUDE_API_KEY environment variable.")}
+
+      {:error, {:api_error, status, body}} ->
+        Logger.error("AI API error: #{status} - #{inspect(body)}")
+        error_msg = if is_map(body) and body["error"] do
+          body["error"]["message"] || "AI API error"
+        else
+          "AI API error (#{status})"
+        end
+        {:noreply, put_flash(socket, :error, error_msg)}
+
+      {:error, {:request_failed, reason}} ->
+        Logger.error("AI request failed: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "AI request failed: #{inspect(reason)}")}
+
+      {:error, :invalid_response_format} ->
+        {:noreply, put_flash(socket, :error, "AI returned invalid response format")}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "AI command failed: #{reason}")}
+        Logger.error("AI command failed: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "AI command failed: #{inspect(reason)}")}
     end
   end
 
@@ -265,37 +307,6 @@ defmodule CollabCanvasWeb.CanvasLive do
     {:noreply, socket}
   end
 
-  # Placeholder AI command processor (will be replaced with actual AI service)
-  defp process_ai_command(command, canvas_id) do
-    # Simple placeholder: create a rectangle based on command
-    # Real implementation will use Task 17's AI service
-    cond do
-      String.contains?(String.downcase(command), "rectangle") ->
-        attrs = %{
-          position: %{x: 200, y: 200},
-          data: Jason.encode!(%{width: 100, height: 60, fill: "#3b82f6"})
-        }
-
-        case Canvases.create_object(canvas_id, "rectangle", attrs) do
-          {:ok, object} -> {:ok, [object]}
-          {:error, _} -> {:error, "Failed to create object"}
-        end
-
-      String.contains?(String.downcase(command), "circle") ->
-        attrs = %{
-          position: %{x: 300, y: 300},
-          data: Jason.encode!(%{radius: 50, fill: "#10b981"})
-        }
-
-        case Canvases.create_object(canvas_id, "circle", attrs) do
-          {:ok, object} -> {:ok, [object]}
-          {:error, _} -> {:error, "Failed to create object"}
-        end
-
-      true ->
-        {:error, "Command not recognized. Try 'create a rectangle' or 'create a circle'"}
-    end
-  end
 
   # Handle object created broadcasts from other clients
   @impl true
