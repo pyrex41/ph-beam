@@ -6,6 +6,10 @@ yarn-debug.log*
 yarn-error.log*
 dev-debug.log
 
+# DB for dev-debug
+*.db
+*.db*
+
 # Dependency directories
 node_modules/
 

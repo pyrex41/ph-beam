@@ -1,0 +1,86 @@
+sequenceDiagram
+    actor UserA
+    actor UserB
+    participant BrowserA as User A's<br>Browser
+    participant BrowserB as User B's<br>Browser
+    participant LV_A as CanvasLive<br>Process A
+    participant LV_B as CanvasLive<br>Process B
+    participant PubSub
+    participant CanvasesContext as Canvases<br>Context
+    participant Database
+    participant AIAgent as AI Agent
+    participant ClaudeAPI as Anthropic<br>Claude API
+    
+    %% Section 1: Real-time Object Update Flow
+    Note over UserA,ClaudeAPI: Real-time Object Update
+    UserA->>BrowserA: Drags an object on canvas
+    BrowserA->>LV_A: phx-event: update_object with new position
+    LV_A->>CanvasesContext: lock_object - id, user_a
+    CanvasesContext->>Database: UPDATE objects SET locked_by='user_a'
+    Database-->>CanvasesContext: Success
+    CanvasesContext-->>LV_A: ok, object
+    
+    LV_A->>CanvasesContext: update_object - id, attrs
+    CanvasesContext->>Database: UPDATE objects SET position=...
+    Database-->>CanvasesContext: Success
+    CanvasesContext-->>LV_A: ok, updated_object
+    LV_A->>PubSub: Broadcast canvas:123, object_updated, object
+    
+    PubSub-->>LV_A: Delivers broadcast to self
+    LV_A->>BrowserA: push_event object_updated, object
+    Note over BrowserA: Renders updated object position
+    PubSub-->>LV_B: Delivers broadcast to User B's process
+    LV_B->>BrowserB: push_event object_updated, object
+    Note over BrowserB: Renders updated object position
+    BrowserB-->>UserB: Shows User A's change
+    
+    %% Section 2: AI Command Execution Flow
+    Note over UserA,ClaudeAPI: AI Command Execution
+    UserA->>BrowserA: Types "create login form", clicks Generate
+    BrowserA->>LV_A: phx-event: execute_ai_command
+    LV_A->>LV_A: Starts async Task, sets loading state
+    
+    Note over LV_A,ClaudeAPI: Task runs in the background
+    LV_A->>AIAgent: Agent.execute_command - command, canvas_id
+    AIAgent->>ClaudeAPI: POST /v1/messages with command and tool schemas
+    ClaudeAPI-->>AIAgent: Responds with tool_use: create_component type: login_form
+    AIAgent->>CanvasesContext: Calls ComponentBuilder to create form elements
+    loop 8 times - for each element
+        CanvasesContext->>Database: INSERT INTO objects ...
+        Database-->>CanvasesContext: ok, new_object
+    end
+    CanvasesContext-->>AIAgent: ok, object_ids list
+    
+    AIAgent-->>LV_A: Task returns ok, results
+    LV_A->>LV_A: handle_info receives task result, clears loading state
+    
+    loop For each new object
+        LV_A->>PubSub: Broadcast canvas:123, object_created, object
+    end
+    Note over PubSub: All connected clients A & B receive the new objects
+    LV_A->>BrowserA: Shows success flash message
+    
+    %% Section 3: User Authentication Flow
+    Note over UserA,Auth0: User Authentication
+    participant Router
+    participant AuthController
+    participant Ueberauth
+    participant Auth0
+    participant AccountsContext as Accounts<br>Context
+    UserA->>BrowserA: Clicks "Login with Auth0"
+    BrowserA->>Router: GET /auth/auth0
+    Router->>AuthController: request
+    AuthController->>Ueberauth: Intercepts request
+    Ueberauth->>BrowserA: Redirect to Auth0 login page
+    BrowserA->>Auth0: User authenticates
+    
+    Auth0->>BrowserA: Redirect back to /auth/auth0/callback
+    BrowserA->>Router: GET /auth/auth0/callback
+    Router->>AuthController: callback
+    
+    AuthController->>AccountsContext: find_or_create_user with auth_data
+    AccountsContext->>Database: SELECT/INSERT user
+    Database-->>AccountsContext: User record
+    AccountsContext-->>AuthController: ok, user
+    
+    AuthController->>BrowserA: Set session cookie & Redirect to /dashboard

@@ -1,0 +1,69 @@
+graph TD
+    subgraph "User's Browser"
+        A1[Phoenix LiveView JS Client]
+        A2["CanvasRenderer Hook - PixiJS"]
+        A3[User Interface HTML/CSS]
+        A1 <--> A2
+        A1 <--> A3
+    end
+    subgraph "External Services"
+        C1[Auth0 Authentication]
+        C2[Anthropic Claude API]
+    end
+    subgraph "Phoenix Server - CollabCanvas Application"
+        B1[Phoenix Endpoint]
+        B2[Router]
+        subgraph "Web Layer - collab_canvas_web"
+            B3[CanvasLive]
+            B4[DashboardLive]
+            B5[AuthController]
+            B6[Presence]
+        end
+        subgraph "Real-time Infrastructure"
+            B7[Phoenix PubSub]
+            B8[Phoenix Presence Tracker]
+        end
+        subgraph "Business Logic / Contexts - collab_canvas"
+            B9[Accounts Context]
+            B10[Canvases Context]
+            B11[AI Agent]
+            B12[ComponentBuilder]
+            B13[AI Tools Definition]
+        end
+        subgraph "Data Layer"
+            B14[Ecto Repo]
+            B15[SQLite Database]
+        end
+        B1 --- B2
+        A1 -- WebSocket --> B1
+        B2 --> B3 & B4 & B5
+        %% LiveView Interactions
+        B3 -- Manages state & events for --> A2
+        B3 & B4 -- Authenticates via --> B9
+        %% Real-time Flow
+        B3 -- Subscribes/Broadcasts via --> B7
+        B6 -- Tracks users via --> B8
+        B7 -- Underpins --> B8
+        B3 -- Uses --> B6
+        %% Business Logic Interactions
+        B3 & B4 -- Uses --> B10
+        B5 -- Uses --> B9
+        B10 & B9 -- Use --> B14
+        %% AI Subsystem Flow
+        B3 -- Calls async --> B11
+        B11 -- Uses definitions from --> B13
+        B11 -- Calls --> B12
+        B12 -- Creates multiple objects via --> B10
+        B11 -- Makes HTTP request to --> C2
+        %% Data Persistence
+        B14 -- Persists data to --> B15
+        %% Authentication Flow
+        B5 -- Interacts with --> C1
+    end
+    %% Style Definitions for Clarity
+    classDef client fill:#e6f3ff,stroke:#333,stroke-width:2px;
+    classDef server fill:#f0fff0,stroke:#333,stroke-width:2px;
+    classDef external fill:#fff5e6,stroke:#333,stroke-width:2px;
+    class A1,A2,A3 client;
+    class B1,B2,B3,B4,B5,B6,B7,B8,B9,B10,B11,B12,B13,B14,B15 server;
+    class C1,C2 external;
