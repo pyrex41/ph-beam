@@ -16,7 +16,7 @@ defmodule CollabCanvasWeb.DashboardLive do
          |> redirect(to: "/")}
 
       user ->
-        canvases = Canvases.list_user_canvases(user.id)
+        canvases = Canvases.list_all_canvases()
 
         {:ok,
          socket
@@ -43,7 +43,7 @@ defmodule CollabCanvasWeb.DashboardLive do
 
     case Canvases.create_canvas(user.id, name) do
       {:ok, canvas} ->
-        canvases = Canvases.list_user_canvases(user.id)
+        canvases = Canvases.list_all_canvases()
 
         {:noreply,
          socket
@@ -66,11 +66,10 @@ defmodule CollabCanvasWeb.DashboardLive do
   @impl true
   def handle_event("delete_canvas", %{"id" => canvas_id_str}, socket) do
     canvas_id = String.to_integer(canvas_id_str)
-    user = socket.assigns.current_user
 
     case Canvases.delete_canvas(canvas_id) do
       {:ok, canvas} ->
-        canvases = Canvases.list_user_canvases(user.id)
+        canvases = Canvases.list_all_canvases()
 
         {:noreply,
          socket
@@ -165,6 +164,9 @@ defmodule CollabCanvasWeb.DashboardLive do
             <%= for canvas <- @canvases do %>
               <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
                 <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= canvas.name %></h3>
+                <p class="text-sm text-gray-600 mb-1">
+                  Created by <%= canvas.user.name || canvas.user.email %>
+                </p>
                 <p class="text-sm text-gray-500 mb-4">
                   Updated <%= Calendar.strftime(canvas.updated_at, "%B %d, %Y") %>
                 </p>

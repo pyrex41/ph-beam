@@ -339,7 +339,11 @@ defmodule CollabCanvasWeb.CanvasLive do
     topic = socket.assigns.topic
     presences = Presence.list(topic)
 
-    {:noreply, assign(socket, :presences, presences)}
+    # Push presence updates to JavaScript
+    {:noreply,
+     socket
+     |> assign(:presences, presences)
+     |> push_event("presence_updated", %{presences: presences})}
   end
 
   # Cleanup when LiveView process terminates
@@ -458,9 +462,20 @@ defmodule CollabCanvasWeb.CanvasLive do
           Shift + Drag = Pan
         </div>
 
-        <!-- User count indicator -->
-        <div class="text-xs text-gray-500 font-medium">
-          <%= map_size(@presences) + 1 %>
+        <!-- Online Users -->
+        <div class="border-t border-gray-200 pt-2 mt-2">
+          <div class="text-[10px] text-gray-500 text-center mb-2 font-medium">
+            ONLINE (<%= map_size(@presences) %>)
+          </div>
+          <%= for {_user_id, %{metas: [meta | _]}} <- @presences do %>
+            <div
+              class="w-12 h-12 rounded-lg flex items-center justify-center mb-1 text-white font-bold text-xs relative group"
+              style={"background-color: #{meta.color}"}
+              title={meta.name}
+            >
+              <%= String.first(meta.name || "?") %>
+            </div>
+          <% end %>
         </div>
       </div>
       <!-- Main Canvas Area -->
@@ -481,6 +496,7 @@ defmodule CollabCanvasWeb.CanvasLive do
           class="flex-1 bg-white overflow-hidden"
           data-objects={Jason.encode!(@objects)}
           data-presences={Jason.encode!(@presences)}
+          data-user-id={@user_id}
         >
           <!-- PixiJS will render here -->
         </div>

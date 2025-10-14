@@ -112,6 +112,25 @@ defmodule CollabCanvas.Canvases do
   end
 
   @doc """
+  Lists all canvases (for collaborative access across all users).
+
+  ## Returns
+    * List of all canvas structs with user preloaded
+
+  ## Examples
+
+      iex> list_all_canvases()
+      [%Canvas{}, %Canvas{}]
+
+  """
+  def list_all_canvases do
+    Canvas
+    |> order_by([c], desc: c.updated_at)
+    |> preload(:user)
+    |> Repo.all()
+  end
+
+  @doc """
   Creates a new object on a canvas.
 
   ## Parameters

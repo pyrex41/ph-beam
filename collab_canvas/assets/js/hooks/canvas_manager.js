@@ -11,9 +11,13 @@ export default {
    * Hook lifecycle - mounted
    */
   mounted() {
+    // Store current user ID
+    this.currentUserId = this.el.dataset.userId;
+
     this.setupPixiApp();
     this.setupEventListeners();
     this.loadInitialObjects();
+    this.loadInitialPresences();
     this.setupServerEventHandlers();
   },
 
@@ -116,6 +120,21 @@ export default {
         objects.forEach(obj => this.createObject(obj));
       } catch (error) {
         console.error('Failed to parse initial objects:', error);
+      }
+    }
+  },
+
+  /**
+   * Load initial presences from data attributes
+   */
+  loadInitialPresences() {
+    const presencesData = this.el.dataset.presences;
+    if (presencesData) {
+      try {
+        const presences = JSON.parse(presencesData);
+        this.updatePresences(presences);
+      } catch (error) {
+        console.error('Failed to parse initial presences:', error);
       }
     }
   },
@@ -297,23 +316,54 @@ export default {
   /**
    * Update cursor position for another user
    */
-  updateCursor(userId, position) {
-    let cursor = this.cursors.get(userId);
+  updateCursor(userId, userData, position) {
+    let cursorGroup = this.cursors.get(userId);
 
-    if (!cursor) {
-      // Create new cursor
-      cursor = new PIXI.Graphics();
-      cursor.beginFill(0x3b82f6);
-      cursor.drawCircle(0, 0, 5);
+    if (!cursorGroup) {
+      // Create new cursor with label
+      cursorGroup = new PIXI.Container();
+
+      // Cursor pointer (arrow shape)
+      const cursor = new PIXI.Graphics();
+      cursor.beginFill(parseInt(userData.color?.replace('#', '0x') || '0x3b82f6'));
+      cursor.moveTo(0, 0);
+      cursor.lineTo(0, 20);
+      cursor.lineTo(6, 15);
+      cursor.lineTo(10, 22);
+      cursor.lineTo(14, 19);
+      cursor.lineTo(10, 12);
+      cursor.lineTo(18, 12);
+      cursor.closePath();
       cursor.endFill();
 
-      this.cursors.set(userId, cursor);
-      this.cursorContainer.addChild(cursor);
+      // User name label
+      const labelBg = new PIXI.Graphics();
+      labelBg.beginFill(parseInt(userData.color?.replace('#', '0x') || '0x3b82f6'));
+      labelBg.drawRoundedRect(0, 0, 100, 24, 4);
+      labelBg.endFill();
+      labelBg.x = 20;
+      labelBg.y = 0;
+
+      const label = new PIXI.Text(userData.name || 'User', {
+        fontFamily: 'Arial',
+        fontSize: 12,
+        fill: 0xffffff,
+        fontWeight: 'bold'
+      });
+      label.x = 25;
+      label.y = 6;
+
+      cursorGroup.addChild(cursor);
+      cursorGroup.addChild(labelBg);
+      cursorGroup.addChild(label);
+
+      this.cursors.set(userId, cursorGroup);
+      this.cursorContainer.addChild(cursorGroup);
     }
 
     // Update position
-    cursor.x = position.x;
-    cursor.y = position.y;
+    cursorGroup.x = position.x;
+    cursorGroup.y = position.y;
   },
 
   /**
@@ -326,6 +376,17 @@ export default {
         this.cursorContainer.removeChild(cursor);
         cursor.destroy();
         this.cursors.delete(userId);
+      }
+    });
+
+    // Update or create cursors for all users except self
+    Object.entries(presences).forEach(([userId, data]) => {
+      // Skip current user
+      if (userId === this.currentUserId) return;
+
+      const metas = data.metas[0]; // Get first meta (most recent)
+      if (metas && metas.cursor) {
+        this.updateCursor(userId, metas, metas.cursor);
       }
     });
   },
