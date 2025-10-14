@@ -638,6 +638,18 @@ export default {
           bounds.height + 4
         );
       }
+
+      // Broadcast object position during drag (throttled to avoid spam)
+      if (!this.lastDragUpdate || Date.now() - this.lastDragUpdate > 50) {
+        this.safePushEvent('update_object', {
+          object_id: this.selectedObject.objectId,
+          position: {
+            x: newX,
+            y: newY
+          }
+        });
+        this.lastDragUpdate = Date.now();
+      }
     }
   },
 
