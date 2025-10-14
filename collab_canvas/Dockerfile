@@ -11,7 +11,7 @@
 #   - https://pkgs.org/ - resource for finding needed packages
 #
 ARG ELIXIR_VERSION=1.15
-ARG DEBIAN_VERSION=bullseye-slim
+ARG DEBIAN_VERSION=bookworm-slim
 
 ARG BUILDER_IMAGE="elixir:${ELIXIR_VERSION}-slim"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
