@@ -2,7 +2,7 @@
   "master": {
     "tasks": [
       {
-        "id": "1",
+        "id": 1,
         "title": "Install Phoenix and Create Project",
         "description": "Set up a new Phoenix project with the required configuration, including Ecto with SQLite instead of Redis, excluding Mailer as per the tech stack.",
         "status": "done",
@@ -52,7 +52,7 @@
         "updatedAt": "2025-10-13T21:16:45.726Z"
       },
       {
-        "id": "2",
+        "id": 2,
         "title": "Configure SQLite Database with Ecto",
         "description": "Configure Ecto with SQLite3 adapter for database handling in the collaborative canvas application.",
         "status": "done",
@@ -107,7 +107,7 @@
         "updatedAt": "2025-10-13T21:22:51.113Z"
       },
       {
-        "id": "3",
+        "id": 3,
         "title": "Configure Phoenix Presence",
         "description": "Set up Phoenix Presence for tracking online users and cursors in real-time.",
         "details": "Create lib/collab_canvas_web/presence.ex using Phoenix.Presence with the PubSub server. Add it to the application supervisor in application.ex. This enables CRDT-backed presence tracking for collaborative features.",
@@ -151,7 +151,7 @@
         "updatedAt": "2025-10-13T21:23:34.347Z"
       },
       {
-        "id": "4",
+        "id": 4,
         "title": "Set Up Auth0 Application",
         "description": "Configure Auth0 for authentication, including creating an application and setting callback URLs. The setup is now fully documented with detailed implementation notes for all subtasks, including a complete step-by-step guide in AUTH0_SETUP_GUIDE.md and a verification checklist in AUTH0_SETUP_CHECKLIST.md.",
         "status": "done",
@@ -225,7 +225,7 @@
         "updatedAt": "2025-10-13T21:57:23.482Z"
       },
       {
-        "id": "5",
+        "id": 5,
         "title": "Implement Ueberauth for Auth0",
         "description": "Integrate Ueberauth with Auth0 strategy for OAuth authentication.",
         "details": "Add Ueberauth configuration to config/config.exs and runtime.exs with Auth0 domain, client ID, and secret. Ensure environment variables are set for local and production. This handles OAuth callbacks and user info extraction.",
@@ -266,7 +266,7 @@
         "updatedAt": "2025-10-13T22:20:28.698Z"
       },
       {
-        "id": "6",
+        "id": 6,
         "title": "Create Accounts Context with Ecto",
         "description": "Build an Ecto-backed user accounts system for storing and retrieving user data.",
         "status": "done",
@@ -348,7 +348,7 @@
         "updatedAt": "2025-10-13T21:30:38.877Z"
       },
       {
-        "id": "7",
+        "id": 7,
         "title": "Create Auth Controller and Plug",
         "description": "Implement authentication controller and plug for handling Auth0 callbacks and session management.",
         "details": "Create lib/collab_canvas_web/controllers/auth_controller.ex for callback and logout handling. Implement lib/collab_canvas_web/plugs/auth.ex with authentication plug and LiveView mount hooks. Update router.ex with auth routes and browser pipeline.",
@@ -411,7 +411,7 @@
         "updatedAt": "2025-10-13T22:21:14.204Z"
       },
       {
-        "id": "8",
+        "id": 8,
         "title": "Create Home Page and Dashboard",
         "description": "Build the home page and dashboard LiveView for user interface after login.",
         "details": "Implement lib/collab_canvas_web/controllers/page_controller.ex and page_html/home.html.heex for the landing page. Create lib/collab_canvas_web/live/dashboard_live.ex for listing and creating canvases. Update router.ex with protected routes.",
@@ -465,7 +465,7 @@
         "updatedAt": "2025-10-13T22:23:24.675Z"
       },
       {
-        "id": "9",
+        "id": 9,
         "title": "Implement Canvas Context with Ecto",
         "description": "Develop the core canvas operations module using Ecto and SQLite for state management.",
         "status": "done",
@@ -545,7 +545,7 @@
         "updatedAt": "2025-10-13T21:42:00.142Z"
       },
       {
-        "id": "10",
+        "id": 10,
         "title": "Create Canvas LiveView",
         "description": "Build the main canvas LiveView for real-time collaboration.",
         "details": "Implement lib/collab_canvas_web/live/canvas_live.ex with mount, handle_event for object operations, AI commands, cursor updates, and presence. Handle PubSub broadcasts and terminate for cleanup. Include HTML template with toolbar, canvas container, and AI panel.",
@@ -648,7 +648,7 @@
         "updatedAt": "2025-10-13T22:16:23.129Z"
       },
       {
-        "id": "11",
+        "id": 11,
         "title": "Implement Real-Time Sync with PubSub",
         "description": "Set up Phoenix PubSub for broadcasting canvas updates to all connected users.",
         "status": "done",
@@ -716,7 +716,7 @@
         "updatedAt": "2025-10-13T22:30:19.027Z"
       },
       {
-        "id": "12",
+        "id": 12,
         "title": "Add Presence Tracking",
         "description": "Integrate presence for showing online users and their cursors.",
         "details": "In Canvas LiveView mount, track user presence using Phoenix.Presence. Update presence on interval and handle presence_diff messages. Display presence in the UI with user names and colors.",
@@ -773,7 +773,7 @@
         "updatedAt": "2025-10-13T22:31:45.288Z"
       },
       {
-        "id": "13",
+        "id": 13,
         "title": "Install and Configure PixiJS",
         "description": "Set up PixiJS for WebGL-based canvas rendering.",
         "details": "Add PixiJS to assets/package.json and install with npm. Update assets/js/app.js to import PixiJS. Ensure esbuild configuration handles the import. Test basic PixiJS rendering in a simple hook.",
@@ -849,7 +849,7 @@
         "updatedAt": "2025-10-13T21:26:35.060Z"
       },
       {
-        "id": "14",
+        "id": 14,
         "title": "Implement PixiJS Canvas Manager Hook",
         "description": "Create the main PixiJS hook for canvas interaction and rendering.",
         "details": "Build assets/js/hooks/canvas_manager.js with CanvasManager class. Initialize PixiJS app, handle object loading, setup event listeners for drawing, pan/zoom, and server events. Implement object creation, updating, and rendering with PixiJS graphics.",
@@ -935,7 +935,7 @@
         "updatedAt": "2025-10-13T22:36:26.337Z"
       },
       {
-        "id": "15",
+        "id": 15,
         "title": "Add Object Creation, Update, and Delete",
         "description": "Implement full CRUD operations for canvas objects in PixiJS.",
         "details": "Extend CanvasManager with functions for createRectangle, createCircle, createText, addObjectToCanvas, updateObject, removeObject, and findObjectAt. Handle user interactions like clicking, dragging, and keyboard shortcuts.",
@@ -1003,7 +1003,7 @@
         "updatedAt": "2025-10-13T22:44:57.693Z"
       },
       {
-        "id": "16",
+        "id": 16,
         "title": "Implement AI Agent Module",
         "description": "Build the AI agent for executing natural language commands using Claude API.",
         "details": "Create lib/collab_canvas/ai/agent.ex with execute_command function that calls Claude API with function calling. Process tool calls to execute canvas operations like create_shape, create_text, move_shape, etc.",
@@ -1069,7 +1069,7 @@
         "updatedAt": "2025-10-13T22:16:24.349Z"
       },
       {
-        "id": "17",
+        "id": 17,
         "title": "Define AI Tools for Claude",
         "description": "Specify tool definitions for Claude function calling.",
         "details": "Implement lib/collab_canvas/ai/tools.ex with get_tool_definitions returning schemas for create_shape, create_text, move_shape, resize_shape, and create_component. Ensure schemas match Claude's expected format.",
@@ -1111,7 +1111,7 @@
         "updatedAt": "2025-10-13T22:34:13.465Z"
       },
       {
-        "id": "18",
+        "id": 18,
         "title": "Add Complex AI Component Creation",
         "description": "Implement functions for creating complex UI components like login forms and nav bars.",
         "details": "In AI agent, add logic for create_login_form, create_nav_bar, and create_card that execute multiple tool calls. Handle component positioning and styling defaults.",
@@ -1164,7 +1164,7 @@
         "updatedAt": "2025-10-13T22:45:44.147Z"
       },
       {
-        "id": "19",
+        "id": 19,
         "title": "Deploy to Fly.io",
         "description": "Set up and deploy the application to Fly.io with production configuration using SQLite for database storage.",
         "status": "deferred",
@@ -1194,7 +1194,7 @@
         "subtasks": []
       },
       {
-        "id": "20",
+        "id": 20,
         "title": "Remove PixiJS Test and Demo Files",
         "description": "Remove unnecessary test and demo files related to PixiJS setup from the codebase, including a standalone test script, a test LiveView, a test hook, and the associated route, ensuring no other parts of the application reference them.",
         "details": "Perform a thorough search across the codebase to ensure no other files or modules reference the files to be removed: collab_canvas/test_accounts.exs, collab_canvas/lib/collab_canvas_web/live/pixi_test_live.ex, collab_canvas/assets/js/pixi_test_hook.js, or the route 'live \"/pixi-test\", PixiTestLive' in router.ex. Use grep or IDE search tools to check for any imports, references, or mentions. If any references are found, update or remove them accordingly before deletion. Then, delete the specified files: remove collab_canvas/test_accounts.exs from the root directory; delete collab_canvas/lib/collab_canvas_web/live/pixi_test_live.ex; delete collab_canvas/assets/js/pixi_test_hook.js; and remove the route line from collab_canvas/lib/collab_canvas_web/router.ex at line 27. After removal, run the application to ensure no compilation errors or runtime issues arise from missing files. Consider committing these changes in a version control system with a descriptive message like 'Remove PixiJS test/demo files post-setup'.",
@@ -1235,7 +1235,7 @@
         "updatedAt": "2025-10-14T16:19:57.832Z"
       },
       {
-        "id": "21",
+        "id": 21,
         "title": "Clean Up Console Log Statements for Production",
         "description": "Remove or conditionally wrap debug console.log statements in JavaScript files to prepare the codebase for production deployment, ensuring error logs are user-friendly and considering the adoption of a proper logging library.",
         "details": "Focus on the specified JavaScript files to clean up logging statements. For assets/js/pixi_test_hook.js (lines 13, 17, 18, 53, 64), remove all console.log statements since this file is slated for deletion in Task 20; if Task 20 is completed first, skip this file. For assets/js/hooks/canvas_manager.js, remove or wrap debug logs in development checks using 'if (process.env.NODE_ENV === 'development') { ... }'; keep console.error statements at lines 134 and 149 but revise messages to be more user-friendly (e.g., change 'Error parsing object' to 'Unable to load canvas object due to invalid data'); for line 213, wrap the console.warn in a development check or remove if not essential. For assets/vendor/daisyui.js (line 94), remove the version display log. Evaluate implementing a logging library like 'winston' or 'loglevel' with environment-based log levels (e.g., set to 'error' in production) to replace scattered console statements; update assets/package.json if adding a library, and modify assets/js/app.js to initialize it. Ensure changes do not break functionality by testing canvas rendering and interactions. If using a library, configure it to output to console in development and potentially to a service in production. Consider adding a global logger instance accessible across hooks.",
@@ -1283,7 +1283,7 @@
         "updatedAt": "2025-10-14T16:28:07.943Z"
       },
       {
-        "id": "22",
+        "id": 22,
         "title": "Fix Event Listener Memory Leaks in Canvas Manager",
         "description": "Fix memory leaks in the canvas_manager.js file by properly storing and removing event listener references in the setupEventListeners and destroyed methods.",
         "details": "In the canvas_manager.js file (collab_canvas/assets/js/hooks/canvas_manager.js), modify the setupEventListeners() method (around line 96) to store bound function references as instance properties. For example, add: this.boundHandleKeyDown = this.handleKeyDown.bind(this); this.boundHandleKeyUp = this.handleKeyUp.bind(this); this.boundHandleResize = this.handleResize.bind(this);. Then, when adding event listeners, use these stored references, e.g., window.addEventListener('keydown', this.boundHandleKeyDown);. In the destroyed() method (around line 926), remove listeners using the same stored references, e.g., window.removeEventListener('keydown', this.boundHandleKeyDown);. This ensures the original bound functions are removed, preventing memory leaks. Ensure all relevant event listeners (keydown, keyup, resize) are handled consistently. After changes, verify no syntax errors and that the code follows the existing structure.",
@@ -1310,7 +1310,7 @@
         "updatedAt": "2025-10-14T16:12:32.103Z"
       },
       {
-        "id": "23",
+        "id": 23,
         "title": "Refactor AI Component Creation Functions",
         "description": "Refactor the AI Agent module by extracting component creation functions into a separate module and moving theme colors to improve maintainability and follow the YAGNI principle.",
         "details": "Audit the usage of component creation functions (create_login_form/7, create_navbar/7, create_card/7, create_button_group/7, create_sidebar/7) and helper functions (create_shape_for_component/8, create_text_for_component/8) in the codebase to determine if they are actively used. If used, extract them into a new module named CollabCanvas.AI.ComponentBuilder, ensuring to move the functions and any related logic while updating imports and references. Move the get_theme_colors/1 function and its extensive color schemes (lines 767-853) to a new module named CollabCanvas.AI.Themes. If the functions are not used, remove them to adhere to YAGNI. Update the execute_tool_call/2 function in agent.ex to reference the new ComponentBuilder module if extraction occurs. Consider the file structure and ensure proper module organization within lib/collab_canvas/ai/. Handle any potential impacts on existing functionality, such as ensuring component positioning and styling defaults remain intact.",
@@ -1359,7 +1359,7 @@
         "updatedAt": "2025-10-14T16:32:38.855Z"
       },
       {
-        "id": "24",
+        "id": 24,
         "title": "Integrate AI Agent into Canvas LiveView",
         "description": "Replace the placeholder AI command processor in CanvasLive with actual integration to the AI.Agent module, enabling natural language processing for canvas operations via Claude API.",
         "details": "Locate the placeholder process_ai_command/2 function in collab_canvas/lib/collab_canvas_web/live/canvas_live.ex (lines 268-298) and replace its hardcoded logic with a call to AI.Agent.execute_command/2. Update the handle_event(\"execute_ai_command\") handler around line 214 to invoke the new process_ai_command function and handle the response from the AI agent, which may include multiple tool calls for operations like create_shape, create_text, move_shape, etc. Ensure the response format is parsed correctly to execute canvas operations using the existing Canvases module functions (e.g., create_object, update_object). Implement proper error handling for API failures, such as network issues or invalid API keys, by adding try-catch blocks and logging errors while providing user feedback in the AI panel UI. If needed, update the AI panel to display processing status (e.g., 'Processing...' during API calls). Verify that the CLAUDE_API_KEY environment variable is configured and consider adding rate limiting to prevent excessive API calls (e.g., using a simple counter or external library). Ensure the integration supports the full range of AI tools defined in Task 17, including complex component creation from Task 18. No changes are needed to the AI.Agent or AI.Tools modules themselves, as they are already implemented.",
@@ -1424,7 +1424,7 @@
         "updatedAt": "2025-10-14T16:35:43.624Z"
       },
       {
-        "id": "25",
+        "id": 25,
         "title": "Clean Up Commented-Out Code Blocks",
         "description": "Review and either remove or uncomment commented-out code blocks in specified files to improve codebase readability and eliminate confusion, while preserving helpful documentation examples.",
         "details": "Conduct a thorough review of each identified commented code block in the listed files. For collab_canvas/assets/js/app.js line 3, evaluate the commented user_socket.js import: remove it if channels are not used, or uncomment if needed for real-time functionality. In collab_canvas/lib/collab_canvas_web/router.ex lines 43-45, assess the commented API scope example: remove it if no API routes are required, as it's boilerplate. For collab_canvas/lib/collab_canvas_web/telemetry.ex line 16, check the commented Telemetry.Metrics.ConsoleReporter: remove if not needed for development logging. In collab_canvas/lib/collab_canvas_web/controllers/error_html.ex line 16, keep the commented embed_templates call and documentation as helpful examples, but consider moving them to a separate documentation file if they clutter the code. After decisions, edit the files accordingly using a text editor or IDE. Ensure changes do not introduce syntax errors or break functionality. If any uncommented code requires additional setup (e.g., dependencies), verify they are in place. Finally, commit changes with a clear message like 'Clean up commented-out code blocks for better readability'.",
@@ -1468,7 +1468,139 @@
       "completedCount": 24,
       "tags": [
         "master"
-      ]
+      ],
+      "created": "2025-10-14T18:12:14.527Z",
+      "description": "Tasks for master context"
+    }
+  },
+  "cleanup": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Document CollabCanvas Application Module",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas/application.ex explaining the OTP application structure, supervision tree, and child processes",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Document CollabCanvas Repo Module",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas/repo.ex explaining the Ecto repository configuration, database connection settings, and common query patterns",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Document CollabCanvas Accounts Context",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas/accounts.ex explaining the accounts context, user management functions, and integration with authentication",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "Document CollabCanvas Canvases Context",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas/canvases.ex explaining the canvases context, canvas operations, and object manipulation functions",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 5,
+        "title": "Document CollabCanvas AI Agent Module",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas/ai/agent.ex explaining the AI agent functionality, Claude API integration, and natural language command processing",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 6,
+        "title": "Document CollabCanvas AI Tools Module",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas/ai/tools.ex explaining the available AI tools for canvas operations and their parameters",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 7,
+        "title": "Document CollabCanvasWeb Endpoint Module",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas_web/endpoint.ex explaining the Phoenix endpoint configuration, plugs, and request handling pipeline",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 8,
+        "title": "Document CollabCanvasWeb Router Module",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas_web/router.ex explaining the routing configuration, pipelines, and available endpoints",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "Document CanvasLive Module",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas_web/live/canvas_live.ex explaining the canvas LiveView functionality, real-time updates, and AI command processing",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 10,
+        "title": "Document DashboardLive Module",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas_web/live/dashboard_live.ex explaining the dashboard functionality and canvas management interface",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 11,
+        "title": "Document AuthController Module",
+        "description": "Add detailed @moduledoc and @doc annotations to collab_canvas/lib/collab_canvas_web/controllers/auth_controller.ex explaining the authentication flow, OAuth integration, and session management",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2025-10-14T18:12:14.528Z",
+      "updated": "2025-10-14T18:12:51.313Z",
+      "description": "Documentation and cleanup tasks for the CollabCanvas project"
     }
   }
 }

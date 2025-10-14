@@ -59,7 +59,9 @@ defmodule CollabCanvasWeb.CanvasLive do
        |> assign(:topic, topic)
        |> assign(:presences, %{})
        |> assign(:selected_tool, "select")
-       |> assign(:ai_command, "")}
+       |> assign(:ai_command, "")
+       |> assign(:ai_loading, false)
+       |> assign(:ai_task_ref, nil)}
     else
       # Canvas not found or user not authenticated
       {:ok,
@@ -212,74 +214,28 @@ defmodule CollabCanvasWeb.CanvasLive do
     {:noreply, assign(socket, :ai_command, command)}
   end
 
-  # Handle AI command execution
+  # Handle AI command execution (async, non-blocking)
   @impl true
   def handle_event("execute_ai_command", %{"command" => command}, socket) do
-    canvas_id = socket.assigns.canvas_id
+    # Prevent duplicate AI commands while one is in progress
+    if socket.assigns.ai_loading do
+      {:noreply, put_flash(socket, :warning, "AI command already in progress, please wait...")}
+    else
+      canvas_id = socket.assigns.canvas_id
 
-    case Agent.execute_command(command, canvas_id) do
-      {:ok, results} ->
-        # Extract successfully created objects from results
-        objects =
-          results
-          |> Enum.map(fn result -> result.result end)
-          |> Enum.filter(fn
-            {:ok, object} when is_map(object) and is_map_key(object, :id) -> true
-            {:ok, %{object_ids: _ids}} -> false  # Component creation returns object_ids
-            _ -> false
-          end)
-          |> Enum.map(fn {:ok, object} -> object end)
+      # Start async task with timeout (Task.async automatically links to current process)
+      task = Task.async(fn ->
+        Agent.execute_command(command, canvas_id)
+      end)
 
-        # Broadcast AI-generated objects to all clients
-        Enum.each(objects, fn object ->
-          Phoenix.PubSub.broadcast(
-            CollabCanvas.PubSub,
-            socket.assigns.topic,
-            {:object_created, object}
-          )
-        end)
+      # Set loading state and store task reference for timeout monitoring
+      Process.send_after(self(), {:ai_timeout, task.ref}, 30_000)
 
-        # Update local state
-        updated_objects = objects ++ socket.assigns.objects
-
-        success_count = length(objects)
-        message = if success_count > 0 do
-          "AI created #{success_count} object(s) successfully"
-        else
-          "AI command processed (check canvas for results)"
-        end
-
-        {:noreply,
-         socket
-         |> assign(:objects, updated_objects)
-         |> assign(:ai_command, "")
-         |> put_flash(:info, message)}
-
-      {:error, :canvas_not_found} ->
-        {:noreply, put_flash(socket, :error, "Canvas not found")}
-
-      {:error, :missing_api_key} ->
-        {:noreply, put_flash(socket, :error, "AI API key not configured. Please set CLAUDE_API_KEY environment variable.")}
-
-      {:error, {:api_error, status, body}} ->
-        Logger.error("AI API error: #{status} - #{inspect(body)}")
-        error_msg = if is_map(body) and body["error"] do
-          body["error"]["message"] || "AI API error"
-        else
-          "AI API error (#{status})"
-        end
-        {:noreply, put_flash(socket, :error, error_msg)}
-
-      {:error, {:request_failed, reason}} ->
-        Logger.error("AI request failed: #{inspect(reason)}")
-        {:noreply, put_flash(socket, :error, "AI request failed: #{inspect(reason)}")}
-
-      {:error, :invalid_response_format} ->
-        {:noreply, put_flash(socket, :error, "AI returned invalid response format")}
-
-      {:error, reason} ->
-        Logger.error("AI command failed: #{inspect(reason)}")
-        {:noreply, put_flash(socket, :error, "AI command failed: #{inspect(reason)}")}
+      {:noreply,
+       socket
+       |> assign(:ai_loading, true)
+       |> assign(:ai_task_ref, task.ref)
+       |> clear_flash()}
     end
   end
 
@@ -363,6 +319,60 @@ defmodule CollabCanvasWeb.CanvasLive do
      |> push_event("presence_updated", %{presences: presences})}
   end
 
+  # Handle successful AI task completion
+  @impl true
+  def handle_info({ref, result}, socket) when is_reference(ref) do
+    # Only process if this is our AI task
+    if ref == socket.assigns.ai_task_ref do
+      # Demonitor the task (cleanup)
+      Process.demonitor(ref, [:flush])
+
+      socket = process_ai_result(result, socket)
+
+      {:noreply,
+       socket
+       |> assign(:ai_loading, false)
+       |> assign(:ai_task_ref, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Handle AI task failure/crash
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, socket) when is_reference(ref) do
+    # Only process if this is our AI task
+    if ref == socket.assigns.ai_task_ref do
+      Logger.error("AI task crashed: #{inspect(reason)}")
+
+      {:noreply,
+       socket
+       |> assign(:ai_loading, false)
+       |> assign(:ai_task_ref, nil)
+       |> put_flash(:error, "AI processing failed unexpectedly")}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Handle AI task timeout
+  @impl true
+  def handle_info({:ai_timeout, ref}, socket) when is_reference(ref) do
+    # Only process if this is still the current task
+    if ref == socket.assigns.ai_task_ref do
+      Logger.warning("AI task timed out after 30 seconds")
+
+      {:noreply,
+       socket
+       |> assign(:ai_loading, false)
+       |> assign(:ai_task_ref, nil)
+       |> put_flash(:error, "AI request timed out after 30 seconds. Please try again.")}
+    else
+      # Timeout for an old task that already completed, ignore
+      {:noreply, socket}
+    end
+  end
+
   # Cleanup when LiveView process terminates
   @impl true
   def terminate(_reason, socket) do
@@ -373,6 +383,73 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     # Presence tracking is automatically cleaned up when process dies
     :ok
+  end
+
+  # Private helper to process AI agent results
+  defp process_ai_result(result, socket) do
+    case result do
+      {:ok, results} ->
+        # Extract successfully created objects from results
+        objects =
+          results
+          |> Enum.map(fn result -> result.result end)
+          |> Enum.filter(fn
+            {:ok, object} when is_map(object) and is_map_key(object, :id) -> true
+            {:ok, %{object_ids: _ids}} -> false  # Component creation returns object_ids
+            _ -> false
+          end)
+          |> Enum.map(fn {:ok, object} -> object end)
+
+        # Broadcast AI-generated objects to all clients
+        Enum.each(objects, fn object ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            socket.assigns.topic,
+            {:object_created, object}
+          )
+        end)
+
+        # Update local state
+        updated_objects = objects ++ socket.assigns.objects
+
+        success_count = length(objects)
+        message = if success_count > 0 do
+          "AI created #{success_count} object(s) successfully"
+        else
+          "AI command processed (check canvas for results)"
+        end
+
+        socket
+        |> assign(:objects, updated_objects)
+        |> assign(:ai_command, "")
+        |> put_flash(:info, message)
+
+      {:error, :canvas_not_found} ->
+        put_flash(socket, :error, "Canvas not found")
+
+      {:error, :missing_api_key} ->
+        put_flash(socket, :error, "AI API key not configured. Please set CLAUDE_API_KEY environment variable.")
+
+      {:error, {:api_error, status, body}} ->
+        Logger.error("AI API error: #{status} - #{inspect(body)}")
+        error_msg = if is_map(body) and body["error"] do
+          body["error"]["message"] || "AI API error"
+        else
+          "AI API error (#{status})"
+        end
+        put_flash(socket, :error, error_msg)
+
+      {:error, {:request_failed, reason}} ->
+        Logger.error("AI request failed: #{inspect(reason)}")
+        put_flash(socket, :error, "AI request failed: #{inspect(reason)}")
+
+      {:error, :invalid_response_format} ->
+        put_flash(socket, :error, "AI returned invalid response format")
+
+      {:error, reason} ->
+        Logger.error("AI command failed: #{inspect(reason)}")
+        put_flash(socket, :error, "AI command failed: #{inspect(reason)}")
+    end
   end
 
   # Render the canvas interface
@@ -542,7 +619,11 @@ defmodule CollabCanvasWeb.CanvasLive do
                 phx-change="ai_command_change"
                 phx-value-value={@ai_command}
                 value={@ai_command}
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                disabled={@ai_loading}
+                class={[
+                  "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none",
+                  @ai_loading && "bg-gray-50 cursor-not-allowed"
+                ]}
                 rows="4"
                 placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle'"
               ><%= @ai_command %></textarea>
@@ -551,16 +632,42 @@ defmodule CollabCanvasWeb.CanvasLive do
             <button
               phx-click="execute_ai_command"
               phx-value-command={@ai_command}
-              disabled={@ai_command == ""}
+              disabled={@ai_command == "" || @ai_loading}
               class={[
-                "w-full py-2 px-4 rounded-lg font-medium transition-colors",
-                @ai_command == "" &&
+                "w-full py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2",
+                (@ai_command == "" || @ai_loading) &&
                   "bg-gray-300 text-gray-500 cursor-not-allowed",
-                @ai_command != "" &&
+                @ai_command != "" && !@ai_loading &&
                   "bg-blue-600 text-white hover:bg-blue-700"
               ]}
             >
-              Generate
+              <%= if @ai_loading do %>
+                <svg
+                  class="animate-spin h-5 w-5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    class="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    stroke-width="4"
+                  >
+                  </circle>
+                  <path
+                    class="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  >
+                  </path>
+                </svg>
+                Processing...
+              <% else %>
+                Generate
+              <% end %>
             </button>
           </div>
           <!-- Example Commands -->
