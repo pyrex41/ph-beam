@@ -1,0 +1,61 @@
+{
+	"meta": {
+		"generatedAt": "2025-10-14T16:02:12.832Z",
+		"tasksAnalyzed": 6,
+		"totalTasks": 25,
+		"analysisCount": 6,
+		"thresholdScore": 5,
+		"projectName": "Taskmaster",
+		"usedResearch": false
+	},
+	"complexityAnalysis": [
+		{
+			"taskId": 20,
+			"taskTitle": "Remove PixiJS Test and Demo Files",
+			"complexityScore": 4,
+			"recommendedSubtasks": 2,
+			"expansionPrompt": "Generate subtasks for removing PixiJS test and demo files, focusing on codebase search, file deletion, and verification steps.",
+			"reasoning": "This task involves careful searching across the codebase to avoid breaking references, followed by file removals and testing. It's moderately complex due to the need for thorough checks and dependencies on prior PixiJS setup tasks, but the steps are straightforward with low technical risk."
+		},
+		{
+			"taskId": 21,
+			"taskTitle": "Clean Up Console Log Statements for Production",
+			"complexityScore": 5,
+			"recommendedSubtasks": 3,
+			"expansionPrompt": "Generate subtasks for cleaning up console log statements, focusing on editing specific JavaScript files, conditionally wrapping logs, and potentially integrating a logging library.",
+			"reasoning": "The task requires editing multiple JavaScript files with conditional logic based on environment, and considering library integration, which adds moderate complexity in terms of implementation effort and testing across development/production modes. Dependencies on PixiJS setup increase coordination needs."
+		},
+		{
+			"taskId": 22,
+			"taskTitle": "Fix Event Listener Memory Leaks in Canvas Manager",
+			"complexityScore": 3,
+			"recommendedSubtasks": 1,
+			"expansionPrompt": "Generate subtasks for fixing event listener memory leaks, focusing on modifying the setupEventListeners and destroyed methods in canvas_manager.js.",
+			"reasoning": "This is a targeted fix in a single JavaScript file to properly manage event listener references, with low complexity due to specific code changes and straightforward testing via browser tools. It builds directly on the canvas manager implementation."
+		},
+		{
+			"taskId": 23,
+			"taskTitle": "Refactor AI Component Creation Functions",
+			"complexityScore": 6,
+			"recommendedSubtasks": 3,
+			"expansionPrompt": "Generate subtasks for refactoring AI component creation functions, focusing on auditing usage, extracting to new modules, and updating references.",
+			"reasoning": "Involves auditing code usage, creating new Elixir modules, and refactoring functions, which requires careful handling of dependencies and references. Moderate complexity from module organization and potential impacts on AI functionality, with testing needs for compilation and runtime behavior."
+		},
+		{
+			"taskId": 24,
+			"taskTitle": "Integrate AI Agent into Canvas LiveView",
+			"complexityScore": 7,
+			"recommendedSubtasks": 4,
+			"expansionPrompt": "Generate subtasks for integrating AI agent into Canvas LiveView, focusing on replacing placeholders, handling API responses, error management, and UI updates.",
+			"reasoning": "This task integrates external API calls (Claude), requires parsing complex responses, and implementing error handling in a LiveView context, adding higher complexity in terms of API reliability, rate limiting, and real-time collaboration testing. Dependencies on AI modules increase integration challenges."
+		},
+		{
+			"taskId": 25,
+			"taskTitle": "Clean Up Commented-Out Code Blocks",
+			"complexityScore": 3,
+			"recommendedSubtasks": 2,
+			"expansionPrompt": "Generate subtasks for cleaning up commented-out code blocks, focusing on reviewing and editing specific files while preserving documentation.",
+			"reasoning": "Primarily involves manual review and editing of comments across a few files, with low technical complexity but requiring careful decisions to avoid breaking functionality. Dependencies on prior cleanup tasks ensure sequencing."
+		}
+	]
+}

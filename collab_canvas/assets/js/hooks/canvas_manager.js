@@ -96,23 +96,35 @@ export default {
   setupEventListeners() {
     const canvas = this.app.view;
 
+    // Store bound function references for proper cleanup
+    this.boundHandleMouseDown = this.handleMouseDown.bind(this);
+    this.boundHandleMouseMove = this.handleMouseMove.bind(this);
+    this.boundHandleMouseUp = this.handleMouseUp.bind(this);
+    this.boundHandleWheel = this.handleWheel.bind(this);
+    this.boundHandleTouchStart = this.handleTouchStart.bind(this);
+    this.boundHandleTouchMove = this.handleTouchMove.bind(this);
+    this.boundHandleTouchEnd = this.handleTouchEnd.bind(this);
+    this.boundHandleKeyDown = this.handleKeyDown.bind(this);
+    this.boundHandleKeyUp = this.handleKeyUp.bind(this);
+    this.boundHandleResize = this.handleResize.bind(this);
+
     // Mouse events
-    canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
-    canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
-    canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
-    canvas.addEventListener('wheel', this.handleWheel.bind(this));
+    canvas.addEventListener('mousedown', this.boundHandleMouseDown);
+    canvas.addEventListener('mousemove', this.boundHandleMouseMove);
+    canvas.addEventListener('mouseup', this.boundHandleMouseUp);
+    canvas.addEventListener('wheel', this.boundHandleWheel);
 
     // Touch events for mobile
-    canvas.addEventListener('touchstart', this.handleTouchStart.bind(this));
-    canvas.addEventListener('touchmove', this.handleTouchMove.bind(this));
-    canvas.addEventListener('touchend', this.handleTouchEnd.bind(this));
+    canvas.addEventListener('touchstart', this.boundHandleTouchStart);
+    canvas.addEventListener('touchmove', this.boundHandleTouchMove);
+    canvas.addEventListener('touchend', this.boundHandleTouchEnd);
 
     // Keyboard events
-    window.addEventListener('keydown', this.handleKeyDown.bind(this));
-    window.addEventListener('keyup', this.handleKeyUp.bind(this));
+    window.addEventListener('keydown', this.boundHandleKeyDown);
+    window.addEventListener('keyup', this.boundHandleKeyUp);
 
     // Window resize
-    window.addEventListener('resize', this.handleResize.bind(this));
+    window.addEventListener('resize', this.boundHandleResize);
 
     // ResizeObserver for container size changes (more reliable than window resize)
     this.resizeObserver = new ResizeObserver(() => {
@@ -924,10 +936,21 @@ export default {
    * Hook lifecycle - destroyed
    */
   destroyed() {
-    // Clean up PixiJS application
-    if (this.app) {
-      this.app.destroy(true);
+    // Remove event listeners using stored bound references
+    const canvas = this.app?.view;
+    if (canvas) {
+      canvas.removeEventListener('mousedown', this.boundHandleMouseDown);
+      canvas.removeEventListener('mousemove', this.boundHandleMouseMove);
+      canvas.removeEventListener('mouseup', this.boundHandleMouseUp);
+      canvas.removeEventListener('wheel', this.boundHandleWheel);
+      canvas.removeEventListener('touchstart', this.boundHandleTouchStart);
+      canvas.removeEventListener('touchmove', this.boundHandleTouchMove);
+      canvas.removeEventListener('touchend', this.boundHandleTouchEnd);
     }
+
+    window.removeEventListener('keydown', this.boundHandleKeyDown);
+    window.removeEventListener('keyup', this.boundHandleKeyUp);
+    window.removeEventListener('resize', this.boundHandleResize);
 
     // Disconnect ResizeObserver
     if (this.resizeObserver) {
@@ -935,9 +958,9 @@ export default {
       this.resizeObserver = null;
     }
 
-    // Remove event listeners
-    window.removeEventListener('keydown', this.handleKeyDown.bind(this));
-    window.removeEventListener('keyup', this.handleKeyUp.bind(this));
-    window.removeEventListener('resize', this.handleResize.bind(this));
+    // Clean up PixiJS application
+    if (this.app) {
+      this.app.destroy(true);
+    }
   }
 };

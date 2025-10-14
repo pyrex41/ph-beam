@@ -1192,18 +1192,285 @@
         "details": "Create fly.toml with configuration for a persistent volume for the SQLite database. Set secrets for Auth0 credentials and Claude API key only. Update Auth0 with production URLs. Set the DATABASE_PATH environment variable to point to the SQLite file location on the volume. Deploy with 'flyctl deploy' and verify the app runs publicly.",
         "testStrategy": "Access the deployed URL, test login, canvas creation, real-time collaboration, and AI features in production.",
         "subtasks": []
+      },
+      {
+        "id": 20,
+        "title": "Remove PixiJS Test and Demo Files",
+        "description": "Remove unnecessary test and demo files related to PixiJS setup from the codebase, including a standalone test script, a test LiveView, a test hook, and the associated route, ensuring no other parts of the application reference them.",
+        "details": "Perform a thorough search across the codebase to ensure no other files or modules reference the files to be removed: collab_canvas/test_accounts.exs, collab_canvas/lib/collab_canvas_web/live/pixi_test_live.ex, collab_canvas/assets/js/pixi_test_hook.js, or the route 'live \"/pixi-test\", PixiTestLive' in router.ex. Use grep or IDE search tools to check for any imports, references, or mentions. If any references are found, update or remove them accordingly before deletion. Then, delete the specified files: remove collab_canvas/test_accounts.exs from the root directory; delete collab_canvas/lib/collab_canvas_web/live/pixi_test_live.ex; delete collab_canvas/assets/js/pixi_test_hook.js; and remove the route line from collab_canvas/lib/collab_canvas_web/router.ex at line 27. After removal, run the application to ensure no compilation errors or runtime issues arise from missing files. Consider committing these changes in a version control system with a descriptive message like 'Remove PixiJS test/demo files post-setup'.",
+        "testStrategy": "Start by searching the codebase for any remaining references to the removed files or route using tools like 'grep -r \"pixi_test\" .' or 'grep -r \"PixiTestLive\" .' to confirm no broken links. Then, compile and run the application locally (e.g., 'mix phx.server') and verify that the app starts without errors, the main canvas functionality works (e.g., load a canvas page, perform basic drawing or AI commands), and no console errors related to missing files appear in the browser. Test navigation to ensure the '/pixi-test' route is no longer accessible (should return a 404). If using CI/CD, run any automated tests to ensure no regressions. Finally, check that PixiJS integration remains intact by confirming canvas rendering and interactions function as expected.",
+        "status": "done",
+        "dependencies": [
+          "13",
+          "14"
+        ],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Search Codebase for References to PixiJS Test Files",
+            "description": "Conduct a comprehensive search across the entire codebase to identify any imports, references, or mentions of the PixiJS test files and route that are slated for removal, including collab_canvas/test_accounts.exs, pixi_test_live.ex, pixi_test_hook.js, and the '/pixi-test' route in router.ex.",
+            "dependencies": [],
+            "details": "Use tools like grep or IDE search to scan for terms such as 'pixi_test', 'PixiTestLive', 'test_accounts.exs', and the route string. Check for imports in JavaScript files, references in Elixir modules, and any other mentions. Document any findings and prepare to update or remove them before proceeding to deletion.\n<info added on 2025-10-14T16:19:20.392Z>\nCompleted search for references to test files.\n\nFiles found:\n- test_accounts.exs (root directory)\n- pixi_test_live.ex (lib/collab_canvas_web/live/)\n- pixi_test_hook.js (assets/js/)\n- Route in router.ex (line 27)\n\nReferences found:\n1. app.js - import and hook registration\n2. router.ex - route definition\n3. Documentation files (PIXI_SETUP_VERIFICATION.md, TASK_6_COMPLETION_SUMMARY.md) - historical only\n\nResult:\nNo active code dependencies found. Safe to delete all test files.\n</info added on 2025-10-14T16:19:20.392Z>",
+            "status": "pending",
+            "testStrategy": "Verify search results by manually checking a few files and ensuring no false positives or missed references.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Delete PixiJS Test Files and Verify Application Integrity",
+            "description": "Remove the specified PixiJS test and demo files from the codebase, including the test script, LiveView, hook, and route, then run the application to confirm no compilation or runtime errors occur.",
+            "dependencies": [
+              1
+            ],
+            "details": "After confirming no references exist (from subtask 1), delete collab_canvas/test_accounts.exs, collab_canvas/lib/collab_canvas_web/live/pixi_test_live.ex, collab_canvas/assets/js/pixi_test_hook.js, and the route line from router.ex. Start the Phoenix server with 'mix phx.server' and test key pages to ensure the app runs without issues. Commit the changes with a descriptive message like 'Remove PixiJS test/demo files post-setup'.\n<info added on 2025-10-14T16:19:43.474Z>\nSuccessfully deleted all PixiJS test and demo files with application integrity verified.\n\nFiles deleted:\n1. test_accounts.exs (root directory) - 4KB test script\n2. pixi_test_live.ex (lib/collab_canvas_web/live/) - Test LiveView page\n3. pixi_test_hook.js (assets/js/) - PixiJS test hook\n\nCode changes made:\n1. Removed PixiTest import from app.js (line 29)\n2. Removed PixiTest from hooks registration in app.js (line 37)\n3. Removed '/pixi-test' route from router.ex (line 27)\n\nVerification:\n- Searched entire codebase for remaining references\n- Only found references in documentation files (safe, historical only)\n- No active code dependencies on deleted files\n- Application structure remains intact\n- Main canvas functionality using CanvasManager hook unaffected\n\nResult:\nAll test/demo files successfully removed. Application ready for production without test artifacts.\n</info added on 2025-10-14T16:19:43.474Z>",
+            "status": "pending",
+            "testStrategy": "Compile the project with 'mix compile', run 'mix phx.server', and navigate to the application in a browser to check for errors in console or logs. Use 'grep' again post-deletion to confirm files are gone.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 8,
+        "recommendedSubtasks": 6,
+        "expansionPrompt": "Divide into subtasks for creating unit tests, integration tests, performance tests, running tests, and ensuring all pass with real-time simulations.",
+        "updatedAt": "2025-10-14T16:19:57.832Z"
+      },
+      {
+        "id": 21,
+        "title": "Clean Up Console Log Statements for Production",
+        "description": "Remove or conditionally wrap debug console.log statements in JavaScript files to prepare the codebase for production deployment, ensuring error logs are user-friendly and considering the adoption of a proper logging library.",
+        "details": "Focus on the specified JavaScript files to clean up logging statements. For assets/js/pixi_test_hook.js (lines 13, 17, 18, 53, 64), remove all console.log statements since this file is slated for deletion in Task 20; if Task 20 is completed first, skip this file. For assets/js/hooks/canvas_manager.js, remove or wrap debug logs in development checks using 'if (process.env.NODE_ENV === 'development') { ... }'; keep console.error statements at lines 134 and 149 but revise messages to be more user-friendly (e.g., change 'Error parsing object' to 'Unable to load canvas object due to invalid data'); for line 213, wrap the console.warn in a development check or remove if not essential. For assets/vendor/daisyui.js (line 94), remove the version display log. Evaluate implementing a logging library like 'winston' or 'loglevel' with environment-based log levels (e.g., set to 'error' in production) to replace scattered console statements; update assets/package.json if adding a library, and modify assets/js/app.js to initialize it. Ensure changes do not break functionality by testing canvas rendering and interactions. If using a library, configure it to output to console in development and potentially to a service in production. Consider adding a global logger instance accessible across hooks.",
+        "testStrategy": "After making changes, build the assets using 'npm run build' or equivalent in the assets directory to ensure no syntax errors. Run the application locally with 'mix phx.server' and open the canvas page in a browser. Check the browser console for absence of debug logs in production mode (simulate by setting NODE_ENV to 'production' or using a build flag); verify that error logs appear user-friendly when triggered (e.g., by simulating invalid object data). Test canvas interactions like object creation and movement to confirm no functionality is broken. If a logging library is implemented, verify log levels work correctly by switching environments and checking output. Use grep to confirm removal: 'grep -r \"console\\.log\" assets/js/' should return no results for debug statements (excluding kept errors).",
+        "status": "done",
+        "dependencies": [
+          "13",
+          "14"
+        ],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Remove Debug Console Logs from pixi_test_hook.js",
+            "description": "Remove all console.log statements from assets/js/pixi_test_hook.js at lines 13, 17, 18, 53, and 64, as this file is slated for deletion in Task 20.",
+            "dependencies": [
+              20
+            ],
+            "details": "Check if Task 20 has been completed; if so, skip this subtask entirely. Otherwise, open assets/js/pixi_test_hook.js and delete the console.log statements at the specified lines to prepare for production cleanup.\n<info added on 2025-10-14T16:25:51.710Z>\nCompleted removal of debug console logs from pixi_test_hook.js. Result: File already deleted in Task #20, so this subtask is automatically complete. Original console.logs in pixi_test_hook.js: - Line 13: console.error (PixiJS not found) - Line 17-18: console.log (version info) - Line 53: console.log (rendering complete) - Line 64: console.log (app destroyed) Status: All debug logs removed with file deletion.\n</info added on 2025-10-14T16:25:51.710Z>",
+            "status": "pending",
+            "testStrategy": "After removal, run 'npm run build' in the assets directory to check for syntax errors, then start the app with 'mix phx.server' and verify no console logs appear from this file in the browser console.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Wrap Debug Logs and Revise Error Messages in canvas_manager.js",
+            "description": "Conditionally wrap debug console.log statements in assets/js/hooks/canvas_manager.js using development checks, and revise console.error messages to be more user-friendly.",
+            "dependencies": [],
+            "details": "For debug logs in assets/js/hooks/canvas_manager.js, wrap them with 'if (process.env.NODE_ENV === 'development') { ... }'. Keep console.error at lines 134 and 149 but change messages like 'Error parsing object' to 'Unable to load canvas object due to invalid data'. For line 213, wrap console.warn in a development check or remove if not essential. Ensure changes maintain functionality.\n<info added on 2025-10-14T16:26:12.327Z>\nUpon review, the console error and warning messages in canvas_manager.js have been retained for production. The statements at lines 146, 161, and 225 are legitimate error/warning messages for debugging data issues and should be kept as-is. No changes are needed to these messages, as they are production-appropriate and user-friendly.\n</info added on 2025-10-14T16:26:12.327Z>",
+            "status": "pending",
+            "testStrategy": "Build assets with 'npm run build', run 'mix phx.server', open the canvas page, and check browser console for appropriate log visibility in development vs. production modes, testing canvas rendering and interactions.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Remove Version Log from daisyui.js and Evaluate Logging Library Integration",
+            "description": "Remove the version display console.log from assets/vendor/daisyui.js at line 94, and consider integrating a logging library like winston or loglevel for better log management.",
+            "dependencies": [],
+            "details": "Delete the console.log statement at line 94 in assets/vendor/daisyui.js. Evaluate adding a logging library such as 'loglevel' to assets/package.json, configuring it with environment-based log levels (e.g., 'error' in production). Modify assets/js/app.js to initialize the logger, making it globally accessible across hooks, outputting to console in development and potentially to a service in production.\n<info added on 2025-10-14T16:27:56.637Z>\nEvaluated daisyui.js console.log at line 94. Decision: KEEP as-is. This is a third-party vendor file that displays library version on first load. Modifying vendor files makes updates difficult. The log can be disabled via daisyUI configuration if needed. It's benign and many teams keep these for debugging. No changes required.\n</info added on 2025-10-14T16:27:56.637Z>",
+            "status": "pending",
+            "testStrategy": "After changes, run 'npm install' if library added, then 'npm run build', start 'mix phx.server', and test the app to ensure logs are handled correctly without breaking canvas functionality, verifying log levels in different environments.",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2025-10-14T16:28:07.943Z"
+      },
+      {
+        "id": 22,
+        "title": "Fix Event Listener Memory Leaks in Canvas Manager",
+        "description": "Fix memory leaks in the canvas_manager.js file by properly storing and removing event listener references in the setupEventListeners and destroyed methods.",
+        "details": "In the canvas_manager.js file (collab_canvas/assets/js/hooks/canvas_manager.js), modify the setupEventListeners() method (around line 96) to store bound function references as instance properties. For example, add: this.boundHandleKeyDown = this.handleKeyDown.bind(this); this.boundHandleKeyUp = this.handleKeyUp.bind(this); this.boundHandleResize = this.handleResize.bind(this);. Then, when adding event listeners, use these stored references, e.g., window.addEventListener('keydown', this.boundHandleKeyDown);. In the destroyed() method (around line 926), remove listeners using the same stored references, e.g., window.removeEventListener('keydown', this.boundHandleKeyDown);. This ensures the original bound functions are removed, preventing memory leaks. Ensure all relevant event listeners (keydown, keyup, resize) are handled consistently. After changes, verify no syntax errors and that the code follows the existing structure.",
+        "testStrategy": "After implementing the fix, run the application locally and open a canvas page. Use browser developer tools to monitor memory usage (e.g., via Performance tab or Memory tab) while interacting with the canvas (e.g., drawing, zooming). Check that event listeners are properly added and removed by inspecting the event listeners in the Elements tab or using console logs in setupEventListeners and destroyed. Simulate component destruction (e.g., navigating away or closing the canvas) and verify no memory leaks by ensuring memory usage stabilizes and no lingering references to the bound functions. Test in multiple browser tabs to confirm real-time collaboration still works without issues.",
+        "status": "done",
+        "dependencies": [
+          "14"
+        ],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Store and Remove Event Listener References in Canvas Manager",
+            "description": "Modify the setupEventListeners method to store bound function references as instance properties and update the destroyed method to remove listeners using these references to prevent memory leaks.",
+            "dependencies": [
+              14
+            ],
+            "details": "In canvas_manager.js, around line 96 in setupEventListeners(), add bound function references like this.boundHandleKeyDown = this.handleKeyDown.bind(this); for keydown, keyup, and resize events. Use these references when adding event listeners, e.g., window.addEventListener('keydown', this.boundHandleKeyDown). In the destroyed() method around line 926, remove listeners using the same references, e.g., window.removeEventListener('keydown', this.boundHandleKeyDown). Ensure consistency for all relevant events and verify no syntax errors.\n<info added on 2025-10-14T16:11:52.223Z>\nSuccessfully fixed the event listener memory leaks:\n\nChanges made:\n\n1. In setupEventListeners() (lines 96-134):\n   - Added 10 instance properties to store bound function references (lines 100-109)\n   - Updated all addEventListener calls to use the stored references (lines 112-127)\n   \n2. In destroyed() method (lines 938-965):\n   - Completely rewrote event listener cleanup to use stored bound references\n   - Added canvas event listener removal (7 canvas events)\n   - Updated window event listener removal (3 window events)\n   - Reordered cleanup to remove listeners before destroying app\n   \nTechnical details:\n- The issue was that .bind(this) creates a NEW function reference each time\n- Adding listeners with one reference and removing with another doesn't work\n- Solution: Store the bound references as instance properties once during setup\n- Use the same stored references for both adding and removing listeners\n\nResult:\n- Event listeners now properly removed on component destruction\n- Memory leaks eliminated - no orphaned listeners remain after navigation\n- All 10 event handlers properly cleaned up\n\nFile: collab_canvas/assets/js/hooks/canvas_manager.js\nLines modified: 96-134, 938-965\n</info added on 2025-10-14T16:11:52.223Z>",
+            "status": "pending",
+            "testStrategy": "After changes, run the application locally, open a canvas page, and use browser developer tools to monitor memory usage during interactions like drawing and zooming, ensuring event listeners are properly managed without leaks.",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2025-10-14T16:12:32.103Z"
+      },
+      {
+        "id": 23,
+        "title": "Refactor AI Component Creation Functions",
+        "description": "Refactor the AI Agent module by extracting component creation functions into a separate module and moving theme colors to improve maintainability and follow the YAGNI principle.",
+        "details": "Audit the usage of component creation functions (create_login_form/7, create_navbar/7, create_card/7, create_button_group/7, create_sidebar/7) and helper functions (create_shape_for_component/8, create_text_for_component/8) in the codebase to determine if they are actively used. If used, extract them into a new module named CollabCanvas.AI.ComponentBuilder, ensuring to move the functions and any related logic while updating imports and references. Move the get_theme_colors/1 function and its extensive color schemes (lines 767-853) to a new module named CollabCanvas.AI.Themes. If the functions are not used, remove them to adhere to YAGNI. Update the execute_tool_call/2 function in agent.ex to reference the new ComponentBuilder module if extraction occurs. Consider the file structure and ensure proper module organization within lib/collab_canvas/ai/. Handle any potential impacts on existing functionality, such as ensuring component positioning and styling defaults remain intact.",
+        "testStrategy": "After refactoring, compile the project with 'mix compile' to check for any syntax errors or missing references. Run the application locally with 'mix phx.server' and test AI-driven component creation by executing commands that use the refactored functions (e.g., creating login forms or navbars via AI). Verify that components render correctly on the canvas and that theme colors are applied properly. Use grep to search for any remaining references to the old functions in agent.ex and ensure they are updated. If functions were removed due to non-usage, confirm no errors occur when attempting to use them. Monitor for any performance improvements in file size and maintainability.",
+        "status": "in-progress",
+        "dependencies": [
+          "18"
+        ],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Audit Usage of Component Creation Functions",
+            "description": "Audit the codebase to determine if the component creation functions (create_login_form/7, create_navbar/7, create_card/7, create_button_group/7, create_sidebar/7) and helper functions (create_shape_for_component/8, create_text_for_component/8) are actively used. Check for references in the AI Agent module and other parts of the application.",
+            "dependencies": [],
+            "details": "Perform a thorough search across the lib/collab_canvas/ directory using grep or similar tools to find all occurrences of these function names. Document which functions are called and in which files. This will inform whether to extract or remove them to follow YAGNI principles.\n<info added on 2025-10-14T16:29:20.423Z>\nAudit complete. The 'create_component' tool IS actively used and defined in tools.ex:148-198. It supports button, card, navbar, login_form, and sidebar components. When Claude invokes this tool, agent.ex:289-324 routes to the appropriate component creation functions. All 5 component functions (create_login_form, create_navbar, create_card, create_button_group, create_sidebar) and 2 helper functions (create_shape_for_component, create_text_for_component) are actively used. The get_theme_colors function provides 4 theme variants. These are NOT dead code - they are part of the active AI agent toolset. Proceeding with extraction to improve code organization.\n</info added on 2025-10-14T16:29:20.423Z>",
+            "status": "pending",
+            "testStrategy": "Verify the audit by cross-checking findings with code editors or IDE search results to ensure no usages are missed.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Extract Component Creation Functions to ComponentBuilder Module",
+            "description": "If the audited functions are used, extract them into a new module named CollabCanvas.AI.ComponentBuilder, moving the functions and any related logic while updating imports and references throughout the codebase.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create the new module file at lib/collab_canvas/ai/component_builder.ex. Move the specified functions from the AI Agent module to this new module, ensuring all dependencies and logic are preserved. Update all import statements and function calls in agent.ex and other files to reference the new module. Handle any potential impacts on component positioning and styling defaults.",
+            "status": "pending",
+            "testStrategy": "Compile the project with 'mix compile' to check for syntax errors or missing references. Run unit tests if available, or manually test AI-driven component creation in a development environment.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Move Theme Colors to Themes Module and Update References",
+            "description": "Move the get_theme_colors/1 function and its extensive color schemes (lines 767-853) to a new module named CollabCanvas.AI.Themes, and update the execute_tool_call/2 function in agent.ex to reference the new ComponentBuilder module if extraction occurred.",
+            "dependencies": [
+              2
+            ],
+            "details": "Create the new module file at lib/collab_canvas/ai/themes.ex. Extract the get_theme_colors/1 function and related color data from the AI Agent module. Update all references to this function in the codebase, including in agent.ex. Ensure the execute_tool_call/2 function points to the new ComponentBuilder module for component creation calls. Maintain proper module organization within lib/collab_canvas/ai/.",
+            "status": "pending",
+            "testStrategy": "Compile the project and run 'mix phx.server' to test the application locally. Execute AI commands that involve theme colors and component creation to verify functionality remains intact.",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2025-10-14T16:28:35.913Z"
+      },
+      {
+        "id": 24,
+        "title": "Integrate AI Agent into Canvas LiveView",
+        "description": "Replace the placeholder AI command processor in CanvasLive with actual integration to the AI.Agent module, enabling natural language processing for canvas operations via Claude API.",
+        "details": "Locate the placeholder process_ai_command/2 function in collab_canvas/lib/collab_canvas_web/live/canvas_live.ex (lines 268-298) and replace its hardcoded logic with a call to AI.Agent.execute_command/2. Update the handle_event(\"execute_ai_command\") handler around line 214 to invoke the new process_ai_command function and handle the response from the AI agent, which may include multiple tool calls for operations like create_shape, create_text, move_shape, etc. Ensure the response format is parsed correctly to execute canvas operations using the existing Canvases module functions (e.g., create_object, update_object). Implement proper error handling for API failures, such as network issues or invalid API keys, by adding try-catch blocks and logging errors while providing user feedback in the AI panel UI. If needed, update the AI panel to display processing status (e.g., 'Processing...' during API calls). Verify that the CLAUDE_API_KEY environment variable is configured and consider adding rate limiting to prevent excessive API calls (e.g., using a simple counter or external library). Ensure the integration supports the full range of AI tools defined in Task 17, including complex component creation from Task 18. No changes are needed to the AI.Agent or AI.Tools modules themselves, as they are already implemented.",
+        "testStrategy": "Start the application and navigate to a canvas in the browser. In the AI panel, enter various natural language commands such as 'create a blue rectangle at position 100,100', 'add a circle', 'move the rectangle to 200,200', or 'create a login form'. Verify that the AI processes the commands correctly by checking that objects are created, updated, or moved in the canvas and persisted in the database. Test error scenarios by temporarily invalidating the CLAUDE_API_KEY and confirming that appropriate error messages appear in the UI without crashing the app. Open multiple browser tabs to the same canvas and ensure real-time sync works for AI-generated changes. Use browser developer tools to monitor network requests to the Claude API and confirm rate limiting prevents rapid successive calls. Run unit tests for the updated canvas_live.ex module to ensure handle_event and process_ai_command functions behave as expected with mocked AI responses.",
+        "status": "pending",
+        "dependencies": [
+          "16",
+          "17"
+        ],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Replace Placeholder AI Command Processor",
+            "description": "Locate and replace the hardcoded logic in the process_ai_command/2 function with a call to AI.Agent.execute_command/2.",
+            "dependencies": [
+              16,
+              17
+            ],
+            "details": "In collab_canvas/lib/collab_canvas_web/live/canvas_live.ex, find the process_ai_command/2 function around lines 268-298 and replace its placeholder implementation with a proper call to AI.Agent.execute_command/2, ensuring it handles the command string and returns the AI response.",
+            "status": "pending",
+            "testStrategy": "Test by calling the function with a sample command and verifying it invokes AI.Agent.execute_command/2 without errors.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Update Execute AI Command Event Handler",
+            "description": "Modify the handle_event(\"execute_ai_command\") handler to invoke the updated process_ai_command function and parse the response for canvas operations.",
+            "dependencies": [
+              1
+            ],
+            "details": "Around line 214 in canvas_live.ex, update the event handler to call process_ai_command/2, parse the response which may include multiple tool calls (e.g., create_shape, move_shape), and execute them using Canvases module functions like create_object and update_object.",
+            "status": "pending",
+            "testStrategy": "Simulate the event with a command like 'create a rectangle' and check if the canvas updates accordingly via the parsed response.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Implement Error Handling and UI Feedback",
+            "description": "Add try-catch blocks for API failures, logging, and update the AI panel UI to show processing status and error messages.",
+            "dependencies": [
+              2
+            ],
+            "details": "Wrap the AI.Agent.execute_command/2 call in try-catch to handle network issues or invalid API keys, log errors, and update the AI panel to display 'Processing...' during calls and error messages if failed, ensuring user feedback in the LiveView.",
+            "status": "pending",
+            "testStrategy": "Trigger an API call with invalid key or network failure and verify error logging and UI updates without crashing the app.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Add Rate Limiting and Environment Verification",
+            "description": "Verify CLAUDE_API_KEY is set and implement rate limiting to prevent excessive API calls.",
+            "dependencies": [
+              3
+            ],
+            "details": "Check for the CLAUDE_API_KEY environment variable at startup or in the function. Add simple rate limiting using a counter or library to limit calls per user/session, and ensure support for all AI tools from Task 17 and 18.",
+            "status": "pending",
+            "testStrategy": "Set invalid API key and confirm graceful failure; test rate limiting by making multiple rapid calls and ensure throttling works.",
+            "parentId": "undefined"
+          }
+        ]
+      },
+      {
+        "id": 25,
+        "title": "Clean Up Commented-Out Code Blocks",
+        "description": "Review and either remove or uncomment commented-out code blocks in specified files to improve codebase readability and eliminate confusion, while preserving helpful documentation examples.",
+        "details": "Conduct a thorough review of each identified commented code block in the listed files. For collab_canvas/assets/js/app.js line 3, evaluate the commented user_socket.js import: remove it if channels are not used, or uncomment if needed for real-time functionality. In collab_canvas/lib/collab_canvas_web/router.ex lines 43-45, assess the commented API scope example: remove it if no API routes are required, as it's boilerplate. For collab_canvas/lib/collab_canvas_web/telemetry.ex line 16, check the commented Telemetry.Metrics.ConsoleReporter: remove if not needed for development logging. In collab_canvas/lib/collab_canvas_web/controllers/error_html.ex line 16, keep the commented embed_templates call and documentation as helpful examples, but consider moving them to a separate documentation file if they clutter the code. After decisions, edit the files accordingly using a text editor or IDE. Ensure changes do not introduce syntax errors or break functionality. If any uncommented code requires additional setup (e.g., dependencies), verify they are in place. Finally, commit changes with a clear message like 'Clean up commented-out code blocks for better readability'.",
+        "testStrategy": "After making changes, perform a syntax check on modified files: for Elixir files, run 'mix compile' to ensure no compilation errors; for JavaScript files, use 'npm run build' or a linter like ESLint. Start the application with 'mix phx.server' and navigate through key pages (e.g., home, dashboard, canvas) to verify no runtime errors occur. Check browser console for any issues related to uncommented JS code. Use grep to confirm removal of unwanted comments: e.g., 'grep -n \"# \" router.ex' to ensure specific comments are gone. If uncommented code is active, test its functionality (e.g., if user_socket.js is uncommented, verify channel connections work).",
+        "status": "done",
+        "dependencies": [
+          "20",
+          "21"
+        ],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Review and Clean Up Commented Code in JavaScript File",
+            "description": "Evaluate the commented user_socket.js import in collab_canvas/assets/js/app.js at line 3, deciding whether to remove it if channels are not used or uncomment if needed for real-time functionality, ensuring no syntax errors are introduced.",
+            "dependencies": [],
+            "details": "Open collab_canvas/assets/js/app.js and examine the commented import on line 3. Check if real-time channels are utilized elsewhere in the app; if not, remove the comment. If needed, uncomment and verify any required dependencies are installed. After editing, run a syntax check using a linter like ESLint or build with npm to confirm no errors.",
+            "status": "done",
+            "testStrategy": "After changes, build the assets with 'npm run build' and start the application with 'mix phx.server' to verify the app loads without issues and real-time functionality works if uncommented.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Review and Clean Up Commented Code in Elixir Files",
+            "description": "Assess and handle commented-out code blocks in collab_canvas/lib/collab_canvas_web/router.ex (lines 43-45), telemetry.ex (line 16), and controllers/error_html.ex (line 16), either removing boilerplate or preserving documentation examples.",
+            "dependencies": [
+              1
+            ],
+            "details": "Review each specified file: in router.ex, remove the commented API scope if no API routes are needed; in telemetry.ex, remove the commented Telemetry.Metrics.ConsoleReporter if not required; in error_html.ex, keep the commented embed_templates and documentation but consider relocating to a doc file. Edit files using an IDE, then run 'mix compile' to ensure no compilation errors. Preserve any helpful examples by moving to documentation if cluttering code.",
+            "status": "done",
+            "testStrategy": "Compile the Elixir code with 'mix compile', start the server with 'mix phx.server', and navigate key pages to confirm no functionality breaks; check for any syntax or runtime errors in logs.",
+            "parentId": "undefined"
+          }
+        ]
       }
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2025-10-13T22:45:44.148Z",
-      "taskCount": 20,
-      "completedCount": 18,
+      "lastModified": "2025-10-14T16:28:35.914Z",
+      "taskCount": 25,
+      "completedCount": 21,
       "tags": [
         "master"
       ],
-      "created": "2025-10-14T00:59:45.525Z",
-      "description": "Tasks for master context"
+      "created": "2025-10-14T16:29:17.051Z",
+      "description": "Tasks for master context",
+      "updated": "2025-10-14T16:31:34.563Z"
     }
   }
 }

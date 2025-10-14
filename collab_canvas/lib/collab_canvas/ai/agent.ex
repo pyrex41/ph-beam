@@ -7,6 +7,7 @@ defmodule CollabCanvas.AI.Agent do
   require Logger
   alias CollabCanvas.Canvases
   alias CollabCanvas.AI.Tools
+  alias CollabCanvas.AI.ComponentBuilder
 
   @claude_api_url "https://api.anthropic.com/v1/messages"
   @claude_model "claude-3-5-sonnet-20241022"
@@ -298,19 +299,19 @@ defmodule CollabCanvas.AI.Agent do
     result =
       case component_type do
         "login_form" ->
-          create_login_form(canvas_id, x, y, width, height, theme, content)
+          ComponentBuilder.create_login_form(canvas_id, x, y, width, height, theme, content)
 
         "navbar" ->
-          create_navbar(canvas_id, x, y, width, height, theme, content)
+          ComponentBuilder.create_navbar(canvas_id, x, y, width, height, theme, content)
 
         "card" ->
-          create_card(canvas_id, x, y, width, height, theme, content)
+          ComponentBuilder.create_card(canvas_id, x, y, width, height, theme, content)
 
         "button" ->
-          create_button_group(canvas_id, x, y, width, height, theme, content)
+          ComponentBuilder.create_button_group(canvas_id, x, y, width, height, theme, content)
 
         "sidebar" ->
-          create_sidebar(canvas_id, x, y, width, height, theme, content)
+          ComponentBuilder.create_sidebar(canvas_id, x, y, width, height, theme, content)
 
         _ ->
           {:error, :unknown_component_type}

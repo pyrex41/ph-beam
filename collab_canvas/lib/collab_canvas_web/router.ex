@@ -2,47 +2,43 @@ defmodule CollabCanvasWeb.Router do
   use CollabCanvasWeb, :router
 
   pipeline :browser do
-    plug :accepts, ["html"]
-    plug :fetch_session
-    plug :fetch_live_flash
-    plug :put_root_layout, html: {CollabCanvasWeb.Layouts, :root}
-    plug :protect_from_forgery
-    plug :put_secure_browser_headers
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {CollabCanvasWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
   end
 
   pipeline :api do
-    plug :accepts, ["json"]
+    plug(:accepts, ["json"])
   end
 
   # Health check endpoint (no auth required)
   scope "/", CollabCanvasWeb do
-    pipe_through :api
-    get "/health", HealthController, :index
+    pipe_through(:api)
+    get("/health", HealthController, :index)
   end
 
   scope "/", CollabCanvasWeb do
-    pipe_through :browser
+    pipe_through(:browser)
 
-    get "/", PageController, :home
-    live "/pixi-test", PixiTestLive
-    live "/dashboard", DashboardLive
-    live "/canvas/:id", CanvasLive
+    get("/", PageController, :home)
+    live("/dashboard", DashboardLive)
+    live("/canvas/:id", CanvasLive)
   end
 
   # Auth routes
   scope "/auth", CollabCanvasWeb do
-    pipe_through :browser
+    pipe_through(:browser)
 
-    get "/logout", AuthController, :logout
-    get "/:provider", AuthController, :request
-    get "/:provider/callback", AuthController, :callback
-    post "/:provider/callback", AuthController, :callback
+    get("/logout", AuthController, :logout)
+    get("/:provider", AuthController, :request)
+    get("/:provider/callback", AuthController, :callback)
+    post("/:provider/callback", AuthController, :callback)
   end
 
   # Other scopes may use custom stacks.
-  # scope "/api", CollabCanvasWeb do
-  #   pipe_through :api
-  # end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:collab_canvas, :dev_routes) do
@@ -54,10 +50,10 @@ defmodule CollabCanvasWeb.Router do
     import Phoenix.LiveDashboard.Router
 
     scope "/dev" do
-      pipe_through :browser
+      pipe_through(:browser)
 
-      live_dashboard "/dashboard", metrics: CollabCanvasWeb.Telemetry
-      forward "/mailbox", Plug.Swoosh.MailboxPreview
+      live_dashboard("/dashboard", metrics: CollabCanvasWeb.Telemetry)
+      forward("/mailbox", Plug.Swoosh.MailboxPreview)
     end
   end
 end
