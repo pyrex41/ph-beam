@@ -196,6 +196,16 @@ export default {
     this.handleEvent('tool_selected', (data) => {
       this.currentTool = data.tool;
     });
+
+    // Handle object lock updates from server
+    this.handleEvent('object_locked', (data) => {
+      this.updateObject(data.object);
+    });
+
+    // Handle object unlock updates from server
+    this.handleEvent('object_unlocked', (data) => {
+      this.updateObject(data.object);
+    });
   },
 
   /**
@@ -226,10 +236,13 @@ export default {
         return;
     }
 
-    // Store object reference
+    // Store object reference and lock information
     pixiObject.objectId = objectData.id;
+    pixiObject.lockedBy = objectData.locked_by;
     pixiObject.eventMode = 'static'; // Replaces interactive = true
-    pixiObject.cursor = 'pointer'; // Replaces buttonMode = true
+
+    // Set cursor and visual appearance based on lock status
+    this.updateObjectAppearance(pixiObject);
 
     // Add event listeners for interaction
     pixiObject.on('pointerdown', this.onObjectPointerDown.bind(this));
@@ -323,10 +336,31 @@ export default {
       pixiObject.y = objectData.position.y;
     }
 
+    // Update lock status
+    if (objectData.locked_by !== undefined) {
+      pixiObject.lockedBy = objectData.locked_by;
+      this.updateObjectAppearance(pixiObject);
+    }
+
     // For more complex updates, recreate the object
     if (objectData.data) {
       this.deleteObject(objectData.id);
       this.createObject(objectData);
+    }
+  },
+
+  /**
+   * Update the visual appearance of an object based on its lock status
+   */
+  updateObjectAppearance(pixiObject) {
+    if (pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId) {
+      // Object is locked by another user - gray it out and change cursor
+      pixiObject.alpha = 0.5;
+      pixiObject.cursor = 'not-allowed';
+    } else {
+      // Object is unlocked or locked by current user - normal appearance
+      pixiObject.alpha = 1.0;
+      pixiObject.cursor = 'pointer';
     }
   },
 
@@ -828,10 +862,17 @@ export default {
    * Clear object selection
    */
   clearSelection() {
-    if (this.selectedObject && this.selectionBox) {
-      this.objectContainer.removeChild(this.selectionBox);
-      this.selectionBox.destroy();
-      this.selectionBox = null;
+    if (this.selectedObject) {
+      // Unlock the object
+      this.safePushEvent('unlock_object', {
+        object_id: this.selectedObject.objectId
+      });
+
+      if (this.selectionBox) {
+        this.objectContainer.removeChild(this.selectionBox);
+        this.selectionBox.destroy();
+        this.selectionBox = null;
+      }
     }
     this.selectedObject = null;
   },
@@ -842,6 +883,11 @@ export default {
   showSelection(object) {
     // Remove previous selection
     this.clearSelection();
+
+    // Lock the object for editing
+    this.safePushEvent('lock_object', {
+      object_id: object.objectId
+    });
 
     // Create selection box
     this.selectionBox = new PIXI.Graphics();
@@ -886,6 +932,13 @@ export default {
     const object = event.currentTarget;
     const globalPos = event.data.global;
     const localPos = this.screenToCanvas(globalPos);
+
+    // Check if object is locked by another user
+    const pixiObject = this.objects.get(object.objectId);
+    if (pixiObject && pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId) {
+      // Object is locked by another user, prevent interaction
+      return;
+    }
 
     if (this.currentTool === 'select') {
       // Show selection and prepare for drag

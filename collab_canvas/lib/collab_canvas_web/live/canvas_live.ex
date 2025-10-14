@@ -2,12 +2,82 @@ defmodule CollabCanvasWeb.CanvasLive do
   @moduledoc """
   LiveView for real-time collaborative canvas editing.
 
-  This module handles:
-  - Canvas state management
-  - Real-time object updates via PubSub
-  - User presence tracking
-  - AI-powered object generation
-  - Cursor position tracking
+  This module provides a complete collaborative drawing canvas with real-time
+  synchronization across multiple users. It combines Phoenix LiveView for
+  server-side rendering with Phoenix PubSub for real-time updates, and
+  Phoenix Presence for user tracking.
+
+  ## Features
+
+  ### Real-time Collaboration
+  - Multiple users can edit the same canvas simultaneously
+  - Changes are broadcast instantly to all connected clients via PubSub
+  - Local state updates are optimized for immediate UI feedback
+  - Prevents duplicate updates when the originating client receives broadcasts
+
+  ### Canvas State Management
+  - Maintains synchronized state of canvas objects (rectangles, circles, text)
+  - Handles object creation, updates, and deletion with database persistence
+  - Tracks object positions and properties (color, size, text content, etc.)
+  - Objects are stored in the database and cached in LiveView assigns
+
+  ### PubSub Architecture
+  - Each canvas has a dedicated PubSub topic: "canvas:<canvas_id>"
+  - Broadcasts three types of events: object_created, object_updated, object_deleted
+  - All connected clients subscribe to their canvas topic on mount
+  - Events are pushed to JavaScript via push_event for client-side rendering
+
+  ### User Presence Tracking
+  - Tracks all users currently viewing the canvas
+  - Each user gets a unique color for visual identification
+  - Real-time cursor position tracking shows where other users are pointing
+  - Presence metadata includes: online_at, cursor position, color, name, email
+  - Automatic cleanup when users disconnect
+
+  ### AI-Powered Object Generation
+  - Natural language commands to create objects: "Create a blue rectangle"
+  - Async implementation using Task.async to prevent blocking the UI
+  - 30-second timeout protection with graceful error handling
+  - AI-generated objects are validated and broadcast to all clients
+  - Uses Claude API (Anthropic) for command interpretation
+  - Prevents duplicate AI requests while one is in progress
+
+  ### Tool System
+  - Multiple drawing tools: select, rectangle, circle, text, delete
+  - Tool state is synchronized between server and client
+  - Keyboard shortcuts for quick tool switching (S, R, C, T, D)
+  - Tool selection is pushed to JavaScript hooks for client-side handling
+
+  ## State Management
+
+  The socket assigns include:
+  - `:canvas` - The canvas struct with metadata
+  - `:canvas_id` - Canvas identifier for PubSub topic
+  - `:objects` - List of all canvas objects (synchronized)
+  - `:user_id` - Unique identifier for the current user
+  - `:topic` - PubSub topic string for this canvas
+  - `:presences` - Map of all connected users and their metadata
+  - `:selected_tool` - Currently active drawing tool
+  - `:ai_command` - Current AI command text
+  - `:ai_loading` - Boolean indicating AI processing state
+  - `:ai_task_ref` - Reference to async AI task for monitoring
+
+  ## Event Flow
+
+  1. User performs action (e.g., creates object)
+  2. Client sends event to LiveView via handle_event/3
+  3. LiveView persists change to database
+  4. LiveView broadcasts change to PubSub topic
+  5. All connected clients (including originator) receive broadcast via handle_info/2
+  6. Each client updates local state and pushes to JavaScript
+  7. JavaScript hook updates the PixiJS canvas rendering
+
+  ## Error Handling
+
+  - Database operations return {:ok, result} or {:error, reason}
+  - Errors are displayed to users via flash messages
+  - AI tasks have timeout protection and crash recovery
+  - Presence tracking is automatically cleaned up on disconnect
   """
 
   use CollabCanvasWeb, :live_view
@@ -19,6 +89,34 @@ defmodule CollabCanvasWeb.CanvasLive do
 
   require Logger
 
+  @doc """
+  Mounts the LiveView and initializes the collaborative canvas session.
+
+  ## Responsibilities
+
+  1. Authenticates the user from session data
+  2. Loads canvas data with associated objects from database
+  3. Subscribes to canvas-specific PubSub topic for real-time updates
+  4. Tracks user presence with cursor metadata
+  5. Initializes socket assigns for canvas state
+
+  ## Parameters
+
+  - `params` - Map containing the canvas ID in the "id" key
+  - `session` - Session data containing authentication information
+  - `socket` - The LiveView socket
+
+  ## Returns
+
+  - `{:ok, socket}` - Successfully mounted with initialized state
+  - `{:ok, socket}` - Redirects to home if canvas not found or user not authenticated
+
+  ## Side Effects
+
+  - Subscribes to PubSub topic "canvas:\#{canvas_id}"
+  - Tracks user presence in Phoenix Presence
+  - Assigns random color to user for cursor display
+  """
   @impl true
   def mount(%{"id" => canvas_id}, session, socket) do
     # Load authenticated user
@@ -71,7 +169,9 @@ defmodule CollabCanvasWeb.CanvasLive do
     end
   end
 
+  @doc false
   # Helper function to generate a random color for user cursors
+  # Returns one of 8 predefined colors for visual distinction between users
   defp generate_user_color do
     colors = [
       "#3b82f6",
@@ -87,7 +187,28 @@ defmodule CollabCanvasWeb.CanvasLive do
     Enum.random(colors)
   end
 
-  # Handle object creation
+  @doc """
+  Handles object creation events from the client.
+
+  Creates a new canvas object (rectangle, circle, text, etc.) and broadcasts
+  the change to all connected clients. The object is persisted to the database
+  and immediately pushed to the JavaScript client for optimistic UI updates.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "type" - Object type (e.g., "rectangle", "circle", "text")
+    - "position" - Map with x, y coordinates (optional, defaults to {100, 100})
+    - "data" - Object-specific data (color, size, text, etc.) as JSON or map
+
+  ## Broadcast
+
+  Sends `{:object_created, object}` to PubSub topic for all clients to receive.
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message.
+  """
   @impl true
   def handle_event("create_object", %{"type" => type} = params, socket) do
     canvas_id = socket.assigns.canvas_id
@@ -125,7 +246,163 @@ defmodule CollabCanvasWeb.CanvasLive do
     end
   end
 
-  # Handle object updates
+  @doc """
+  Handles object selection events from the client.
+
+  Locks an object for editing when a user selects it, preventing other users
+  from modifying it simultaneously.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_id" or "id" - ID of object to lock
+
+  ## Broadcast
+
+  Sends `{:object_locked, object}` to PubSub topic for all clients to receive.
+
+  ## Returns
+
+  `{:noreply, socket}` with locked object or error flash message.
+  """
+  @impl true
+  def handle_event("lock_object", params, socket) do
+    # Extract object_id from params (could be "id" or "object_id")
+    object_id = params["object_id"] || params["id"]
+
+    # Convert string ID to integer if needed
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    user_id = socket.assigns.user_id
+
+    case Canvases.lock_object(object_id, user_id) do
+      {:ok, locked_object} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:object_locked, locked_object}
+        )
+
+        # Update local state
+        objects =
+          Enum.map(socket.assigns.objects, fn obj ->
+            if obj.id == locked_object.id, do: locked_object, else: obj
+          end)
+
+        {:noreply,
+         socket
+         |> assign(:objects, objects)
+         |> push_event("object_locked", %{object: locked_object})}
+
+      {:error, :already_locked} ->
+        {:noreply, put_flash(socket, :error, "Object is currently being edited by another user")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+    end
+  end
+
+  @doc """
+  Handles object deselection events from the client.
+
+  Unlocks an object when a user deselects it, allowing other users to edit it.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_id" or "id" - ID of object to unlock
+
+  ## Broadcast
+
+  Sends `{:object_unlocked, object}` to PubSub topic for all clients to receive.
+
+  ## Returns
+
+  `{:noreply, socket}` with unlocked object.
+  """
+  @impl true
+  def handle_event("unlock_object", params, socket) do
+    # Extract object_id from params (could be "id" or "object_id")
+    object_id = params["object_id"] || params["id"]
+
+    # Convert string ID to integer if needed
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    user_id = socket.assigns.user_id
+
+    case Canvases.unlock_object(object_id, user_id) do
+      {:ok, unlocked_object} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:object_unlocked, unlocked_object}
+        )
+
+        # Update local state
+        objects =
+          Enum.map(socket.assigns.objects, fn obj ->
+            if obj.id == unlocked_object.id, do: unlocked_object, else: obj
+          end)
+
+        {:noreply,
+         socket
+         |> assign(:objects, objects)
+         |> push_event("object_unlocked", %{object: unlocked_object})}
+
+      {:error, :not_locked_by_user} ->
+        # Object was locked by someone else, but we still want to unlock it
+        # This handles cases where the locking user disconnected
+        case Canvases.unlock_object(object_id) do
+          {:ok, unlocked_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              socket.assigns.topic,
+              {:object_unlocked, unlocked_object}
+            )
+
+            objects =
+              Enum.map(socket.assigns.objects, fn obj ->
+                if obj.id == unlocked_object.id, do: unlocked_object, else: obj
+              end)
+
+            {:noreply,
+             socket
+             |> assign(:objects, objects)
+             |> push_event("object_unlocked", %{object: unlocked_object})}
+
+          _ ->
+            {:noreply, socket}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Handles object update events from the client.
+
+  Updates an existing canvas object's position or data properties and broadcasts
+  the change to all connected clients. Common for drag operations and property
+  changes.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_id" or "id" - ID of object to update
+    - "position" - New position map with x, y coordinates (optional)
+    - "data" - Updated object data as JSON or map (optional)
+
+  ## Broadcast
+
+  Sends `{:object_updated, object}` to PubSub topic for all clients to receive.
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message.
+  """
   @impl true
   def handle_event("update_object", params, socket) do
     # Extract object_id from params (could be "id" or "object_id")
@@ -134,50 +411,82 @@ defmodule CollabCanvasWeb.CanvasLive do
     # Convert string ID to integer if needed
     object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
 
-    # Extract update attributes and convert data to JSON string if it's a map
-    data =
-      case params["data"] do
-        data when is_map(data) and data != %{} -> Jason.encode!(data)
-        data when is_binary(data) -> data
-        nil -> nil
-      end
+    user_id = socket.assigns.user_id
 
-    attrs = %{
-      position: params["position"],
-      data: data
-    }
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-    |> Map.new()
-
-    case Canvases.update_object(object_id, attrs) do
-      {:ok, updated_object} ->
-        # Broadcast to all connected clients
-        Phoenix.PubSub.broadcast(
-          CollabCanvas.PubSub,
-          socket.assigns.topic,
-          {:object_updated, updated_object}
-        )
-
-        # Update local state and push to JavaScript immediately
-        objects =
-          Enum.map(socket.assigns.objects, fn obj ->
-            if obj.id == updated_object.id, do: updated_object, else: obj
-          end)
-
-        {:noreply,
-         socket
-         |> assign(:objects, objects)
-         |> push_event("object_updated", %{object: updated_object})}
+    # Check if object is locked by another user
+    case Canvases.check_lock(object_id) do
+      {:locked, locked_by} when locked_by != user_id ->
+        {:noreply, put_flash(socket, :error, "Object is currently being edited by another user")}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Object not found")}
 
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed to update object")}
+      _ ->
+        # Object is unlocked or locked by current user, proceed with update
+        # Extract update attributes and convert data to JSON string if it's a map
+        data =
+          case params["data"] do
+            data when is_map(data) and data != %{} -> Jason.encode!(data)
+            data when is_binary(data) -> data
+            nil -> nil
+          end
+
+        attrs =
+          %{
+            position: params["position"],
+            data: data
+          }
+          |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+          |> Map.new()
+
+        case Canvases.update_object(object_id, attrs) do
+          {:ok, updated_object} ->
+            # Broadcast to all connected clients
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              socket.assigns.topic,
+              {:object_updated, updated_object}
+            )
+
+            # Update local state and push to JavaScript immediately
+            objects =
+              Enum.map(socket.assigns.objects, fn obj ->
+                if obj.id == updated_object.id, do: updated_object, else: obj
+              end)
+
+            {:noreply,
+             socket
+             |> assign(:objects, objects)
+             |> push_event("object_updated", %{object: updated_object})}
+
+          {:error, :not_found} ->
+            {:noreply, put_flash(socket, :error, "Object not found")}
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Failed to update object")}
+        end
     end
   end
 
-  # Handle object deletion
+  @doc """
+  Handles object deletion events from the client.
+
+  Deletes a canvas object from the database and broadcasts the deletion to all
+  connected clients for immediate removal from their canvases.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_id" or "id" - ID of object to delete
+
+  ## Broadcast
+
+  Sends `{:object_deleted, object_id}` to PubSub topic for all clients to receive.
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message.
+  """
   @impl true
   def handle_event("delete_object", params, socket) do
     # Extract object_id from params (could be "id" or "object_id")
@@ -186,35 +495,90 @@ defmodule CollabCanvasWeb.CanvasLive do
     # Convert string ID to integer if needed
     object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
 
-    case Canvases.delete_object(object_id) do
-      {:ok, _deleted_object} ->
-        # Broadcast to all connected clients
-        Phoenix.PubSub.broadcast(
-          CollabCanvas.PubSub,
-          socket.assigns.topic,
-          {:object_deleted, object_id}
-        )
+    user_id = socket.assigns.user_id
 
-        # Update local state and push to JavaScript immediately
-        objects = Enum.reject(socket.assigns.objects, fn obj -> obj.id == object_id end)
-
-        {:noreply,
-         socket
-         |> assign(:objects, objects)
-         |> push_event("object_deleted", %{object_id: object_id})}
+    # Check if object is locked by another user
+    case Canvases.check_lock(object_id) do
+      {:locked, locked_by} when locked_by != user_id ->
+        {:noreply, put_flash(socket, :error, "Object is currently being edited by another user")}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Object not found")}
+
+      _ ->
+        # Object is unlocked or locked by current user, proceed with deletion
+        case Canvases.delete_object(object_id) do
+          {:ok, _deleted_object} ->
+            # Broadcast to all connected clients
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              socket.assigns.topic,
+              {:object_deleted, object_id}
+            )
+
+            # Update local state and push to JavaScript immediately
+            objects = Enum.reject(socket.assigns.objects, fn obj -> obj.id == object_id end)
+
+            {:noreply,
+             socket
+             |> assign(:objects, objects)
+             |> push_event("object_deleted", %{object_id: object_id})}
+
+          {:error, :not_found} ->
+            {:noreply, put_flash(socket, :error, "Object not found")}
+        end
     end
   end
 
-  # Handle AI command input changes
+  @doc """
+  Handles AI command input changes from the client.
+
+  Updates the AI command text in socket assigns as the user types in the
+  AI assistant textarea. This maintains form state across renders.
+
+  ## Parameters
+
+  - `params` - Map containing "value" key with current command text
+
+  ## Returns
+
+  `{:noreply, socket}` with updated ai_command assign.
+  """
   @impl true
   def handle_event("ai_command_change", %{"value" => command}, socket) do
     {:noreply, assign(socket, :ai_command, command)}
   end
 
-  # Handle AI command execution (async, non-blocking)
+  @doc """
+  Handles AI command execution requests from the client (async, non-blocking).
+
+  Spawns an async task to process the natural language command using Claude API.
+  The task runs in the background and results are handled by handle_info/2 callbacks.
+  Includes duplicate request prevention and 30-second timeout protection.
+
+  ## Parameters
+
+  - `params` - Map containing "command" key with natural language instruction
+
+  ## Async Processing
+
+  1. Spawns Task.async to call Agent.execute_command/2
+  2. Sets 30-second timeout with Process.send_after/3
+  3. Task completion handled by handle_info({ref, result}, socket)
+  4. Task crash handled by handle_info({:DOWN, ref, ...}, socket)
+  5. Timeout handled by handle_info({:ai_timeout, ref}, socket)
+
+  ## Returns
+
+  `{:noreply, socket}` with ai_loading=true and ai_task_ref set, or warning
+  flash if a command is already in progress.
+
+  ## Example Commands
+
+  - "Create a blue rectangle"
+  - "Add a green circle"
+  - "Make a text box saying Hello World"
+  """
   @impl true
   def handle_event("execute_ai_command", %{"command" => command}, socket) do
     # Prevent duplicate AI commands while one is in progress
@@ -224,9 +588,10 @@ defmodule CollabCanvasWeb.CanvasLive do
       canvas_id = socket.assigns.canvas_id
 
       # Start async task with timeout (Task.async automatically links to current process)
-      task = Task.async(fn ->
-        Agent.execute_command(command, canvas_id)
-      end)
+      task =
+        Task.async(fn ->
+          Agent.execute_command(command, canvas_id)
+        end)
 
       # Set loading state and store task reference for timeout monitoring
       Process.send_after(self(), {:ai_timeout, task.ref}, 30_000)
@@ -239,7 +604,28 @@ defmodule CollabCanvasWeb.CanvasLive do
     end
   end
 
-  # Handle tool selection
+  @doc """
+  Handles tool selection events from the client.
+
+  Updates the currently selected drawing tool and pushes the selection to
+  JavaScript hooks for client-side behavior changes (cursor style, click handlers).
+
+  ## Parameters
+
+  - `params` - Map containing "tool" key with tool name
+
+  ## Available Tools
+
+  - "select" - Selection and move tool (keyboard: S)
+  - "rectangle" - Rectangle drawing tool (keyboard: R)
+  - "circle" - Circle drawing tool (keyboard: C)
+  - "text" - Text insertion tool (keyboard: T)
+  - "delete" - Object deletion tool (keyboard: D)
+
+  ## Returns
+
+  `{:noreply, socket}` with updated selected_tool assign and push_event to client.
+  """
   @impl true
   def handle_event("select_tool", %{"tool" => tool}, socket) do
     # Push tool selection to JavaScript hook
@@ -249,7 +635,25 @@ defmodule CollabCanvasWeb.CanvasLive do
      |> push_event("tool_selected", %{tool: tool})}
   end
 
-  # Handle cursor position updates
+  @doc """
+  Handles cursor position update events from the client.
+
+  Updates the user's cursor position in Phoenix Presence, which is then
+  broadcast to all other connected clients for real-time cursor tracking.
+
+  ## Parameters
+
+  - `params` - Map containing "position" with x, y coordinates in canvas space
+
+  ## Side Effects
+
+  Updates Presence metadata for current user with new cursor position.
+  Other clients receive presence_diff broadcast and update cursor display.
+
+  ## Returns
+
+  `{:noreply, socket}` - State unchanged as cursor position is in Presence only.
+  """
   @impl true
   def handle_event("cursor_move", %{"position" => %{"x" => x, "y" => y}}, socket) do
     user_id = socket.assigns.user_id
@@ -263,8 +667,22 @@ defmodule CollabCanvasWeb.CanvasLive do
     {:noreply, socket}
   end
 
+  @doc """
+  Handles object_created broadcasts from PubSub (from other clients or AI).
 
-  # Handle object created broadcasts from other clients
+  Adds newly created objects to local state and pushes to JavaScript for
+  rendering. Includes deduplication logic to prevent showing the same object
+  twice when the originating client receives its own broadcast.
+
+  ## Parameters
+
+  - `object` - The newly created canvas object struct
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client,
+  or unchanged socket if object already exists (deduplication).
+  """
   @impl true
   def handle_info({:object_created, object}, socket) do
     # Only update if this object isn't already in our list (avoid duplicates)
@@ -280,7 +698,20 @@ defmodule CollabCanvasWeb.CanvasLive do
     end
   end
 
-  # Handle object updated broadcasts from other clients
+  @doc """
+  Handles object_updated broadcasts from PubSub (from other clients).
+
+  Updates the object in local state with the new properties and pushes to
+  JavaScript for re-rendering. Common during drag operations or property changes.
+
+  ## Parameters
+
+  - `updated_object` - The updated canvas object struct with new properties
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
   @impl true
   def handle_info({:object_updated, updated_object}, socket) do
     objects =
@@ -294,7 +725,20 @@ defmodule CollabCanvasWeb.CanvasLive do
      |> push_event("object_updated", %{object: updated_object})}
   end
 
-  # Handle object deleted broadcasts from other clients
+  @doc """
+  Handles object_deleted broadcasts from PubSub (from other clients).
+
+  Removes the deleted object from local state and pushes to JavaScript for
+  removal from the canvas rendering.
+
+  ## Parameters
+
+  - `object_id` - ID of the deleted canvas object
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
   @impl true
   def handle_info({:object_deleted, object_id}, socket) do
     objects = Enum.reject(socket.assigns.objects, fn obj -> obj.id == object_id end)
@@ -305,7 +749,79 @@ defmodule CollabCanvasWeb.CanvasLive do
      |> push_event("object_deleted", %{object_id: object_id})}
   end
 
-  # Handle presence diff (user join/leave, cursor updates)
+  @doc """
+  Handles object_locked broadcasts from PubSub (from other clients).
+
+  Updates the object in local state to show it's locked and pushes to
+  JavaScript for visual feedback (grayed out, different cursor).
+
+  ## Parameters
+
+  - `locked_object` - The object that was locked with locked_by field set
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:object_locked, locked_object}, socket) do
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        if obj.id == locked_object.id, do: locked_object, else: obj
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("object_locked", %{object: locked_object})}
+  end
+
+  @doc """
+  Handles object_unlocked broadcasts from PubSub (from other clients).
+
+  Updates the object in local state to show it's unlocked and pushes to
+  JavaScript for visual feedback (normal appearance).
+
+  ## Parameters
+
+  - `unlocked_object` - The object that was unlocked with locked_by set to nil
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:object_unlocked, unlocked_object}, socket) do
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        if obj.id == unlocked_object.id, do: unlocked_object, else: obj
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("object_unlocked", %{object: unlocked_object})}
+  end
+
+  @doc """
+  Handles presence_diff broadcasts from Phoenix Presence.
+
+  Triggered when users join, leave, or update their presence metadata (cursor
+  position). Fetches the latest presence list and pushes to JavaScript for
+  updating user cursors and online user display.
+
+  ## Presence Metadata
+
+  - `online_at` - Unix timestamp when user joined
+  - `cursor` - Map with x, y coordinates or nil
+  - `color` - Hex color string for user identification
+  - `name` - User display name
+  - `email` - User email address
+
+  ## Returns
+
+  `{:noreply, socket}` with updated presences assign and push_event to client.
+  """
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff", payload: _diff}, socket) do
     # Get current presences from the topic
@@ -319,7 +835,28 @@ defmodule CollabCanvasWeb.CanvasLive do
      |> push_event("presence_updated", %{presences: presences})}
   end
 
-  # Handle successful AI task completion
+  @doc """
+  Handles successful AI task completion messages.
+
+  Called when the async AI task spawned by execute_ai_command completes
+  successfully. Processes the result, creates objects, broadcasts to all
+  clients, and updates UI with success/error message.
+
+  ## Parameters
+
+  - `ref` - Task reference to match against ai_task_ref
+  - `result` - AI execution result from Agent.execute_command/2
+
+  ## Result Processing
+
+  Extracts created objects from AI results, broadcasts them to all clients,
+  and displays success message with count of objects created.
+
+  ## Returns
+
+  `{:noreply, socket}` with ai_loading=false, objects updated, and flash message,
+  or unchanged socket if ref doesn't match current task.
+  """
   @impl true
   def handle_info({ref, result}, socket) when is_reference(ref) do
     # Only process if this is our AI task
@@ -338,7 +875,22 @@ defmodule CollabCanvasWeb.CanvasLive do
     end
   end
 
-  # Handle AI task failure/crash
+  @doc """
+  Handles AI task failure or crash via process monitoring.
+
+  Called when the async AI task process crashes or exits abnormally. Logs
+  the error and displays user-friendly error message.
+
+  ## Parameters
+
+  - `ref` - Task reference to match against ai_task_ref
+  - `reason` - Crash reason (exception, exit signal, etc.)
+
+  ## Returns
+
+  `{:noreply, socket}` with ai_loading=false and error flash message,
+  or unchanged socket if ref doesn't match current task.
+  """
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, reason}, socket) when is_reference(ref) do
     # Only process if this is our AI task
@@ -355,7 +907,21 @@ defmodule CollabCanvasWeb.CanvasLive do
     end
   end
 
-  # Handle AI task timeout
+  @doc """
+  Handles AI task timeout after 30 seconds.
+
+  Called when the AI task takes longer than 30 seconds to complete. Resets
+  loading state and displays timeout error message to the user.
+
+  ## Parameters
+
+  - `ref` - Task reference to match against ai_task_ref
+
+  ## Returns
+
+  `{:noreply, socket}` with ai_loading=false and timeout error message,
+  or unchanged socket if ref doesn't match current task (already completed).
+  """
   @impl true
   def handle_info({:ai_timeout, ref}, socket) when is_reference(ref) do
     # Only process if this is still the current task
@@ -373,9 +939,47 @@ defmodule CollabCanvasWeb.CanvasLive do
     end
   end
 
-  # Cleanup when LiveView process terminates
+  @doc """
+  Cleanup when the LiveView process terminates.
+
+  Unsubscribes from PubSub topic to prevent memory leaks. Presence tracking
+  is automatically cleaned up when the process dies. Also unlocks any objects
+  that were locked by this user.
+
+  ## Parameters
+
+  - `reason` - Termination reason (normal, crash, timeout, etc.)
+  - `socket` - The LiveView socket
+
+  ## Returns
+
+  `:ok`
+  """
   @impl true
   def terminate(_reason, socket) do
+    # Unlock any objects locked by this user
+    if Map.has_key?(socket.assigns, :user_id) do
+      user_id = socket.assigns.user_id
+      canvas_id = socket.assigns[:canvas_id]
+
+      if canvas_id do
+        # Find and unlock all objects locked by this user on this canvas
+        locked_objects =
+          Canvases.list_objects(canvas_id)
+          |> Enum.filter(fn obj -> obj.locked_by == user_id end)
+
+        Enum.each(locked_objects, fn obj ->
+          Canvases.unlock_object(obj.id)
+          # Broadcast unlock to other clients
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            socket.assigns.topic,
+            {:object_unlocked, %{obj | locked_by: nil}}
+          )
+        end)
+      end
+    end
+
     # Unsubscribe from PubSub topic
     if Map.has_key?(socket.assigns, :topic) do
       Phoenix.PubSub.unsubscribe(CollabCanvas.PubSub, socket.assigns.topic)
@@ -385,7 +989,16 @@ defmodule CollabCanvasWeb.CanvasLive do
     :ok
   end
 
-  # Private helper to process AI agent results
+  @doc false
+  # Private helper to process AI agent results and update socket state.
+  # Handles all possible result types from Agent.execute_command/2:
+  # - {:ok, results} - Successfully created objects
+  # - {:error, :canvas_not_found} - Canvas doesn't exist
+  # - {:error, :missing_api_key} - Claude API key not configured
+  # - {:error, {:api_error, status, body}} - API request failed
+  # - {:error, {:request_failed, reason}} - Network/connection error
+  # - {:error, :invalid_response_format} - AI response parsing failed
+  # - {:error, reason} - Other errors
   defp process_ai_result(result, socket) do
     case result do
       {:ok, results} ->
@@ -395,7 +1008,8 @@ defmodule CollabCanvasWeb.CanvasLive do
           |> Enum.map(fn result -> result.result end)
           |> Enum.filter(fn
             {:ok, object} when is_map(object) and is_map_key(object, :id) -> true
-            {:ok, %{object_ids: _ids}} -> false  # Component creation returns object_ids
+            # Component creation returns object_ids
+            {:ok, %{object_ids: _ids}} -> false
             _ -> false
           end)
           |> Enum.map(fn {:ok, object} -> object end)
@@ -413,11 +1027,13 @@ defmodule CollabCanvasWeb.CanvasLive do
         updated_objects = objects ++ socket.assigns.objects
 
         success_count = length(objects)
-        message = if success_count > 0 do
-          "AI created #{success_count} object(s) successfully"
-        else
-          "AI command processed (check canvas for results)"
-        end
+
+        message =
+          if success_count > 0 do
+            "AI created #{success_count} object(s) successfully"
+          else
+            "AI command processed (check canvas for results)"
+          end
 
         socket
         |> assign(:objects, updated_objects)
@@ -428,15 +1044,22 @@ defmodule CollabCanvasWeb.CanvasLive do
         put_flash(socket, :error, "Canvas not found")
 
       {:error, :missing_api_key} ->
-        put_flash(socket, :error, "AI API key not configured. Please set CLAUDE_API_KEY environment variable.")
+        put_flash(
+          socket,
+          :error,
+          "AI API key not configured. Please set CLAUDE_API_KEY environment variable."
+        )
 
       {:error, {:api_error, status, body}} ->
         Logger.error("AI API error: #{status} - #{inspect(body)}")
-        error_msg = if is_map(body) and body["error"] do
-          body["error"]["message"] || "AI API error"
-        else
-          "AI API error (#{status})"
-        end
+
+        error_msg =
+          if is_map(body) and body["error"] do
+            body["error"]["message"] || "AI API error"
+          else
+            "AI API error (#{status})"
+          end
+
         put_flash(socket, :error, error_msg)
 
       {:error, {:request_failed, reason}} ->
@@ -452,7 +1075,17 @@ defmodule CollabCanvasWeb.CanvasLive do
     end
   end
 
-  # Render the canvas interface
+  @doc """
+  Renders the canvas interface with toolbar, canvas area, and AI panel.
+
+  The template includes:
+  - Left toolbar with drawing tools and online user list
+  - Center canvas area with PixiJS rendering via CanvasRenderer hook
+  - Right AI assistant panel with command input and object list
+
+  All real-time updates are handled via push_event to JavaScript hooks,
+  which update the PixiJS canvas without full page re-renders.
+  """
   @impl true
   def render(assigns) do
     ~H"""

@@ -1,4 +1,74 @@
 defmodule CollabCanvasWeb.Endpoint do
+  @moduledoc """
+  The HTTP/WebSocket server endpoint for the CollabCanvas application.
+
+  This module configures the Phoenix endpoint that handles all incoming HTTP and WebSocket
+  connections. It sets up the Plug pipeline, LiveView sockets, static asset serving, and
+  session management for the collaborative canvas application.
+
+  ## HTTP/WebSocket Server
+
+  The endpoint serves as the entry point for all client connections:
+  - HTTP requests are processed through the configured Plug pipeline
+  - WebSocket connections are established for LiveView real-time updates
+  - Static assets are served efficiently with optional gzip compression
+
+  ## LiveView Socket Configuration
+
+  LiveView sockets are mounted at `/live` and support both WebSocket and long-polling
+  transports. Session data is passed to LiveView processes via `connect_info`, enabling
+  stateful real-time interactions for the collaborative canvas features.
+
+  ## Plug Pipeline
+
+  The endpoint configures a series of Plugs that process requests in order:
+
+  1. `Plug.Static` - Serves static files from `priv/static` with conditional gzip compression
+  2. Development-only plugs (when code reloading is enabled):
+     - `Phoenix.LiveReloader` - Auto-reloads browser on code changes
+     - `Phoenix.CodeReloader` - Recompiles code on each request
+     - `Phoenix.Ecto.CheckRepoStatus` - Ensures database is running and migrated
+  3. `Phoenix.LiveDashboard.RequestLogger` - Logs requests for LiveDashboard inspection
+  4. `Plug.RequestId` - Generates unique request IDs for tracing
+  5. `Plug.Telemetry` - Emits telemetry events for monitoring
+  6. `Plug.Parsers` - Parses request bodies (URL-encoded, multipart, JSON)
+  7. `Plug.MethodOverride` - Allows method override via `_method` parameter
+  8. `Plug.Head` - Converts HEAD requests to GET requests
+  9. `Plug.Session` - Manages cookie-based session storage
+  10. `CollabCanvasWeb.Router` - Routes requests to appropriate controllers/LiveViews
+
+  ## Static Asset Serving
+
+  Static files are served from `priv/static` directory at the root path `/`. In production
+  (when code reloading is disabled), assets are served with gzip compression for improved
+  performance. Only files matching paths defined in `CollabCanvasWeb.static_paths/0` are
+  served.
+
+  ## Session Management
+
+  Sessions are stored in signed cookies to prevent tampering while remaining readable on
+  the client side. The session configuration includes:
+
+  - `store: :cookie` - Sessions stored in browser cookies
+  - `key: "_collab_canvas_key"` - Cookie name for session data
+  - `signing_salt: "baMCDlhj"` - Salt for cryptographic signing
+  - `same_site: "Lax"` - CSRF protection via SameSite cookie attribute
+
+  ## Security Considerations
+
+  - Session cookies are cryptographically signed to prevent tampering
+  - SameSite attribute set to "Lax" provides CSRF protection
+  - Static file serving is restricted to explicitly allowed paths
+  - Request logging is available for security auditing via LiveDashboard
+
+  ## Development Features
+
+  When code reloading is enabled (development environment):
+  - Live browser reload on file changes
+  - Automatic code recompilation
+  - Database repository status checks
+  - Enhanced debugging via LiveDashboard request logger
+  """
   use Phoenix.Endpoint, otp_app: :collab_canvas
 
   # The session will be stored in the cookie and signed,
