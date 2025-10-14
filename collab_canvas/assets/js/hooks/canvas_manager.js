@@ -300,6 +300,11 @@ export default {
       return;
     }
 
+    // Skip updates for objects currently being dragged by this user
+    if (this.isDragging && this.selectedObject && this.selectedObject.objectId === objectData.id) {
+      return;
+    }
+
     // Update position if changed
     if (objectData.position) {
       pixiObject.x = objectData.position.x;
