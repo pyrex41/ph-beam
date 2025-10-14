@@ -9,13 +9,28 @@ defmodule CollabCanvas.Release do
     load_app()
 
     for repo <- repos() do
-      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(
+          repo,
+          &Ecto.Migrator.run(&1, :up, all: true),
+          pool_size: 1,
+          queue_target: 5000,
+          queue_interval: 5000
+        )
     end
   end
 
   def rollback(repo, version) do
     load_app()
-    {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :down, to: version))
+
+    {:ok, _, _} =
+      Ecto.Migrator.with_repo(
+        repo,
+        &Ecto.Migrator.run(&1, :down, to: version),
+        pool_size: 1,
+        queue_target: 5000,
+        queue_interval: 5000
+      )
   end
 
   defp repos do
@@ -24,5 +39,6 @@ defmodule CollabCanvas.Release do
 
   defp load_app do
     Application.load(@app)
+    Application.ensure_all_started(:ssl)
   end
 end

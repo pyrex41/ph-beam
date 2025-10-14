@@ -7,8 +7,9 @@ kill_signal = 'SIGTERM'
 
 [build]
 
-[deploy]
-  release_command = '/app/bin/collab_canvas eval "CollabCanvas.Release.migrate()"'
+# Commented out: run migrations manually via SSH console
+# [deploy]
+#   release_command = '/app/bin/collab_canvas eval "CollabCanvas.Release.migrate()"'
 
 [env]
   PHX_HOST = 'ph-beam.fly.dev'
