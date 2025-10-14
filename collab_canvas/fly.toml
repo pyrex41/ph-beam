@@ -1,0 +1,40 @@
+# fly.toml app configuration file generated for ph-beam
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+
+app = 'ph-beam'
+primary_region = 'ord'
+kill_signal = 'SIGTERM'
+
+[build]
+
+[env]
+  PHX_HOST = 'ph-beam.fly.dev'
+  PORT = '8080'
+  DATABASE_PATH = '/data/collab_canvas.db'
+  ECTO_IPV6 = 'true'
+  ERL_AFLAGS = '-proto_dist inet6_tcp'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '10s'
+    grace_period = '30s'
+    method = 'GET'
+    path = '/health'
+
+[[mounts]]
+  source = 'ph'
+  destination = '/data'
+  initial_size = '1gb'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

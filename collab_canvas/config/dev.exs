@@ -1,8 +1,9 @@
 import Config
 
 # Configure your database
+# Uses DATABASE_PATH env var if set, otherwise defaults to local dev database
 config :collab_canvas, CollabCanvas.Repo,
-  database: Path.expand("../collab_canvas_dev.db", __DIR__),
+  database: System.get_env("DATABASE_PATH") || Path.expand("../collab_canvas_dev.db", __DIR__),
   pool_size: 5,
   stacktrace: true,
   show_sensitive_data_on_connection_error: true
