@@ -82,6 +82,7 @@ export default {
     this.panStart = { x: 0, y: 0 };
     this.viewOffset = { x: 0, y: 0 };
     this.zoomLevel = 1;
+    this.spacePressed = false;
   },
 
   /**
@@ -317,6 +318,23 @@ export default {
    * Update cursor position for another user
    */
   updateCursor(userId, userData, position) {
+    // Don't show cursor if position is invalid or at initial (0, 0)
+    if (!position || typeof position.x !== 'number' || typeof position.y !== 'number') {
+      return;
+    }
+
+    // Don't show cursor at origin (0, 0) - likely user hasn't moved yet
+    // Only show it once they've actually moved their cursor
+    if (position.x === 0 && position.y === 0) {
+      // Remove cursor if it exists (user might have moved away and come back to origin)
+      const existingCursor = this.cursors.get(userId);
+      if (existingCursor && (existingCursor.x !== 0 || existingCursor.y !== 0)) {
+        // User actually moved to origin, allow it
+      } else {
+        return;
+      }
+    }
+
     let cursorGroup = this.cursors.get(userId);
 
     if (!cursorGroup) {
@@ -325,7 +343,8 @@ export default {
 
       // Cursor pointer (arrow shape)
       const cursor = new PIXI.Graphics();
-      cursor.beginFill(parseInt(userData.color?.replace('#', '0x') || '0x3b82f6'));
+      const cursorColor = parseInt(userData.color?.replace('#', '0x') || '0x3b82f6');
+      cursor.beginFill(cursorColor);
       cursor.moveTo(0, 0);
       cursor.lineTo(0, 20);
       cursor.lineTo(6, 15);
@@ -336,15 +355,9 @@ export default {
       cursor.closePath();
       cursor.endFill();
 
-      // User name label
-      const labelBg = new PIXI.Graphics();
-      labelBg.beginFill(parseInt(userData.color?.replace('#', '0x') || '0x3b82f6'));
-      labelBg.drawRoundedRect(0, 0, 100, 24, 4);
-      labelBg.endFill();
-      labelBg.x = 20;
-      labelBg.y = 0;
-
-      const label = new PIXI.Text(userData.name || 'User', {
+      // User email/name label
+      const displayName = userData.email || userData.name || 'User';
+      const label = new PIXI.Text(displayName, {
         fontFamily: 'Arial',
         fontSize: 12,
         fill: 0xffffff,
@@ -352,6 +365,14 @@ export default {
       });
       label.x = 25;
       label.y = 6;
+
+      // Create label background sized to fit text - use same color as cursor
+      const labelBg = new PIXI.Graphics();
+      labelBg.beginFill(cursorColor);
+      labelBg.drawRoundedRect(0, 0, label.width + 10, 24, 4);
+      labelBg.endFill();
+      labelBg.x = 20;
+      labelBg.y = 0;
 
       cursorGroup.addChild(cursor);
       cursorGroup.addChild(labelBg);
@@ -397,10 +418,12 @@ export default {
   handleMouseDown(event) {
     const position = this.getMousePosition(event);
 
-    if (event.shiftKey || event.button === 1) {
-      // Start panning with shift+click or middle mouse
+    // Start panning with spacebar+click, shift+click, or middle mouse
+    if (this.spacePressed || event.shiftKey || event.button === 1) {
       this.isPanning = true;
-      this.panStart = position;
+      this.panStart = { x: event.clientX, y: event.clientY };
+      this.app.view.style.cursor = 'grabbing';
+      event.preventDefault();
       return;
     }
 
@@ -563,22 +586,24 @@ export default {
     const position = this.getMousePosition(event);
 
     // Update cursor position for other users (throttled to avoid spam)
-    if (!this.lastCursorUpdate || Date.now() - this.lastCursorUpdate > 50) {
+    if (!this.isPanning && (!this.lastCursorUpdate || Date.now() - this.lastCursorUpdate > 50)) {
       this.safePushEvent('cursor_move', { position: position });
       this.lastCursorUpdate = Date.now();
     }
 
     if (this.isPanning) {
-      // Pan the view
-      const dx = position.x - this.panStart.x;
-      const dy = position.y - this.panStart.y;
+      // Pan the view using screen coordinates for smooth panning
+      const dx = event.clientX - this.panStart.x;
+      const dy = event.clientY - this.panStart.y;
 
       this.viewOffset.x += dx;
       this.viewOffset.y += dy;
       this.objectContainer.x = this.viewOffset.x;
       this.objectContainer.y = this.viewOffset.y;
+      this.cursorContainer.x = this.viewOffset.x;
+      this.cursorContainer.y = this.viewOffset.y;
 
-      this.panStart = position;
+      this.panStart = { x: event.clientX, y: event.clientY };
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
@@ -626,20 +651,38 @@ export default {
       this.isDragging = false;
     }
 
-    this.isPanning = false;
+    if (this.isPanning) {
+      this.isPanning = false;
+      // Restore cursor based on spacebar state
+      this.app.view.style.cursor = this.spacePressed ? 'grab' : 'default';
+    }
   },
 
   /**
-   * Handle mouse wheel for zoom
+   * Handle mouse wheel for zoom and pan
    */
   handleWheel(event) {
     event.preventDefault();
 
-    const delta = event.deltaY > 0 ? 0.9 : 1.1;
-    const newZoom = Math.min(Math.max(this.zoomLevel * delta, 0.1), 5);
+    // Ctrl/Cmd+wheel = zoom, otherwise pan
+    if (event.ctrlKey || event.metaKey) {
+      // Zoom
+      const delta = event.deltaY > 0 ? 0.9 : 1.1;
+      const newZoom = Math.min(Math.max(this.zoomLevel * delta, 0.1), 5);
 
-    this.zoomLevel = newZoom;
-    this.objectContainer.scale.set(newZoom, newZoom);
+      this.zoomLevel = newZoom;
+      this.objectContainer.scale.set(newZoom, newZoom);
+      this.cursorContainer.scale.set(newZoom, newZoom);
+    } else {
+      // Pan with trackpad scroll or mouse wheel
+      // Use deltaX and deltaY for two-finger trackpad scrolling
+      this.viewOffset.x -= event.deltaX;
+      this.viewOffset.y -= event.deltaY;
+      this.objectContainer.x = this.viewOffset.x;
+      this.objectContainer.y = this.viewOffset.y;
+      this.cursorContainer.x = this.viewOffset.x;
+      this.cursorContainer.y = this.viewOffset.y;
+    }
   },
 
   /**
@@ -665,6 +708,20 @@ export default {
    * Handle keyboard events
    */
   handleKeyDown(event) {
+    // Handle spacebar for panning
+    if (event.code === 'Space' && !this.spacePressed) {
+      // Don't handle spacebar if user is typing in an input
+      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+        return;
+      }
+      event.preventDefault();
+      this.spacePressed = true;
+      if (!this.isPanning) {
+        this.app.view.style.cursor = 'grab';
+      }
+      return;
+    }
+
     // Don't handle keyboard shortcuts if user is typing in an input
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
       return;
@@ -709,7 +766,13 @@ export default {
   },
 
   handleKeyUp(event) {
-    // Handle key up events if needed
+    // Handle spacebar release
+    if (event.code === 'Space') {
+      this.spacePressed = false;
+      if (!this.isPanning) {
+        this.app.view.style.cursor = 'default';
+      }
+    }
   },
 
   /**

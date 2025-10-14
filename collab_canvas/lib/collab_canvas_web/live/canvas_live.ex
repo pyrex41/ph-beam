@@ -14,30 +14,36 @@ defmodule CollabCanvasWeb.CanvasLive do
 
   alias CollabCanvas.Canvases
   alias CollabCanvasWeb.Presence
+  alias CollabCanvasWeb.Plugs.Auth
 
   @impl true
-  def mount(%{"id" => canvas_id}, _session, socket) do
+  def mount(%{"id" => canvas_id}, session, socket) do
+    # Load authenticated user
+    socket = Auth.assign_current_user(socket, session)
+
     # Convert canvas_id to integer
     canvas_id = String.to_integer(canvas_id)
 
     # Load canvas data
     canvas = Canvases.get_canvas_with_preloads(canvas_id, [:objects])
 
-    if canvas do
+    if canvas && socket.assigns.current_user do
       # Subscribe to canvas-specific PubSub topic for real-time updates
       topic = "canvas:#{canvas_id}"
       Phoenix.PubSub.subscribe(CollabCanvas.PubSub, topic)
 
-      # Generate a unique user ID for this session (in production, use authenticated user)
-      user_id = "user_#{:erlang.unique_integer([:positive])}"
+      # Use authenticated user information
+      user = socket.assigns.current_user
+      user_id = "user_#{user.id}"
 
-      # Track user presence with initial cursor position
+      # Track user presence (cursor will be set when user first moves mouse)
       {:ok, _} =
         Presence.track(self(), topic, user_id, %{
           online_at: System.system_time(:second),
-          cursor: %{x: 0, y: 0},
+          cursor: nil,
           color: generate_user_color(),
-          name: "User #{String.slice(user_id, -4..-1)}"
+          name: user.name || user.email,
+          email: user.email
         })
 
       # Initialize socket state
@@ -52,10 +58,10 @@ defmodule CollabCanvasWeb.CanvasLive do
        |> assign(:selected_tool, "select")
        |> assign(:ai_command, "")}
     else
-      # Canvas not found
+      # Canvas not found or user not authenticated
       {:ok,
        socket
-       |> put_flash(:error, "Canvas not found")
+       |> put_flash(:error, "Canvas not found or you must be logged in")
        |> redirect(to: "/")}
     end
   end
@@ -458,8 +464,10 @@ defmodule CollabCanvasWeb.CanvasLive do
         <div class="flex-1"></div>
 
         <!-- Keyboard shortcuts help -->
-        <div class="text-[10px] text-gray-400 text-center px-1 leading-tight">
-          Shift + Drag = Pan
+        <div class="text-[10px] text-gray-400 text-center px-1 leading-tight mb-2">
+          <div class="mb-1">Space + Drag = Pan</div>
+          <div class="mb-1">2-Finger Scroll = Pan</div>
+          <div>Ctrl + Scroll = Zoom</div>
         </div>
 
         <!-- Online Users -->
@@ -467,13 +475,16 @@ defmodule CollabCanvasWeb.CanvasLive do
           <div class="text-[10px] text-gray-500 text-center mb-2 font-medium">
             ONLINE (<%= map_size(@presences) %>)
           </div>
-          <%= for {_user_id, %{metas: [meta | _]}} <- @presences do %>
+          <%= for {user_id, %{metas: [meta | _]}} <- @presences do %>
             <div
               class="w-12 h-12 rounded-lg flex items-center justify-center mb-1 text-white font-bold text-xs relative group"
               style={"background-color: #{meta.color}"}
-              title={meta.name}
+              title={"#{meta.email}#{if user_id == @user_id, do: " (You)", else: ""}"}
             >
-              <%= String.first(meta.name || "?") %>
+              <%= String.first(meta.email || meta.name || "?") %>
+              <%= if user_id == @user_id do %>
+                <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+              <% end %>
             </div>
           <% end %>
         </div>
