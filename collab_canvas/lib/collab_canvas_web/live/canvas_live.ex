@@ -1054,10 +1054,10 @@ defmodule CollabCanvasWeb.CanvasLive do
         Logger.error("AI API error: #{status} - #{inspect(body)}")
 
         error_msg =
-          if is_map(body) and body["error"] do
-            body["error"]["message"] || "AI API error"
-          else
-            "AI API error (#{status})"
+          case body do
+            %{"error" => %{"message" => msg}} when is_binary(msg) -> msg
+            %{"error" => msg} when is_binary(msg) -> msg
+            _ -> "AI API error (#{status})"
           end
 
         put_flash(socket, :error, error_msg)
