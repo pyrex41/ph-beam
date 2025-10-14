@@ -96,23 +96,35 @@ export default {
   setupEventListeners() {
     const canvas = this.app.view;
 
+    // Store bound function references for proper cleanup
+    this.boundHandleMouseDown = this.handleMouseDown.bind(this);
+    this.boundHandleMouseMove = this.handleMouseMove.bind(this);
+    this.boundHandleMouseUp = this.handleMouseUp.bind(this);
+    this.boundHandleWheel = this.handleWheel.bind(this);
+    this.boundHandleTouchStart = this.handleTouchStart.bind(this);
+    this.boundHandleTouchMove = this.handleTouchMove.bind(this);
+    this.boundHandleTouchEnd = this.handleTouchEnd.bind(this);
+    this.boundHandleKeyDown = this.handleKeyDown.bind(this);
+    this.boundHandleKeyUp = this.handleKeyUp.bind(this);
+    this.boundHandleResize = this.handleResize.bind(this);
+
     // Mouse events
-    canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
-    canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
-    canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
-    canvas.addEventListener('wheel', this.handleWheel.bind(this));
+    canvas.addEventListener('mousedown', this.boundHandleMouseDown);
+    canvas.addEventListener('mousemove', this.boundHandleMouseMove);
+    canvas.addEventListener('mouseup', this.boundHandleMouseUp);
+    canvas.addEventListener('wheel', this.boundHandleWheel);
 
     // Touch events for mobile
-    canvas.addEventListener('touchstart', this.handleTouchStart.bind(this));
-    canvas.addEventListener('touchmove', this.handleTouchMove.bind(this));
-    canvas.addEventListener('touchend', this.handleTouchEnd.bind(this));
+    canvas.addEventListener('touchstart', this.boundHandleTouchStart);
+    canvas.addEventListener('touchmove', this.boundHandleTouchMove);
+    canvas.addEventListener('touchend', this.boundHandleTouchEnd);
 
     // Keyboard events
-    window.addEventListener('keydown', this.handleKeyDown.bind(this));
-    window.addEventListener('keyup', this.handleKeyUp.bind(this));
+    window.addEventListener('keydown', this.boundHandleKeyDown);
+    window.addEventListener('keyup', this.boundHandleKeyUp);
 
     // Window resize
-    window.addEventListener('resize', this.handleResize.bind(this));
+    window.addEventListener('resize', this.boundHandleResize);
 
     // ResizeObserver for container size changes (more reliable than window resize)
     this.resizeObserver = new ResizeObserver(() => {
@@ -184,6 +196,16 @@ export default {
     this.handleEvent('tool_selected', (data) => {
       this.currentTool = data.tool;
     });
+
+    // Handle object lock updates from server
+    this.handleEvent('object_locked', (data) => {
+      this.updateObject(data.object);
+    });
+
+    // Handle object unlock updates from server
+    this.handleEvent('object_unlocked', (data) => {
+      this.updateObject(data.object);
+    });
   },
 
   /**
@@ -214,10 +236,13 @@ export default {
         return;
     }
 
-    // Store object reference
+    // Store object reference and lock information
     pixiObject.objectId = objectData.id;
+    pixiObject.lockedBy = objectData.locked_by;
     pixiObject.eventMode = 'static'; // Replaces interactive = true
-    pixiObject.cursor = 'pointer'; // Replaces buttonMode = true
+
+    // Set cursor and visual appearance based on lock status
+    this.updateObjectAppearance(pixiObject);
 
     // Add event listeners for interaction
     pixiObject.on('pointerdown', this.onObjectPointerDown.bind(this));
@@ -311,10 +336,31 @@ export default {
       pixiObject.y = objectData.position.y;
     }
 
+    // Update lock status
+    if (objectData.locked_by !== undefined) {
+      pixiObject.lockedBy = objectData.locked_by;
+      this.updateObjectAppearance(pixiObject);
+    }
+
     // For more complex updates, recreate the object
     if (objectData.data) {
       this.deleteObject(objectData.id);
       this.createObject(objectData);
+    }
+  },
+
+  /**
+   * Update the visual appearance of an object based on its lock status
+   */
+  updateObjectAppearance(pixiObject) {
+    if (pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId) {
+      // Object is locked by another user - gray it out and change cursor
+      pixiObject.alpha = 0.5;
+      pixiObject.cursor = 'not-allowed';
+    } else {
+      // Object is unlocked or locked by current user - normal appearance
+      pixiObject.alpha = 1.0;
+      pixiObject.cursor = 'pointer';
     }
   },
 
@@ -816,10 +862,17 @@ export default {
    * Clear object selection
    */
   clearSelection() {
-    if (this.selectedObject && this.selectionBox) {
-      this.objectContainer.removeChild(this.selectionBox);
-      this.selectionBox.destroy();
-      this.selectionBox = null;
+    if (this.selectedObject) {
+      // Unlock the object
+      this.safePushEvent('unlock_object', {
+        object_id: this.selectedObject.objectId
+      });
+
+      if (this.selectionBox) {
+        this.objectContainer.removeChild(this.selectionBox);
+        this.selectionBox.destroy();
+        this.selectionBox = null;
+      }
     }
     this.selectedObject = null;
   },
@@ -830,6 +883,11 @@ export default {
   showSelection(object) {
     // Remove previous selection
     this.clearSelection();
+
+    // Lock the object for editing
+    this.safePushEvent('lock_object', {
+      object_id: object.objectId
+    });
 
     // Create selection box
     this.selectionBox = new PIXI.Graphics();
@@ -874,6 +932,13 @@ export default {
     const object = event.currentTarget;
     const globalPos = event.data.global;
     const localPos = this.screenToCanvas(globalPos);
+
+    // Check if object is locked by another user
+    const pixiObject = this.objects.get(object.objectId);
+    if (pixiObject && pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId) {
+      // Object is locked by another user, prevent interaction
+      return;
+    }
 
     if (this.currentTool === 'select') {
       // Show selection and prepare for drag
@@ -924,10 +989,21 @@ export default {
    * Hook lifecycle - destroyed
    */
   destroyed() {
-    // Clean up PixiJS application
-    if (this.app) {
-      this.app.destroy(true);
+    // Remove event listeners using stored bound references
+    const canvas = this.app?.view;
+    if (canvas) {
+      canvas.removeEventListener('mousedown', this.boundHandleMouseDown);
+      canvas.removeEventListener('mousemove', this.boundHandleMouseMove);
+      canvas.removeEventListener('mouseup', this.boundHandleMouseUp);
+      canvas.removeEventListener('wheel', this.boundHandleWheel);
+      canvas.removeEventListener('touchstart', this.boundHandleTouchStart);
+      canvas.removeEventListener('touchmove', this.boundHandleTouchMove);
+      canvas.removeEventListener('touchend', this.boundHandleTouchEnd);
     }
+
+    window.removeEventListener('keydown', this.boundHandleKeyDown);
+    window.removeEventListener('keyup', this.boundHandleKeyUp);
+    window.removeEventListener('resize', this.boundHandleResize);
 
     // Disconnect ResizeObserver
     if (this.resizeObserver) {
@@ -935,9 +1011,9 @@ export default {
       this.resizeObserver = null;
     }
 
-    // Remove event listeners
-    window.removeEventListener('keydown', this.handleKeyDown.bind(this));
-    window.removeEventListener('keyup', this.handleKeyUp.bind(this));
-    window.removeEventListener('resize', this.handleResize.bind(this));
+    // Clean up PixiJS application
+    if (this.app) {
+      this.app.destroy(true);
+    }
   }
 };
