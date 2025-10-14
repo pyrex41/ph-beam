@@ -52,7 +52,10 @@ export default {
       autoDensity: true
     });
 
-    // Add canvas to DOM
+    // Add canvas to DOM and ensure it's responsive
+    this.app.view.style.display = 'block';
+    this.app.view.style.width = '100%';
+    this.app.view.style.height = '100%';
     container.appendChild(this.app.view);
 
     // Create main container for objects
@@ -108,6 +111,12 @@ export default {
 
     // Window resize
     window.addEventListener('resize', this.handleResize.bind(this));
+
+    // ResizeObserver for container size changes (more reliable than window resize)
+    this.resizeObserver = new ResizeObserver(() => {
+      this.handleResize();
+    });
+    this.resizeObserver.observe(this.el);
   },
 
   /**
@@ -823,9 +832,17 @@ export default {
    * Handle window resize
    */
   handleResize() {
-    const width = this.el.clientWidth;
-    const height = this.el.clientHeight;
-    this.app.renderer.resize(width, height);
+    // Use requestAnimationFrame to ensure we get accurate dimensions
+    // after the browser has finished layout calculations
+    requestAnimationFrame(() => {
+      const width = this.el.clientWidth;
+      const height = this.el.clientHeight;
+
+      // Only resize if we have valid dimensions
+      if (width > 0 && height > 0) {
+        this.app.renderer.resize(width, height);
+      }
+    });
   },
 
   /**
@@ -891,6 +908,12 @@ export default {
     // Clean up PixiJS application
     if (this.app) {
       this.app.destroy(true);
+    }
+
+    // Disconnect ResizeObserver
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
     }
 
     // Remove event listeners
