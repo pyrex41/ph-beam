@@ -105,4 +105,8 @@ USER nobody
 ENV ECTO_IPV6="true"
 ENV ERL_AFLAGS="-proto_dist inet6_tcp"
 
-CMD ["/app/bin/server"]
+# Ensure Phoenix server starts
+ENV PHX_SERVER="true"
+
+# Start the Phoenix server
+CMD ["/app/bin/collab_canvas", "start"]
