@@ -20,14 +20,14 @@ export class CanvasManager {
 
     // Interaction state
     this.currentUserId = null;
-    this.selectedObject = null;
+    this.selectedObjects = new Set(); // Changed from selectedObject to support multi-selection
+    this.selectionBoxes = new Map(); // Map of objectId -> selectionBox graphics
     this.isDragging = false;
-    this.dragOffset = { x: 0, y: 0 };
+    this.dragOffsets = new Map(); // Map of objectId -> {x, y} drag offset
     this.currentTool = 'select';
     this.isCreating = false;
     this.createStart = { x: 0, y: 0 };
     this.tempObject = null;
-    this.selectionBox = null;
 
     // Pan and zoom state
     this.isPanning = false;
@@ -53,6 +53,10 @@ export class CanvasManager {
 
     // Performance monitoring
     this.performanceMonitor = null;
+
+    // Shared resources for cursor label optimization
+    this.sharedCursorLabelStyle = null;
+    this.sharedLabelBgContext = null;
   }
 
   /**
@@ -91,9 +95,21 @@ export class CanvasManager {
     this.objectContainer.isRenderGroup = true; // v8 render groups for batching
     this.app.stage.addChild(this.objectContainer);
 
-    // Create cursor overlay container
+    // Create cursor overlay container with render group for batching
     this.cursorContainer = new PIXI.Container();
+    this.cursorContainer.isRenderGroup = true; // v8 render groups for cursor batching
     this.app.stage.addChild(this.cursorContainer);
+
+    // Create shared TextStyle for cursor labels (performance optimization)
+    this.sharedCursorLabelStyle = new PIXI.TextStyle({
+      fontFamily: 'Arial',
+      fontSize: 12,
+      fill: 0xffffff,
+      fontWeight: 'bold'
+    });
+
+    // Create shared GraphicsContext for label backgrounds (performance optimization)
+    this.sharedLabelBgContext = new PIXI.GraphicsContext();
 
     // Store canvas dimensions for viewport culling
     this.canvasWidth = width;
@@ -309,7 +325,7 @@ export class CanvasManager {
     }
 
     // Skip updates for objects currently being dragged by this user
-    if (this.isDragging && this.selectedObject && this.selectedObject.objectId === objectData.id) {
+    if (this.isDragging && this.selectedObjects.has(pixiObject)) {
       return;
     }
 
@@ -403,19 +419,17 @@ export class CanvasManager {
         18, 12
       ]).fill(cursorColor);
 
-      // User email/name label
+      // User email/name label using shared TextStyle
       const displayName = userData.email || userData.name || 'User';
-      const label = new PIXI.Text(displayName, {
-        fontFamily: 'Arial',
-        fontSize: 12,
-        fill: 0xffffff,
-        fontWeight: 'bold'
+      const label = new PIXI.Text({
+        text: displayName,
+        style: this.sharedCursorLabelStyle // Reuse shared style for performance
       });
       label.x = 25;
       label.y = 6;
 
-      // Create label background sized to fit text - use same color as cursor
-      const labelBg = new PIXI.Graphics();
+      // Create label background using shared GraphicsContext
+      const labelBg = new PIXI.Graphics(this.sharedLabelBgContext);
       // v8 Graphics API: shape → fill
       labelBg.roundRect(0, 0, label.width + 10, 24, 4)
         .fill(cursorColor);
@@ -477,8 +491,8 @@ export class CanvasManager {
   handleMouseDown(event) {
     const position = this.getMousePosition(event);
 
-    // Start panning with spacebar+click, shift+click, or middle mouse
-    if (this.spacePressed || event.shiftKey || event.button === 1) {
+    // Start panning with spacebar+click or middle mouse (NOT shift anymore - used for multi-select)
+    if (this.spacePressed || event.button === 1) {
       this.isPanning = true;
       this.panStart = { x: event.clientX, y: event.clientY };
       this.app.canvas.style.cursor = 'grabbing';
@@ -491,11 +505,17 @@ export class CanvasManager {
 
     if (this.currentTool === 'select') {
       if (clickedObject) {
-        // Select and prepare to drag
-        this.showSelection(clickedObject);
+        // Shift+click = toggle selection, regular click = replace selection
+        if (event.shiftKey) {
+          this.toggleSelection(clickedObject);
+        } else {
+          this.setSelection(clickedObject);
+        }
       } else {
-        // Deselect
-        this.clearSelection();
+        // Clicking on empty space = clear selection (unless shift-clicking)
+        if (!event.shiftKey) {
+          this.clearSelection();
+        }
       }
     } else if (this.currentTool === 'delete') {
       if (clickedObject) {
@@ -558,31 +578,29 @@ export class CanvasManager {
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
-    } else if (this.isDragging && this.selectedObject) {
-      // Move selected object
-      const newX = position.x + this.dragOffset.x;
-      const newY = position.y + this.dragOffset.y;
+    } else if (this.isDragging && this.selectedObjects.size > 0) {
+      // Move all selected objects together (Task 19: multi-object dragging)
+      this.selectedObjects.forEach(obj => {
+        const offset = this.dragOffsets.get(obj.objectId);
+        if (offset) {
+          const newX = position.x + offset.x;
+          const newY = position.y + offset.y;
 
-      this.selectedObject.x = newX;
-      this.selectedObject.y = newY;
+          obj.x = newX;
+          obj.y = newY;
+        }
+      });
 
-      // Update selection box
-      if (this.selectionBox) {
-        const rect = this.selectedObject.getBounds();
-        this.selectionBox.clear();
-        this.selectionBox.rect(
-          rect.x - 2,
-          rect.y - 2,
-          rect.width + 4,
-          rect.height + 4
-        ).stroke({ width: 2, color: 0x3b82f6 });
-      }
+      // Update all selection boxes
+      this.updateSelectionBoxes();
 
-      // Broadcast object position during drag (throttled to avoid spam)
+      // Broadcast positions for all selected objects during drag (throttled to avoid spam)
       if (!this.lastDragUpdate || Date.now() - this.lastDragUpdate > 50) {
-        this.emit('update_object', {
-          object_id: this.selectedObject.objectId,
-          position: { x: newX, y: newY }
+        this.selectedObjects.forEach(obj => {
+          this.emit('update_object', {
+            object_id: obj.objectId,
+            position: { x: obj.x, y: obj.y }
+          });
         });
         this.lastDragUpdate = Date.now();
       }
@@ -599,14 +617,16 @@ export class CanvasManager {
     if (this.isCreating) {
       // Finalize object creation
       this.finalizeTempObject(position);
-    } else if (this.isDragging && this.selectedObject) {
-      // Send update to server after dragging
-      this.emit('update_object', {
-        object_id: this.selectedObject.objectId,
-        position: {
-          x: this.selectedObject.x,
-          y: this.selectedObject.y
-        }
+    } else if (this.isDragging && this.selectedObjects.size > 0) {
+      // Send final update to server after dragging all selected objects
+      this.selectedObjects.forEach(obj => {
+        this.emit('update_object', {
+          object_id: obj.objectId,
+          position: {
+            x: obj.x,
+            y: obj.y
+          }
+        });
       });
       this.isDragging = false;
     }
@@ -696,9 +716,12 @@ export class CanvasManager {
     switch (event.key.toLowerCase()) {
       case 'delete':
       case 'backspace':
-        if (this.selectedObject) {
+        if (this.selectedObjects.size > 0) {
           event.preventDefault();
-          this.emit('delete_object', { object_id: this.selectedObject.objectId });
+          // Delete all selected objects
+          this.selectedObjects.forEach(obj => {
+            this.emit('delete_object', { object_id: obj.objectId });
+          });
           this.clearSelection();
         }
         break;
@@ -852,47 +875,104 @@ export class CanvasManager {
   }
 
   /**
-   * Clear object selection
+   * Clear all object selections
    */
   clearSelection() {
-    if (this.selectedObject) {
-      // Unlock the object
-      this.emit('unlock_object', { object_id: this.selectedObject.objectId });
+    // Unlock all selected objects
+    this.selectedObjects.forEach(obj => {
+      this.emit('unlock_object', { object_id: obj.objectId });
+    });
 
-      if (this.selectionBox) {
-        this.objectContainer.removeChild(this.selectionBox);
-        this.selectionBox.destroy();
-        this.selectionBox = null;
-      }
-    }
-    this.selectedObject = null;
+    // Remove all selection boxes
+    this.selectionBoxes.forEach((box, objectId) => {
+      this.objectContainer.removeChild(box);
+      box.destroy();
+    });
+
+    this.selectedObjects.clear();
+    this.selectionBoxes.clear();
   }
 
   /**
-   * Show selection box around object
+   * Set selection to a single object (clears previous selection)
    * @param {PIXI.DisplayObject} object - Object to select
    */
-  showSelection(object) {
-    // Remove previous selection
+  setSelection(object) {
+    // Clear previous selection
     this.clearSelection();
+
+    // Add to selection
+    this.selectedObjects.add(object);
 
     // Lock the object for editing
     this.emit('lock_object', { object_id: object.objectId });
 
     // Create selection box
-    this.selectionBox = new PIXI.Graphics();
+    this.createSelectionBox(object);
+  }
+
+  /**
+   * Toggle selection of an object (for Shift+click multi-selection)
+   * @param {PIXI.DisplayObject} object - Object to toggle
+   */
+  toggleSelection(object) {
+    if (this.selectedObjects.has(object)) {
+      // Deselect
+      this.selectedObjects.delete(object);
+      this.emit('unlock_object', { object_id: object.objectId });
+
+      // Remove selection box
+      const box = this.selectionBoxes.get(object.objectId);
+      if (box) {
+        this.objectContainer.removeChild(box);
+        box.destroy();
+        this.selectionBoxes.delete(object.objectId);
+      }
+    } else {
+      // Add to selection
+      this.selectedObjects.add(object);
+      this.emit('lock_object', { object_id: object.objectId });
+      this.createSelectionBox(object);
+    }
+  }
+
+  /**
+   * Create a selection box for an object
+   * @param {PIXI.DisplayObject} object - Object to create selection box for
+   */
+  createSelectionBox(object) {
+    const selectionBox = new PIXI.Graphics();
     const rect = object.getBounds();
 
     // v8 Graphics API: shape → stroke (no fill for selection box)
-    this.selectionBox.rect(
+    selectionBox.rect(
       rect.x - 2,
       rect.y - 2,
       rect.width + 4,
       rect.height + 4
     ).stroke({ width: 2, color: 0x3b82f6 });
 
-    this.objectContainer.addChild(this.selectionBox);
-    this.selectedObject = object;
+    this.objectContainer.addChild(selectionBox);
+    this.selectionBoxes.set(object.objectId, selectionBox);
+  }
+
+  /**
+   * Update all selection boxes to match object positions
+   */
+  updateSelectionBoxes() {
+    this.selectionBoxes.forEach((box, objectId) => {
+      const obj = this.objects.get(objectId);
+      if (obj) {
+        const rect = obj.getBounds();
+        box.clear();
+        box.rect(
+          rect.x - 2,
+          rect.y - 2,
+          rect.width + 4,
+          rect.height + 4
+        ).stroke({ width: 2, color: 0x3b82f6 });
+      }
+    });
   }
 
   /**
@@ -971,13 +1051,22 @@ export class CanvasManager {
     }
 
     if (this.currentTool === 'select') {
-      // Show selection and prepare for drag
-      this.showSelection(object);
+      // If object is not selected, select it (but don't deselect others if shift was held during initial click)
+      if (!this.selectedObjects.has(object)) {
+        this.setSelection(object);
+      }
+
+      // Prepare for dragging all selected objects
       this.isDragging = true;
-      this.dragOffset = {
-        x: object.x - localPos.x,
-        y: object.y - localPos.y
-      };
+
+      // Calculate drag offset for each selected object
+      this.dragOffsets.clear();
+      this.selectedObjects.forEach(obj => {
+        this.dragOffsets.set(obj.objectId, {
+          x: obj.x - localPos.x,
+          y: obj.y - localPos.y
+        });
+      });
     } else if (this.currentTool === 'delete') {
       // Delete object
       this.emit('delete_object', { object_id: object.objectId });

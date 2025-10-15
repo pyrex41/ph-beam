@@ -469,6 +469,105 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles batch object update events from the client (for multi-object dragging).
+
+  Updates multiple canvas objects in a single database transaction and broadcasts
+  the changes to all connected clients. This is more efficient than individual
+  updates when dragging multiple selected objects.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "updates" - List of update maps, each containing:
+      - "object_id" or "id" - ID of object to update
+      - "position" - New position map with x, y coordinates
+
+  ## Broadcast
+
+  Sends `{:objects_updated_batch, updated_objects}` to PubSub topic for all clients to receive.
+
+  ## Transaction
+
+  All updates are performed in a single database transaction for atomicity.
+  If any update fails, all updates are rolled back.
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message.
+  """
+  @impl true
+  def handle_event("update_objects_batch", %{"updates" => updates}, socket) when is_list(updates) do
+    user_id = socket.assigns.user_id
+
+    # Execute all updates in a transaction
+    result = CollabCanvas.Repo.transaction(fn ->
+      Enum.map(updates, fn update_params ->
+        # Extract object_id from params
+        object_id = update_params["object_id"] || update_params["id"]
+        object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+        # Check if object is locked by another user
+        case Canvases.check_lock(object_id) do
+          {:locked, locked_by} when locked_by != user_id ->
+            CollabCanvas.Repo.rollback({:error, :locked_by_another_user, object_id})
+
+          {:error, :not_found} ->
+            CollabCanvas.Repo.rollback({:error, :not_found, object_id})
+
+          _ ->
+            # Object is unlocked or locked by current user, proceed with update
+            attrs = %{position: update_params["position"]}
+
+            case Canvases.update_object(object_id, attrs) do
+              {:ok, updated_object} -> updated_object
+              {:error, :not_found} -> CollabCanvas.Repo.rollback({:error, :not_found, object_id})
+              {:error, _changeset} -> CollabCanvas.Repo.rollback({:error, :update_failed, object_id})
+            end
+        end
+      end)
+    end)
+
+    case result do
+      {:ok, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_updated_batch, updated_objects}
+        )
+
+        # Update local state
+        updated_ids = MapSet.new(updated_objects, & &1.id)
+        objects =
+          Enum.map(socket.assigns.objects, fn obj ->
+            if MapSet.member?(updated_ids, obj.id) do
+              Enum.find(updated_objects, obj, fn updated -> updated.id == obj.id end)
+            else
+              obj
+            end
+          end)
+
+        # Push batch update to JavaScript
+        {:noreply,
+         socket
+         |> assign(:objects, objects)
+         |> push_event("objects_updated_batch", %{objects: updated_objects})}
+
+      {:error, {error_type, object_id}} ->
+        message = case error_type do
+          :locked_by_another_user -> "Object #{object_id} is locked by another user"
+          :not_found -> "Object #{object_id} not found"
+          :update_failed -> "Failed to update object #{object_id}"
+          _ -> "Batch update failed"
+        end
+        {:noreply, put_flash(socket, :error, message)}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Batch update failed")}
+    end
+  end
+
+  @doc """
   Handles object deletion events from the client.
 
   Deletes a canvas object from the database and broadcasts the deletion to all
@@ -723,6 +822,37 @@ defmodule CollabCanvasWeb.CanvasLive do
      socket
      |> assign(:objects, objects)
      |> push_event("object_updated", %{object: updated_object})}
+  end
+
+  @doc """
+  Handles batch object updates broadcast from PubSub (from other clients).
+
+  Updates multiple objects in local state with new properties and pushes to
+  JavaScript for re-rendering. Used during multi-object dragging operations.
+
+  ## Parameters
+
+  - `updated_objects` - List of updated canvas object structs
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:objects_updated_batch, updated_objects}, socket) do
+    # Create a map of updated objects for efficient lookup
+    updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+    # Update local state
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        Map.get(updated_map, obj.id, obj)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_updated_batch", %{objects: updated_objects})}
   end
 
   @doc """

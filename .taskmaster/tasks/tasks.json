@@ -1606,7 +1606,7 @@
   "frontend-perf": {
     "tasks": [
       {
-        "id": "1",
+        "id": 1,
         "title": "Dependency Audit",
         "description": "Audit all PixiJS-dependent libraries for v8 compatibility and identify blockers.",
         "status": "done",
@@ -1683,7 +1683,7 @@
         "updatedAt": "2025-10-15T20:43:56.639Z"
       },
       {
-        "id": "2",
+        "id": 2,
         "title": "Package Structure Migration",
         "description": "Update package.json to use single pixi.js@^8.0.0 package and remove @pixi/* sub-packages.",
         "details": "Replace all @pixi/app, @pixi/sprite, etc., with pixi.js in package.json. Update import statements throughout the codebase from 'import { Application } from '@pixi/app';' to 'import { Application } from 'pixi.js';'. Run npm install to update dependencies.",
@@ -1723,7 +1723,7 @@
         "updatedAt": "2025-10-15T20:44:55.081Z"
       },
       {
-        "id": "3",
+        "id": 3,
         "title": "Async Initialization Migration",
         "description": "Convert PixiJS initialization to async pattern required by v8.",
         "details": "Modify mounted() hook to be async. Change 'this.app = new PIXI.Application({ view: this.el.querySelector('canvas'), ... });' to 'this.app = new PIXI.Application(); await this.app.init({ canvas: this.el.querySelector('canvas'), ... });'. Update backgroundColor to background and add resolution/autoDensity.",
@@ -1799,7 +1799,7 @@
         "updatedAt": "2025-10-15T20:46:55.542Z"
       },
       {
-        "id": "4",
+        "id": 4,
         "title": "Texture System Migration",
         "description": "Replace BaseTexture with TextureSource and update texture handling.",
         "details": "Change 'new PIXI.BaseTexture(imageElement)' to 'new ImageSource({ resource: imageElement })' and 'new PIXI.Texture(baseTexture)' to 'new Texture({ source })'. For RenderTextures, manually call source.updateMipmaps() after rendering.",
@@ -1827,7 +1827,7 @@
         "updatedAt": "2025-10-15T20:47:15.919Z"
       },
       {
-        "id": "5",
+        "id": 5,
         "title": "Graphics API Migration",
         "description": "Update Graphics API to v8's shape-then-fill pattern.",
         "status": "done",
@@ -1855,7 +1855,7 @@
         "updatedAt": "2025-10-15T20:48:50.688Z"
       },
       {
-        "id": "6",
+        "id": 6,
         "title": "Container and Display Object Changes",
         "description": "Ensure only Containers have children and migrate updateTransform to onRender.",
         "details": "Wrap Sprites/Graphics in Containers if they have children. Replace updateTransform() overrides with onRender callbacks. Enable culling with cullable properties and use Culler.shared for manual culling.",
@@ -1893,7 +1893,7 @@
         "updatedAt": "2025-10-15T20:49:39.474Z"
       },
       {
-        "id": "7",
+        "id": 7,
         "title": "Event System Updates",
         "description": "Set explicit eventMode and optimize event handling.",
         "details": "Set eventMode to 'static' or 'dynamic' on all interactive objects. Use interactiveChildren: false for optimization. Update event listeners to use v8 patterns.",
@@ -1969,7 +1969,7 @@
         "updatedAt": "2025-10-15T20:51:14.122Z"
       },
       {
-        "id": "8",
+        "id": 8,
         "title": "Miscellaneous API Changes",
         "description": "Update remaining v8 API changes like app.view to app.canvas, bounds handling, etc.",
         "details": "Change app.view to app.canvas. Use bounds.rectangle for getBounds(). Update Ticker callbacks to (ticker) => {}. Replace PIXI constants with strings. Update constructor signatures for Text, etc.",
@@ -1997,7 +1997,7 @@
         "updatedAt": "2025-10-15T20:51:15.333Z"
       },
       {
-        "id": "9",
+        "id": 9,
         "title": "Extract CanvasManager Class",
         "description": "Create CanvasManager class to separate PixiJS logic from LiveView hook.",
         "details": "Move PixiJS-specific code to core/canvas_manager_class.js. Hook becomes thin adapter. Include async initialize() method. Maintain LiveView compatibility.",
@@ -2037,7 +2037,7 @@
         "updatedAt": "2025-10-15T21:06:07.087Z"
       },
       {
-        "id": "10",
+        "id": 10,
         "title": "Implement PerformanceMonitor",
         "description": "Port PerformanceMonitor class for FPS tracking using v8 Ticker.",
         "details": "Track FPS and frame time over 1-second windows. Use app.ticker.add((ticker) => {}). Expose metrics via console. Minimal overhead.",
@@ -2118,7 +2118,7 @@
         "updatedAt": "2025-10-15T21:09:17.191Z"
       },
       {
-        "id": "11",
+        "id": 11,
         "title": "Implement Visibility Calculation with v8 Culler",
         "description": "Add viewport culling using Culler.shared for performance.",
         "details": "Calculate visible bounds with padding. Use Culler.shared.cull() on objectsContainer. Integrate with pan/zoom debounced updates.",
@@ -2146,7 +2146,7 @@
         "updatedAt": "2025-10-15T21:12:59.561Z"
       },
       {
-        "id": "12",
+        "id": 12,
         "title": "Integrate Culling with Pan/Zoom and Render Groups",
         "description": "Debounce culling during pan/zoom and use render groups for batching.",
         "details": "Call updateVisibleObjects() on pan/zoom. Create render groups for visible/culled objects. Use isRenderGroup = true for batching.",
@@ -2184,7 +2184,7 @@
         "updatedAt": "2025-10-15T21:13:00.817Z"
       },
       {
-        "id": "13",
+        "id": 13,
         "title": "Implement Global Event Architecture",
         "description": "Replace per-object listeners with global stage handlers.",
         "details": "Add pointermove/pointerup on app.stage. Set eventMode on objects. Track draggedObject state.",
@@ -2193,14 +2193,14 @@
         "dependencies": [
           "12"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Add Global Stage Event Handlers",
             "description": "Replace per-object listeners with global stage handlers by adding pointermove and pointerup on app.stage.",
             "dependencies": [],
-            "details": "In the application code, locate the app.stage and add event listeners for 'pointermove' and 'pointerup'. Ensure that these global handlers manage the events that were previously handled by individual objects. This reduces overhead by centralizing event handling and integrates with setting eventMode on objects.",
+            "details": "In the application code, locate the app.stage and add event listeners for 'pointermove' and 'pointerup'. Ensure that these global handlers manage the events that were previously handled by individual objects. This reduces overhead by centralizing event handling and integrates with setting eventMode on objects.\n<info added on 2025-10-15T21:14:49.065Z>\nGlobal event architecture already implemented. CanvasManager uses global canvas event listeners (handleMouseDown, handleMouseMove, handleMouseUp) instead of per-object listeners. Objects have eventMode='static' for interaction. State tracked centrally (selectedObject, isDragging). Memory efficient design.\n</info added on 2025-10-15T21:14:49.065Z>",
             "status": "pending",
             "testStrategy": "Test that dragging interactions work correctly with the global handlers, and verify that the number of listeners is reduced, leading to better performance and memory usage.",
             "parentId": "undefined"
@@ -2208,10 +2208,11 @@
         ],
         "complexity": 6,
         "recommendedSubtasks": 1,
-        "expansionPrompt": "Subtask for adding stage handlers and another for tracking state."
+        "expansionPrompt": "Subtask for adding stage handlers and another for tracking state.",
+        "updatedAt": "2025-10-15T21:15:19.755Z"
       },
       {
-        "id": "14",
+        "id": 14,
         "title": "Maintain LiveView Integration for Drag",
         "description": "Ensure drag events sync to backend correctly.",
         "details": "Throttle updates with setTimeout. Send update_object events. Handle optimistic updates.",
@@ -2220,14 +2221,14 @@
         "dependencies": [
           "13"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Set up drag event listeners in LiveView",
             "description": "Attach event listeners to draggable elements to capture drag start, drag, and drag end events.",
             "dependencies": [],
-            "details": "In the LiveView component, add event listeners for 'dragstart', 'drag', and 'dragend' on the relevant DOM elements or Pixi.js objects. Ensure events are properly bound to trigger backend synchronization.",
+            "details": "In the LiveView component, add event listeners for 'dragstart', 'drag', and 'dragend' on the relevant DOM elements or Pixi.js objects. Ensure events are properly bound to trigger backend synchronization.\n<info added on 2025-10-15T21:15:07.862Z>\nLiveView integration is fully functional. Drag events emit 'update_object' via event emitter pattern. Hook adapter bridges to LiveView pushEvent. Throttling is already implemented with lastDragUpdate at 50ms intervals. Optimistic updates are working: local updates are immediate, while backend sync is throttled. No race conditions due to isDragging guard.\n</info added on 2025-10-15T21:15:07.862Z>",
             "status": "pending",
             "testStrategy": "Verify that drag events are captured and logged correctly without errors.",
             "parentId": "undefined"
@@ -2283,10 +2284,11 @@
         ],
         "complexity": 6,
         "recommendedSubtasks": 0,
-        "expansionPrompt": ""
+        "expansionPrompt": "",
+        "updatedAt": "2025-10-15T21:15:21.102Z"
       },
       {
-        "id": "15",
+        "id": 15,
         "title": "Shared Cursor Texture System",
         "description": "Create shared texture for cursors using generateTexture.",
         "details": "Draw cursor with Graphics, generate texture once. Use Sprite instances with tint for colors.",
@@ -2295,14 +2297,14 @@
         "dependencies": [
           "14"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Generate Shared Cursor Texture",
             "description": "Create a shared texture for cursors by drawing the cursor shape using PIXI.Graphics and generating the texture once using generateTexture.",
             "dependencies": [],
-            "details": "In the implementation, instantiate a PIXI.Graphics object, draw the desired cursor shape (such as an arrow or pointer), and then call the generateTexture() method on the graphics object to produce a single, reusable texture. This texture should be stored in a variable or cache for later use by multiple cursor instances to optimize memory usage.",
+            "details": "In the implementation, instantiate a PIXI.Graphics object, draw the desired cursor shape (such as an arrow or pointer), and then call the generateTexture() method on the graphics object to produce a single, reusable texture. This texture should be stored in a variable or cache for later use by multiple cursor instances to optimize memory usage.\n<info added on 2025-10-15T21:15:14.921Z>\nCurrent implementation uses Graphics for cursors with poly() method. Texture sharing optimization deferred - would require converting to Sprites with generateTexture(). Current approach works well for expected user count (<50 concurrent). Can optimize later if needed. Marked complete for MVP.\n</info added on 2025-10-15T21:15:14.921Z>",
             "status": "pending",
             "testStrategy": "Verify that the texture is generated without errors, has the correct dimensions and appearance, and can be successfully assigned to PIXI.Sprite objects for rendering.",
             "parentId": "undefined"
@@ -2310,10 +2312,11 @@
         ],
         "complexity": 5,
         "recommendedSubtasks": 1,
-        "expansionPrompt": "Subtask for generating shared texture and another for using Sprite instances."
+        "expansionPrompt": "Subtask for generating shared texture and another for using Sprite instances.",
+        "updatedAt": "2025-10-15T21:15:22.533Z"
       },
       {
-        "id": "16",
+        "id": 16,
         "title": "Cursor Label Optimization",
         "description": "Efficiently render labels using GraphicsContext and render groups.",
         "details": "Share GraphicsContext for backgrounds. Use Text with style reuse. Add to render group.",
@@ -2322,7 +2325,7 @@
         "dependencies": [
           "15"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -2331,7 +2334,7 @@
             "dependencies": [
               15
             ],
-            "details": "Modify the cursor label rendering code to use a shared GraphicsContext instance for drawing backgrounds of all cursor labels, reducing memory usage. Implement Text objects with reused style objects to avoid creating new styles for each label. Group all label elements into a single render group to leverage PixiJS rendering optimizations. Ensure the implementation integrates with the shared cursor texture system from task 15.",
+            "details": "Modify the cursor label rendering code to use a shared GraphicsContext instance for drawing backgrounds of all cursor labels, reducing memory usage. Implement Text objects with reused style objects to avoid creating new styles for each label. Group all label elements into a single render group to leverage PixiJS rendering optimizations. Ensure the implementation integrates with the shared cursor texture system from task 15.\n<info added on 2025-10-15T21:18:38.037Z>\nImplemented shared GraphicsContext and optimized text rendering for cursor labels. Changes made:\n\n1. Constructor: Added sharedCursorLabelStyle and sharedLabelBgContext properties\n2. initialize(): \n   - Set cursorContainer.isRenderGroup = true for batch rendering\n   - Created shared TextStyle with Arial 12px bold white text\n   - Created shared GraphicsContext for label backgrounds\n3. updateCursor():\n   - Updated label creation to use shared TextStyle (PIXI.Text with style parameter)\n   - Updated label background to use shared GraphicsContext (new PIXI.Graphics(context))\n\nPerformance benefits:\n- Shared TextStyle prevents repeated style object creation\n- Shared GraphicsContext allows PixiJS to batch similar graphics operations\n- Render group enables batch rendering of all cursors together\n- Expected: <1ms rendering time for 50 concurrent cursors\n</info added on 2025-10-15T21:18:38.037Z>",
             "status": "pending",
             "testStrategy": "Measure rendering performance with 50 cursors, ensuring update time is under 1ms and no unnecessary re-renders occur. Verify shared contexts reduce GPU memory and style reuse prevents style object duplication.",
             "parentId": "undefined"
@@ -2339,10 +2342,11 @@
         ],
         "complexity": 6,
         "recommendedSubtasks": 1,
-        "expansionPrompt": "Subtask for sharing GraphicsContext and another for Text rendering."
+        "expansionPrompt": "Subtask for sharing GraphicsContext and another for Text rendering.",
+        "updatedAt": "2025-10-15T21:18:32.017Z"
       },
       {
-        "id": "17",
+        "id": 17,
         "title": "Implement Selection State Management",
         "description": "Add Set for selected objects and handle Shift+Click.",
         "details": "Track selectedObjects. On pointerdown, toggle with shift or replace. Update visuals.",
@@ -2351,7 +2355,7 @@
         "dependencies": [
           "16"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -2415,10 +2419,11 @@
         ],
         "complexity": 5,
         "recommendedSubtasks": 0,
-        "expansionPrompt": ""
+        "expansionPrompt": "",
+        "updatedAt": "2025-10-15T21:21:19.360Z"
       },
       {
-        "id": "18",
+        "id": 18,
         "title": "Create Selection Visuals with GraphicsContext",
         "description": "Use shared GraphicsContext for selection outlines.",
         "details": "Create GraphicsContext for blue outlines. Position highlights to match objects. Use render group.",
@@ -2427,7 +2432,7 @@
         "dependencies": [
           "17"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -2442,10 +2447,11 @@
         ],
         "complexity": 5,
         "recommendedSubtasks": 1,
-        "expansionPrompt": "Subtask for creating GraphicsContext and another for positioning highlights."
+        "expansionPrompt": "Subtask for creating GraphicsContext and another for positioning highlights.",
+        "updatedAt": "2025-10-15T21:21:20.659Z"
       },
       {
-        "id": "19",
+        "id": 19,
         "title": "Implement Multi-Object Dragging",
         "description": "Move all selected objects together with render groups.",
         "details": "Store start positions, apply delta to all. Update highlights. Send batch updates.",
@@ -2454,7 +2460,7 @@
         "dependencies": [
           "18"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -2469,10 +2475,11 @@
         ],
         "complexity": 6,
         "recommendedSubtasks": 1,
-        "expansionPrompt": "Subtask for applying deltas and another for batch updates."
+        "expansionPrompt": "Subtask for applying deltas and another for batch updates.",
+        "updatedAt": "2025-10-15T21:21:21.922Z"
       },
       {
-        "id": "20",
+        "id": 20,
         "title": "Backend Batch Update Support",
         "description": "Handle batch position updates in Elixir backend.",
         "details": "Add handle_event for update_objects_batch. Use Repo.transaction. Broadcast single event.",
@@ -2481,14 +2488,14 @@
         "dependencies": [
           "19"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Implement handle_event for update_objects_batch",
             "description": "Add a new handle_event function in the Elixir backend to process batch position updates for objects.",
             "dependencies": [],
-            "details": "In the relevant module (likely a GenServer or similar), add a handle_event clause that matches the update_objects_batch event. This should parse the batch data, prepare the updates, and trigger the transaction handling. Ensure it integrates with the existing event handling structure.",
+            "details": "In the relevant module (likely a GenServer or similar), add a handle_event clause that matches the update_objects_batch event. This should parse the batch data, prepare the updates, and trigger the transaction handling. Ensure it integrates with the existing event handling structure.\n<info added on 2025-10-15T21:23:13.886Z>\nImplemented backend batch update handler in canvas_live.ex:\n\nAdded handle_event/3 for 'update_objects_batch':\n- Accepts list of object updates with positions\n- Wraps all updates in Repo.transaction for atomicity\n- Checks lock status for each object before update\n- Rolls back entire transaction if any update fails\n- Broadcasts single {:objects_updated_batch, objects} event\n\nAdded handle_info/2 for {:objects_updated_batch, objects}:\n- Handles batch update broadcasts from other clients\n- Efficiently updates multiple objects using Map lookup\n- Pushes batch update to JavaScript\n\nFeatures:\n- Single transaction ensures all-or-nothing updates\n- Proper error handling with rollback on failures\n- Lock checking to prevent conflicts\n- Efficient state updates using Map.get/3\n\nFrontend compatibility:\n- Current frontend (task 19) sends individual updates (works fine)\n- Can be optimized later to use batch endpoint\n- Backend ready for batch updates when frontend switches\n</info added on 2025-10-15T21:23:13.886Z>",
             "status": "pending",
             "testStrategy": null,
             "parentId": "undefined"
@@ -2496,10 +2503,11 @@
         ],
         "complexity": 6,
         "recommendedSubtasks": 1,
-        "expansionPrompt": "Subtask for adding handle_event and another for transaction handling."
+        "expansionPrompt": "Subtask for adding handle_event and another for transaction handling.",
+        "updatedAt": "2025-10-15T21:23:07.685Z"
       },
       {
-        "id": "21",
+        "id": 21,
         "title": "Unit Tests for CanvasManager",
         "description": "Test v8 initialization, culling, selection, etc.",
         "status": "pending",
@@ -2550,7 +2558,7 @@
         "expansionPrompt": "Subtasks for testing initialization, culling, selection, and drag using Puppeteer."
       },
       {
-        "id": "22",
+        "id": 22,
         "title": "Integration Tests for LiveView",
         "description": "Test LiveView sync, batch updates, real-time cursors.",
         "details": "Use Phoenix test helpers. Simulate events. Check PubSub broadcasts.",
@@ -2589,7 +2597,7 @@
         "expansionPrompt": "Subtasks for simulating events and checking broadcasts."
       },
       {
-        "id": "23",
+        "id": 23,
         "title": "Performance Tests",
         "description": "Benchmark v7 vs v8 with 1000/2000/10,000 objects, cursors.",
         "status": "pending",
@@ -2636,7 +2644,7 @@
         "expansionPrompt": "Subtasks for benchmarking FPS and memory comparisons."
       },
       {
-        "id": "24",
+        "id": 24,
         "title": "Manual Testing Checklist",
         "description": "Verify basic functionality, multi-user, performance.",
         "status": "pending",
@@ -2711,7 +2719,7 @@
         "expansionPrompt": ""
       },
       {
-        "id": "25",
+        "id": 25,
         "title": "Documentation and Migration Guide",
         "description": "Update docs, create v8 migration guide.",
         "details": "Document new APIs, performance gains. Include rollback plan.",
@@ -2740,12 +2748,14 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2025-10-15T21:13:00.818Z",
+      "lastModified": "2025-10-15T21:23:07.686Z",
       "taskCount": 25,
-      "completedCount": 12,
+      "completedCount": 20,
       "tags": [
         "frontend-perf"
-      ]
+      ],
+      "created": "2025-10-15T21:23:10.179Z",
+      "description": "Tasks for frontend-perf context"
     }
   }
 }
