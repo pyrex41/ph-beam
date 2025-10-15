@@ -1,0 +1,31 @@
+# Task ID: 12
+# Title: Add Presence Tracking
+# Status: done
+# Dependencies: 10, 3
+# Priority: medium
+# Description: Integrate presence for showing online users and their cursors.
+# Details:
+In Canvas LiveView mount, track user presence using Phoenix.Presence. Update presence on interval and handle presence_diff messages. Display presence in the UI with user names and colors.
+
+# Test Strategy:
+Connect multiple users to a canvas and verify presence list updates and cursor visibility in real-time.
+
+# Subtasks:
+## 1. Track User Presence on Mount and Update on Interval [done]
+### Dependencies: None
+### Description: Implement presence tracking in the Canvas LiveView mount function using Phoenix.Presence, and set up periodic updates to maintain accurate online user status.
+### Details:
+In the mount callback of CanvasLiveView, initialize Phoenix.Presence tracking for the current user. Configure an interval-based update mechanism to refresh presence data, ensuring real-time accuracy for online users and their cursors.
+
+## 2. Handle Presence Diff Messages [done]
+### Dependencies: 12.1
+### Description: Add event handling for presence_diff messages to update the LiveView state when users join or leave the canvas.
+### Details:
+Implement a handle_info callback in CanvasLiveView to process presence_diff messages from Phoenix.Presence. Update the socket assigns with the latest presence list, including user names, colors, and cursor positions for seamless real-time updates.
+
+## 3. Display Presence in UI and Test with Multiple Users [done]
+### Dependencies: 12.1, 12.2
+### Description: Render the online users and their cursors in the canvas UI, and verify functionality through multi-user testing.
+### Details:
+Update the LiveView template to display a list of online users with names and colors, and overlay cursors on the canvas. Ensure the UI updates dynamically based on presence changes. Conduct tests by connecting multiple users to the same canvas and confirming real-time presence list updates and cursor visibility.
+

@@ -1,0 +1,37 @@
+# Task ID: 15
+# Title: Add Object Creation, Update, and Delete
+# Status: done
+# Dependencies: 14
+# Priority: medium
+# Description: Implement full CRUD operations for canvas objects in PixiJS.
+# Details:
+Extend CanvasManager with functions for createRectangle, createCircle, createText, addObjectToCanvas, updateObject, removeObject, and findObjectAt. Handle user interactions like clicking, dragging, and keyboard shortcuts.
+
+# Test Strategy:
+In the canvas, create different object types, select and move them, delete objects, and verify server sync and rendering accuracy.
+
+# Subtasks:
+## 1. Implement Object Creation Functions [pending]
+### Dependencies: 15.14
+### Description: Add functions to CanvasManager for creating canvas objects such as rectangles, circles, and text elements using PixiJS graphics.
+### Details:
+Extend CanvasManager with createRectangle, createCircle, and createText methods that generate PixiJS Graphics or Text objects with default properties like position, size, color, and add them to the canvas stage. Ensure each object has a unique ID for tracking.
+
+## 2. Implement Object Update Functions [pending]
+### Dependencies: 15.1
+### Description: Develop functionality to update existing canvas objects, including position, size, and other attributes.
+### Details:
+Add updateObject method to CanvasManager that takes an object ID and new properties (e.g., position, scale, color), updates the PixiJS object accordingly, and triggers re-rendering. Handle updates for rectangles, circles, and text objects.
+
+## 3. Implement Object Deletion Functions [pending]
+### Dependencies: 15.1
+### Description: Add capabilities to remove canvas objects from the scene and clean up resources.
+### Details:
+Implement removeObject function in CanvasManager that removes the specified PixiJS object from the stage, destroys it to free memory, and updates any internal object lists. Include findObjectAt for selection purposes.
+
+## 4. Handle User Interactions and Testing [pending]
+### Dependencies: 15.1, 15.2, 15.3
+### Description: Integrate user interactions like clicking, dragging, and keyboard shortcuts for object manipulation, and ensure sync and rendering accuracy.
+### Details:
+Add event listeners to the PixiJS canvas for mouse events (click, drag) and keyboard shortcuts (e.g., delete key). Implement selection logic using findObjectAt, enable dragging by updating object positions, and broadcast changes via PubSub for real-time sync. Test for accurate rendering and server synchronization.
+

@@ -1,0 +1,25 @@
+# Task ID: 25
+# Title: Clean Up Commented-Out Code Blocks
+# Status: done
+# Dependencies: 20, 21
+# Priority: medium
+# Description: Review and either remove or uncomment commented-out code blocks in specified files to improve codebase readability and eliminate confusion, while preserving helpful documentation examples.
+# Details:
+Conduct a thorough review of each identified commented code block in the listed files. For collab_canvas/assets/js/app.js line 3, evaluate the commented user_socket.js import: remove it if channels are not used, or uncomment if needed for real-time functionality. In collab_canvas/lib/collab_canvas_web/router.ex lines 43-45, assess the commented API scope example: remove it if no API routes are required, as it's boilerplate. For collab_canvas/lib/collab_canvas_web/telemetry.ex line 16, check the commented Telemetry.Metrics.ConsoleReporter: remove if not needed for development logging. In collab_canvas/lib/collab_canvas_web/controllers/error_html.ex line 16, keep the commented embed_templates call and documentation as helpful examples, but consider moving them to a separate documentation file if they clutter the code. After decisions, edit the files accordingly using a text editor or IDE. Ensure changes do not introduce syntax errors or break functionality. If any uncommented code requires additional setup (e.g., dependencies), verify they are in place. Finally, commit changes with a clear message like 'Clean up commented-out code blocks for better readability'.
+
+# Test Strategy:
+After making changes, perform a syntax check on modified files: for Elixir files, run 'mix compile' to ensure no compilation errors; for JavaScript files, use 'npm run build' or a linter like ESLint. Start the application with 'mix phx.server' and navigate through key pages (e.g., home, dashboard, canvas) to verify no runtime errors occur. Check browser console for any issues related to uncommented JS code. Use grep to confirm removal of unwanted comments: e.g., 'grep -n "# " router.ex' to ensure specific comments are gone. If uncommented code is active, test its functionality (e.g., if user_socket.js is uncommented, verify channel connections work).
+
+# Subtasks:
+## 1. Review and Clean Up Commented Code in JavaScript File [done]
+### Dependencies: None
+### Description: Evaluate the commented user_socket.js import in collab_canvas/assets/js/app.js at line 3, deciding whether to remove it if channels are not used or uncomment if needed for real-time functionality, ensuring no syntax errors are introduced.
+### Details:
+Open collab_canvas/assets/js/app.js and examine the commented import on line 3. Check if real-time channels are utilized elsewhere in the app; if not, remove the comment. If needed, uncomment and verify any required dependencies are installed. After editing, run a syntax check using a linter like ESLint or build with npm to confirm no errors.
+
+## 2. Review and Clean Up Commented Code in Elixir Files [done]
+### Dependencies: 25.1
+### Description: Assess and handle commented-out code blocks in collab_canvas/lib/collab_canvas_web/router.ex (lines 43-45), telemetry.ex (line 16), and controllers/error_html.ex (line 16), either removing boilerplate or preserving documentation examples.
+### Details:
+Review each specified file: in router.ex, remove the commented API scope if no API routes are needed; in telemetry.ex, remove the commented Telemetry.Metrics.ConsoleReporter if not required; in error_html.ex, keep the commented embed_templates and documentation but consider relocating to a doc file. Edit files using an IDE, then run 'mix compile' to ensure no compilation errors. Preserve any helpful examples by moving to documentation if cluttering code.
+

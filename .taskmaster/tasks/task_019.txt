@@ -1,0 +1,11 @@
+# Task ID: 19
+# Title: Deploy to Fly.io
+# Status: deferred
+# Dependencies: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
+# Priority: low
+# Description: Set up and deploy the application to Fly.io with production configuration using SQLite for database storage.
+# Details:
+Create fly.toml with configuration for a persistent volume for the SQLite database. Set secrets for Auth0 credentials and Claude API key only. Update Auth0 with production URLs. Set the DATABASE_PATH environment variable to point to the SQLite file location on the volume. Deploy with 'flyctl deploy' and verify the app runs publicly.
+
+# Test Strategy:
+Access the deployed URL, test login, canvas creation, real-time collaboration, and AI features in production.

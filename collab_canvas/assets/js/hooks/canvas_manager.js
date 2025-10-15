@@ -10,11 +10,11 @@ export default {
   /**
    * Hook lifecycle - mounted
    */
-  mounted() {
+  async mounted() {
     // Store current user ID
     this.currentUserId = this.el.dataset.userId;
 
-    this.setupPixiApp();
+    await this.setupPixiApp();
     this.setupEventListeners();
     this.loadInitialObjects();
     this.loadInitialPresences();
@@ -36,29 +36,30 @@ export default {
   /**
    * Initialize PixiJS Application
    */
-  setupPixiApp() {
+  async setupPixiApp() {
     // Get canvas container dimensions
     const container = this.el;
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // Create PixiJS application (v7 API)
-    this.app = new PIXI.Application({
+    // Create PixiJS application (v8 API - async initialization)
+    this.app = new PIXI.Application();
+    await this.app.init({
       width: width,
       height: height,
-      backgroundColor: 0xffffff,
+      background: 0xffffff,
       antialias: true,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true
     });
 
-    // Add canvas to DOM
-    container.appendChild(this.app.view);
+    // Add canvas to DOM (v8 uses app.canvas instead of app.view)
+    container.appendChild(this.app.canvas);
 
     // Set canvas display and max-size to prevent overflow
-    this.app.view.style.display = 'block';
-    this.app.view.style.maxWidth = '100%';
-    this.app.view.style.maxHeight = '100%';
+    this.app.canvas.style.display = 'block';
+    this.app.canvas.style.maxWidth = '100%';
+    this.app.canvas.style.maxHeight = '100%';
 
     // Create main container for objects
     this.objectContainer = new PIXI.Container();
@@ -94,7 +95,7 @@ export default {
    * Setup event listeners for user interactions
    */
   setupEventListeners() {
-    const canvas = this.app.view;
+    const canvas = this.app.canvas;
 
     // Store bound function references for proper cleanup
     this.boundHandleMouseDown = this.handleMouseDown.bind(this);
@@ -264,10 +265,10 @@ export default {
     const stroke = parseInt(data.stroke?.replace('#', '0x') || '0x1e40af');
     const strokeWidth = data.stroke_width || 2;
 
-    graphics.beginFill(fill);
-    graphics.lineStyle(strokeWidth, stroke);
-    graphics.drawRect(0, 0, width, height);
-    graphics.endFill();
+    // v8 Graphics API: shape → fill → stroke
+    graphics.rect(0, 0, width, height)
+      .fill(fill)
+      .stroke({ width: strokeWidth, color: stroke });
 
     graphics.x = position.x;
     graphics.y = position.y;
@@ -285,10 +286,10 @@ export default {
     const stroke = parseInt(data.stroke?.replace('#', '0x') || '0x1e40af');
     const strokeWidth = data.stroke_width || 2;
 
-    graphics.beginFill(fill);
-    graphics.lineStyle(strokeWidth, stroke);
-    graphics.drawCircle(radius, radius, radius);
-    graphics.endFill();
+    // v8 Graphics API: shape → fill → stroke
+    graphics.circle(radius, radius, radius)
+      .fill(fill)
+      .stroke({ width: strokeWidth, color: stroke });
 
     graphics.x = position.x;
     graphics.y = position.y;
@@ -406,16 +407,16 @@ export default {
       // Cursor pointer (arrow shape)
       const cursor = new PIXI.Graphics();
       const cursorColor = parseInt(userData.color?.replace('#', '0x') || '0x3b82f6');
-      cursor.beginFill(cursorColor);
-      cursor.moveTo(0, 0);
-      cursor.lineTo(0, 20);
-      cursor.lineTo(6, 15);
-      cursor.lineTo(10, 22);
-      cursor.lineTo(14, 19);
-      cursor.lineTo(10, 12);
-      cursor.lineTo(18, 12);
-      cursor.closePath();
-      cursor.endFill();
+      // v8 Graphics API: use poly() for custom shapes
+      cursor.poly([
+        0, 0,
+        0, 20,
+        6, 15,
+        10, 22,
+        14, 19,
+        10, 12,
+        18, 12
+      ]).fill(cursorColor);
 
       // User email/name label
       const displayName = userData.email || userData.name || 'User';
@@ -430,9 +431,9 @@ export default {
 
       // Create label background sized to fit text - use same color as cursor
       const labelBg = new PIXI.Graphics();
-      labelBg.beginFill(cursorColor);
-      labelBg.drawRoundedRect(0, 0, label.width + 10, 24, 4);
-      labelBg.endFill();
+      // v8 Graphics API: shape → fill
+      labelBg.roundRect(0, 0, label.width + 10, 24, 4)
+        .fill(cursorColor);
       labelBg.x = 20;
       labelBg.y = 0;
 
@@ -484,7 +485,7 @@ export default {
     if (this.spacePressed || event.shiftKey || event.button === 1) {
       this.isPanning = true;
       this.panStart = { x: event.clientX, y: event.clientY };
-      this.app.view.style.cursor = 'grabbing';
+      this.app.canvas.style.cursor = 'grabbing';
       event.preventDefault();
       return;
     }
@@ -556,17 +557,18 @@ export default {
     const height = currentPosition.y - this.createStart.y;
 
     this.tempObject.clear();
-    this.tempObject.lineStyle(2, 0x1e40af);
-    this.tempObject.beginFill(0x3b82f6, 0.3);
 
+    // v8 Graphics API: shape → fill → stroke
     if (this.currentTool === 'rectangle') {
-      this.tempObject.drawRect(0, 0, width, height);
+      this.tempObject.rect(0, 0, width, height)
+        .fill({ color: 0x3b82f6, alpha: 0.3 })
+        .stroke({ width: 2, color: 0x1e40af });
     } else if (this.currentTool === 'circle') {
       const radius = Math.max(Math.abs(width), Math.abs(height)) / 2;
-      this.tempObject.drawCircle(width / 2, height / 2, radius);
+      this.tempObject.circle(width / 2, height / 2, radius)
+        .fill({ color: 0x3b82f6, alpha: 0.3 })
+        .stroke({ width: 2, color: 0x1e40af });
     }
-
-    this.tempObject.endFill();
   },
 
   /**
@@ -627,12 +629,13 @@ export default {
     const objectsArray = Array.from(this.objects.values()).reverse();
 
     for (const obj of objectsArray) {
-      const bounds = obj.getBounds();
+      // v8: getBounds() returns Bounds object, access rectangle via .rectangle
+      const rect = obj.getBounds();
       if (
-        position.x >= bounds.x &&
-        position.x <= bounds.x + bounds.width &&
-        position.y >= bounds.y &&
-        position.y <= bounds.y + bounds.height
+        position.x >= rect.x &&
+        position.x <= rect.x + rect.width &&
+        position.y >= rect.y &&
+        position.y <= rect.y + rect.height
       ) {
         return obj;
       }
@@ -679,15 +682,16 @@ export default {
 
       // Update selection box
       if (this.selectionBox) {
-        const bounds = this.selectedObject.getBounds();
+        // v8: getBounds() returns Bounds object
+        const rect = this.selectedObject.getBounds();
         this.selectionBox.clear();
-        this.selectionBox.lineStyle(2, 0x3b82f6, 1);
-        this.selectionBox.drawRect(
-          bounds.x - 2,
-          bounds.y - 2,
-          bounds.width + 4,
-          bounds.height + 4
-        );
+        // v8 Graphics API: shape → stroke (no fill for selection box)
+        this.selectionBox.rect(
+          rect.x - 2,
+          rect.y - 2,
+          rect.width + 4,
+          rect.height + 4
+        ).stroke({ width: 2, color: 0x3b82f6 });
       }
 
       // Broadcast object position during drag (throttled to avoid spam)
@@ -728,7 +732,7 @@ export default {
     if (this.isPanning) {
       this.isPanning = false;
       // Restore cursor based on spacebar state
-      this.app.view.style.cursor = this.spacePressed ? 'grab' : 'default';
+      this.app.canvas.style.cursor = this.spacePressed ? 'grab' : 'default';
     }
   },
 
@@ -791,7 +795,7 @@ export default {
       event.preventDefault();
       this.spacePressed = true;
       if (!this.isPanning) {
-        this.app.view.style.cursor = 'grab';
+        this.app.canvas.style.cursor = 'grab';
       }
       return;
     }
@@ -844,7 +848,7 @@ export default {
     if (event.code === 'Space') {
       this.spacePressed = false;
       if (!this.isPanning) {
-        this.app.view.style.cursor = 'default';
+        this.app.canvas.style.cursor = 'default';
       }
     }
   },
@@ -891,15 +895,16 @@ export default {
 
     // Create selection box
     this.selectionBox = new PIXI.Graphics();
-    const bounds = object.getBounds();
+    // v8: getBounds() returns Bounds object
+    const rect = object.getBounds();
 
-    this.selectionBox.lineStyle(2, 0x3b82f6, 1);
-    this.selectionBox.drawRect(
-      bounds.x - 2,
-      bounds.y - 2,
-      bounds.width + 4,
-      bounds.height + 4
-    );
+    // v8 Graphics API: shape → stroke (no fill for selection box)
+    this.selectionBox.rect(
+      rect.x - 2,
+      rect.y - 2,
+      rect.width + 4,
+      rect.height + 4
+    ).stroke({ width: 2, color: 0x3b82f6 });
 
     this.objectContainer.addChild(this.selectionBox);
     this.selectedObject = object;
@@ -978,7 +983,7 @@ export default {
    * Get mouse position relative to canvas
    */
   getMousePosition(event) {
-    const rect = this.app.view.getBoundingClientRect();
+    const rect = this.app.canvas.getBoundingClientRect();
     return {
       x: (event.clientX - rect.left - this.viewOffset.x) / this.zoomLevel,
       y: (event.clientY - rect.top - this.viewOffset.y) / this.zoomLevel
@@ -990,7 +995,7 @@ export default {
    */
   destroyed() {
     // Remove event listeners using stored bound references
-    const canvas = this.app?.view;
+    const canvas = this.app?.canvas;
     if (canvas) {
       canvas.removeEventListener('mousedown', this.boundHandleMouseDown);
       canvas.removeEventListener('mousemove', this.boundHandleMouseMove);

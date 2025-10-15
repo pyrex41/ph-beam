@@ -1,0 +1,31 @@
+# Task ID: 8
+# Title: Create Home Page and Dashboard
+# Status: done
+# Dependencies: 7
+# Priority: high
+# Description: Build the home page and dashboard LiveView for user interface after login.
+# Details:
+Implement lib/collab_canvas_web/controllers/page_controller.ex and page_html/home.html.heex for the landing page. Create lib/collab_canvas_web/live/dashboard_live.ex for listing and creating canvases. Update router.ex with protected routes.
+
+# Test Strategy:
+Access the home page as unauthenticated user, login, then access dashboard to create and list canvases.
+
+# Subtasks:
+## 1. Implement Page Controller and Home Template [pending]
+### Dependencies: 8.7
+### Description: Create the page controller in lib/collab_canvas_web/controllers/page_controller.ex and the home.html.heex template for the landing page after login.
+### Details:
+Implement the page_controller.ex with necessary actions for rendering the home page. Design and code the home.html.heex template to display a welcoming interface for authenticated users, ensuring it integrates with the Phoenix LiveView setup.
+
+## 2. Create Dashboard LiveView [pending]
+### Dependencies: 8.1
+### Description: Build the dashboard LiveView in lib/collab_canvas_web/live/dashboard_live.ex for listing and creating canvases.
+### Details:
+Implement the dashboard_live.ex with mount function to load user canvases, handle_event for creating new canvases, and render a list of existing canvases. Include HTML template elements for canvas listing and creation forms, ensuring real-time updates if needed.
+
+## 3. Update Router with Protected Routes and Test [pending]
+### Dependencies: 8.2
+### Description: Update router.ex to include protected routes for the home page and dashboard, ensuring authentication is required.
+### Details:
+Modify router.ex to add protected routes using the auth plug, securing access to the home page and dashboard LiveView. Ensure the browser pipeline includes authentication checks. Then, perform end-to-end testing of navigation and functionality.
+

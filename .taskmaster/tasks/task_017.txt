@@ -1,0 +1,25 @@
+# Task ID: 17
+# Title: Define AI Tools for Claude
+# Status: done
+# Dependencies: 16
+# Priority: medium
+# Description: Specify tool definitions for Claude function calling.
+# Details:
+Implement lib/collab_canvas/ai/tools.ex with get_tool_definitions returning schemas for create_shape, create_text, move_shape, resize_shape, and create_component. Ensure schemas match Claude's expected format.
+
+# Test Strategy:
+Verify tool definitions are valid by testing Claude API calls and checking response parsing.
+
+# Subtasks:
+## 1. Define JSON Schemas for Claude Tools [done]
+### Dependencies: None
+### Description: Create detailed JSON schemas for each tool: create_shape, create_text, move_shape, resize_shape, and create_component in the get_tool_definitions function.
+### Details:
+Implement the schemas in lib/collab_canvas/ai/tools.ex, ensuring they match Claude's expected format for function calling, including properties, types, and required fields for each tool.
+
+## 2. Test Tool Definitions with Claude API [done]
+### Dependencies: 17.1
+### Description: Verify that the defined tool schemas are valid by making test API calls to Claude and checking response parsing.
+### Details:
+Set up test scenarios to call Claude with the tool definitions, simulate tool calls, and ensure the responses are parsed correctly without errors, validating schema compatibility.
+

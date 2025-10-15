@@ -1,0 +1,40 @@
+# Task ID: 23
+# Title: Refactor AI Component Creation Functions
+# Status: done
+# Dependencies: 18
+# Priority: medium
+# Description: Refactor the AI Agent module by extracting component creation functions into a separate module and moving theme colors to improve maintainability and follow the YAGNI principle.
+# Details:
+Audit the usage of component creation functions (create_login_form/7, create_navbar/7, create_card/7, create_button_group/7, create_sidebar/7) and helper functions (create_shape_for_component/8, create_text_for_component/8) in the codebase to determine if they are actively used. If used, extract them into a new module named CollabCanvas.AI.ComponentBuilder, ensuring to move the functions and any related logic while updating imports and references. Move the get_theme_colors/1 function and its extensive color schemes (lines 767-853) to a new module named CollabCanvas.AI.Themes. If the functions are not used, remove them to adhere to YAGNI. Update the execute_tool_call/2 function in agent.ex to reference the new ComponentBuilder module if extraction occurs. Consider the file structure and ensure proper module organization within lib/collab_canvas/ai/. Handle any potential impacts on existing functionality, such as ensuring component positioning and styling defaults remain intact.
+
+# Test Strategy:
+After refactoring, compile the project with 'mix compile' to check for any syntax errors or missing references. Run the application locally with 'mix phx.server' and test AI-driven component creation by executing commands that use the refactored functions (e.g., creating login forms or navbars via AI). Verify that components render correctly on the canvas and that theme colors are applied properly. Use grep to search for any remaining references to the old functions in agent.ex and ensure they are updated. If functions were removed due to non-usage, confirm no errors occur when attempting to use them. Monitor for any performance improvements in file size and maintainability.
+
+# Subtasks:
+## 1. Audit Usage of Component Creation Functions [pending]
+### Dependencies: None
+### Description: Audit the codebase to determine if the component creation functions (create_login_form/7, create_navbar/7, create_card/7, create_button_group/7, create_sidebar/7) and helper functions (create_shape_for_component/8, create_text_for_component/8) are actively used. Check for references in the AI Agent module and other parts of the application.
+### Details:
+Perform a thorough search across the lib/collab_canvas/ directory using grep or similar tools to find all occurrences of these function names. Document which functions are called and in which files. This will inform whether to extract or remove them to follow YAGNI principles.
+<info added on 2025-10-14T16:29:20.423Z>
+Audit complete. The 'create_component' tool IS actively used and defined in tools.ex:148-198. It supports button, card, navbar, login_form, and sidebar components. When Claude invokes this tool, agent.ex:289-324 routes to the appropriate component creation functions. All 5 component functions (create_login_form, create_navbar, create_card, create_button_group, create_sidebar) and 2 helper functions (create_shape_for_component, create_text_for_component) are actively used. The get_theme_colors function provides 4 theme variants. These are NOT dead code - they are part of the active AI agent toolset. Proceeding with extraction to improve code organization.
+</info added on 2025-10-14T16:29:20.423Z>
+
+## 2. Extract Component Creation Functions to ComponentBuilder Module [pending]
+### Dependencies: 23.1
+### Description: If the audited functions are used, extract them into a new module named CollabCanvas.AI.ComponentBuilder, moving the functions and any related logic while updating imports and references throughout the codebase.
+### Details:
+Create the new module file at lib/collab_canvas/ai/component_builder.ex. Move the specified functions from the AI Agent module to this new module, ensuring all dependencies and logic are preserved. Update all import statements and function calls in agent.ex and other files to reference the new module. Handle any potential impacts on component positioning and styling defaults.
+<info added on 2025-10-14T16:32:24.980Z>
+Successfully created CollabCanvas.AI.ComponentBuilder module at lib/collab_canvas/ai/component_builder.ex. Extracted all 5 component creation functions (create_login_form, create_navbar, create_card, create_button_group, create_sidebar) and 2 helper functions (create_shape_for_component, create_text_for_component). Module is properly documented with @moduledoc and @doc comments. All functions maintain their original behavior and signatures. Updated all import statements and function calls in agent.ex and other files to reference the new module. No impacts on component positioning and styling defaults observed.
+</info added on 2025-10-14T16:32:24.980Z>
+
+## 3. Move Theme Colors to Themes Module and Update References [pending]
+### Dependencies: 23.2
+### Description: Move the get_theme_colors/1 function and its extensive color schemes (lines 767-853) to a new module named CollabCanvas.AI.Themes, and update the execute_tool_call/2 function in agent.ex to reference the new ComponentBuilder module if extraction occurred.
+### Details:
+Create the new module file at lib/collab_canvas/ai/themes.ex. Extract the get_theme_colors/1 function and related color data from the AI Agent module. Update all references to this function in the codebase, including in agent.ex. Ensure the execute_tool_call/2 function points to the new ComponentBuilder module for component creation calls. Maintain proper module organization within lib/collab_canvas/ai/.
+<info added on 2025-10-14T16:32:34.902Z>
+Successfully created CollabCanvas.AI.Themes module at lib/collab_canvas/ai/themes.ex. Extracted get_theme_colors/1 function with all 4 theme variants (light, dark, blue, green). Updated agent.ex to add alias for ComponentBuilder and updated execute_tool_call to use ComponentBuilder.create_* functions. Removed all old function definitions from agent.ex (lines 346-516). Code compiles successfully with no errors. Agent functionality preserved.
+</info added on 2025-10-14T16:32:34.902Z>
+

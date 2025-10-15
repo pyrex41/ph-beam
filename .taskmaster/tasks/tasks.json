@@ -1602,5 +1602,1141 @@
       "updated": "2025-10-14T18:12:51.313Z",
       "description": "Documentation and cleanup tasks for the CollabCanvas project"
     }
+  },
+  "frontend-perf": {
+    "tasks": [
+      {
+        "id": "1",
+        "title": "Dependency Audit",
+        "description": "Audit all PixiJS-dependent libraries for v8 compatibility and identify blockers.",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "details": "Review package.json and all imports. Check libraries like pixi-filters, pixi-sound, etc. Document compatible versions and alternatives for incompatible ones like pixi-layers. Use npm ls to list dependencies and cross-reference with PixiJS v8 release notes.",
+        "testStrategy": "Verify no import errors after audit. Run build and check console for deprecation warnings.",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "List Current PixiJS Dependencies",
+            "description": "Compile a comprehensive list of all PixiJS-related dependencies from package.json and import statements in the codebase.",
+            "dependencies": [],
+            "details": "Use npm ls command to generate a list of all installed packages. Manually review package.json for direct dependencies and scan the codebase for import statements to identify all PixiJS-dependent libraries such as pixi-filters, pixi-sound, and pixi-layers. Ensure the list is complete and up-to-date.\n<info added on 2025-10-15T20:41:41.584Z>\nAudit completed. Found single dependency: pixi.js ^7.4.2 in collab_canvas/assets/package.json. No additional PixiJS plugins or extension libraries found. Current installation shows UNMET DEPENDENCY status.\n</info added on 2025-10-15T20:41:41.584Z>",
+            "status": "pending",
+            "testStrategy": "Verify the list matches the output of npm ls and includes all imports found in the code.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Review PixiJS v8 Release Notes",
+            "description": "Examine the official PixiJS v8 release notes to understand changes, deprecations, and compatibility requirements.",
+            "dependencies": [
+              1
+            ],
+            "details": "Access the PixiJS v8 release notes from the official repository or documentation site. Note any breaking changes, new APIs, and specific compatibility issues with dependent libraries. Document key points that affect the project's dependencies.\n<info added on 2025-10-15T20:41:49.336Z>\nKey breaking changes from PixiJS v8 migration guide:\n\n1. Single package structure: No more @pixi/* imports; all functionality now in pixi.js package.\n\n2. Async initialization: Use app.init() instead of direct Application constructor; initialization is now asynchronous.\n\n3. Texture system overhaul: BaseTexture removed; TextureSource types added for texture handling.\n\n4. Graphics API redesigned: Workflow reversed; update drawing methods accordingly.\n\n5. Container changes: DisplayObject removed; updateTransform replaced with onRender.\n\n6. Event system changes: Review and update event listeners for compatibility.\n\n7. Culler requires manual calls: Explicitly call culling methods where needed.\n</info added on 2025-10-15T20:41:49.336Z>",
+            "status": "pending",
+            "testStrategy": "Summarize the release notes in a document and cross-check with known issues online.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Check Compatibility of Each Dependency",
+            "description": "For each listed dependency, verify compatibility with PixiJS v8 by checking documentation, GitHub issues, and version histories.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Go through the list of dependencies one by one. For each, check the library's documentation, changelog, and PixiJS community forums for v8 compatibility. Use tools like npm view to check latest versions and any peer dependency warnings.\n<info added on 2025-10-15T20:43:09.874Z>\nCompatibility check completed. Only pixi.js ^7.4.2 is present - no additional plugins. pixi.js v8 is fully available and compatible as upgrade path. No breaking plugin dependencies found since project uses vanilla PixiJS only.\n</info added on 2025-10-15T20:43:09.874Z>",
+            "status": "pending",
+            "testStrategy": "Run a test import in a separate project to check for immediate errors or warnings.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Identify Incompatible Libraries and Alternatives",
+            "description": "Identify any dependencies that are incompatible with PixiJS v8 and research viable alternatives or update paths.",
+            "dependencies": [
+              3
+            ],
+            "details": "Based on compatibility checks, flag libraries like pixi-layers that are known to be incompatible. Research official alternatives provided by PixiJS or community-maintained forks. Document update procedures or migration steps for each incompatible library.\n<info added on 2025-10-15T20:43:31.452Z>\nNo incompatible libraries were identified during the compatibility checks. The project exclusively uses vanilla PixiJS with no plugins or third-party libraries. All utilized APIs (Graphics, Container, Text, Application) are core PixiJS features that remain fully supported in v8, with a documented migration path. No alternatives or update procedures are required, as a direct upgrade to PixiJS v8 is viable.\n</info added on 2025-10-15T20:43:31.452Z>",
+            "status": "pending",
+            "testStrategy": "Test proposed alternatives in a small prototype to ensure they integrate without issues.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Document Audit Findings and Blockers",
+            "description": "Compile all findings into a report detailing compatible versions, incompatibilities, alternatives, and any blockers for v8 migration.",
+            "dependencies": [
+              2,
+              3,
+              4
+            ],
+            "details": "Create a structured document summarizing the audit. Include sections for each dependency with compatibility status, recommended versions or alternatives, and potential blockers. Highlight any critical issues that must be resolved before proceeding to migration. Save the document as a markdown file in the collab_canvas/docs/ directory alongside other markdown documentation files.\n<info added on 2025-10-15T20:43:40.295Z>\nAUDIT FINDINGS: ✅ NO BLOCKERS. Single dependency pixi.js ^7.4.2 is fully v8 compatible. Migration path clear: 1) Update package.json to ^8.0.0, 2) Convert to async init(), 3) Update Graphics API calls (beginFill→fill, lineStyle→stroke), 4) Change app.view→app.canvas, 5) Update event mode syntax. All breaking changes documented and addressable. Project ready for v8 migration.\n</info added on 2025-10-15T20:43:40.295Z>",
+            "status": "pending",
+            "testStrategy": "Review the document for completeness and accuracy by a second team member.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 4,
+        "recommendedSubtasks": 0,
+        "expansionPrompt": "",
+        "updatedAt": "2025-10-15T20:43:56.639Z"
+      },
+      {
+        "id": "2",
+        "title": "Package Structure Migration",
+        "description": "Update package.json to use single pixi.js@^8.0.0 package and remove @pixi/* sub-packages.",
+        "details": "Replace all @pixi/app, @pixi/sprite, etc., with pixi.js in package.json. Update import statements throughout the codebase from 'import { Application } from '@pixi/app';' to 'import { Application } from 'pixi.js';'. Run npm install to update dependencies.",
+        "testStrategy": "Confirm single pixi.js package installed. Build succeeds without import errors.",
+        "priority": "medium",
+        "dependencies": [
+          "1"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update package.json to use single pixi.js package",
+            "description": "Modify package.json to replace all @pixi/* sub-packages with a single pixi.js@^8.0.0 dependency.",
+            "dependencies": [],
+            "details": "Remove all @pixi/app, @pixi/sprite, and other @pixi/* entries from dependencies. Add 'pixi.js': '^8.0.0' to dependencies. Ensure no other Pixi-related packages remain.\n<info added on 2025-10-15T20:44:33.501Z>\nUpdated package.json from pixi.js ^7.4.2 to ^8.0.0. Confirmed single package structure was already correct with no @pixi/* sub-packages used.\n</info added on 2025-10-15T20:44:33.501Z>",
+            "status": "pending",
+            "testStrategy": "Verify package.json contains only pixi.js and no @pixi/* packages.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Update import statements across the codebase",
+            "description": "Change all import statements from @pixi/* packages to the unified pixi.js package.",
+            "dependencies": [
+              1
+            ],
+            "details": "Search the entire codebase for imports like 'import { Application } from '@pixi/app';' and replace them with 'import { Application } from 'pixi.js';'. This may involve multiple files, so use a find-and-replace tool or script to ensure consistency.\n<info added on 2025-10-15T20:44:38.939Z>\nVerification: Import statements are already correct. All files use 'import * as PIXI from pixi.js' pattern. No @pixi/* imports found in codebase. Verified canvas_manager.js and app.js both use correct v8-compatible import syntax. No changes needed.\n</info added on 2025-10-15T20:44:38.939Z>",
+            "status": "pending",
+            "testStrategy": "Build the project and confirm no import errors occur, and that the application runs correctly.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 2,
+        "expansionPrompt": "Break down into subtasks for updating package.json and then updating import statements across the codebase.",
+        "updatedAt": "2025-10-15T20:44:55.081Z"
+      },
+      {
+        "id": "3",
+        "title": "Async Initialization Migration",
+        "description": "Convert PixiJS initialization to async pattern required by v8.",
+        "details": "Modify mounted() hook to be async. Change 'this.app = new PIXI.Application({ view: this.el.querySelector('canvas'), ... });' to 'this.app = new PIXI.Application(); await this.app.init({ canvas: this.el.querySelector('canvas'), ... });'. Update backgroundColor to background and add resolution/autoDensity.",
+        "testStrategy": "Canvas initializes without errors. App renders basic scene after init.",
+        "priority": "medium",
+        "dependencies": [
+          "2"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Make mounted() hook async",
+            "description": "Modify the mounted lifecycle hook to support async operations for PixiJS v8 initialization. [Updated: 10/15/2025]",
+            "dependencies": [],
+            "details": "Change the mounted() function signature to async mounted() in the component to allow awaiting the app initialization.\n<info added on 2025-10-15T20:46:14.016Z>\nMade mounted() hook async to support v8 initialization pattern.\n</info added on 2025-10-15T20:46:14.016Z>",
+            "status": "pending",
+            "testStrategy": "Verify that the mounted hook is defined as an async function without syntax errors.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Instantiate PIXI.Application without options",
+            "description": "Create a new PIXI.Application instance using the new constructor pattern without passing options. [Updated: 10/15/2025]",
+            "dependencies": [
+              1
+            ],
+            "details": "Replace the existing 'this.app = new PIXI.Application({ view: this.el.querySelector('canvas'), ... });' with 'this.app = new PIXI.Application();' to prepare for the async init call.\n<info added on 2025-10-15T20:46:21.169Z>\nConverted to v8 pattern: new PIXI.Application() without options, then await app.init({...options}).\n</info added on 2025-10-15T20:46:21.169Z>",
+            "status": "pending",
+            "testStrategy": "Confirm that a PIXI.Application instance is created successfully without options, and no errors are thrown.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Update canvas option from view to canvas",
+            "description": "Change the canvas reference in the init options from 'view' to 'canvas' as required by PixiJS v8.",
+            "dependencies": [
+              2
+            ],
+            "details": "In the await this.app.init() call, replace 'view: this.el.querySelector('canvas')' with 'canvas: this.el.querySelector('canvas')' to specify the canvas element correctly.\n<info added on 2025-10-15T20:46:26.123Z>\nAdditionally, updated all 9 occurrences of app.view to app.canvas throughout canvas_manager.js, including in DOM append, event listeners, cursor styling, getBoundingClientRect, and cleanup.\n</info added on 2025-10-15T20:46:26.123Z>",
+            "status": "pending",
+            "testStrategy": "Check that the canvas element is properly assigned and the app initializes without canvas-related errors.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Change backgroundColor to background",
+            "description": "Update the option name from backgroundColor to background in the PixiJS init configuration. [Updated: 10/15/2025]",
+            "dependencies": [
+              2
+            ],
+            "details": "In the await this.app.init() options object, change 'backgroundColor' to 'background' to match the new API.\n<info added on 2025-10-15T20:46:33.968Z>\nChanged backgroundColor: 0xffffff to background: 0xffffff in init options.\n</info added on 2025-10-15T20:46:33.968Z>",
+            "status": "pending",
+            "testStrategy": "Verify that the background color is set correctly by rendering a test scene and checking the canvas background.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Add resolution and autoDensity options",
+            "description": "Include resolution and autoDensity properties in the init options for proper rendering in PixiJS v8. [Updated: 10/15/2025]",
+            "dependencies": [
+              2
+            ],
+            "details": "Add 'resolution: 1' (or appropriate value) and 'autoDensity: true' to the await this.app.init() options object to enable high-DPI support and automatic density adjustment.\n<info added on 2025-10-15T20:46:41.166Z>\nResolution and autoDensity options already present and compatible with v8. No changes needed.\n</info added on 2025-10-15T20:46:41.166Z>",
+            "status": "pending",
+            "testStrategy": "Test that the app renders correctly on high-DPI displays and that resolution/autoDensity settings prevent blurriness or scaling issues.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 0,
+        "expansionPrompt": "",
+        "updatedAt": "2025-10-15T20:46:55.542Z"
+      },
+      {
+        "id": "4",
+        "title": "Texture System Migration",
+        "description": "Replace BaseTexture with TextureSource and update texture handling.",
+        "details": "Change 'new PIXI.BaseTexture(imageElement)' to 'new ImageSource({ resource: imageElement })' and 'new PIXI.Texture(baseTexture)' to 'new Texture({ source })'. For RenderTextures, manually call source.updateMipmaps() after rendering.",
+        "testStrategy": "Textures load and display correctly. No BaseTexture references remain.",
+        "priority": "medium",
+        "dependencies": [
+          "3"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update BaseTexture to TextureSource",
+            "description": "Replace all instances of PIXI.BaseTexture with ImageSource and update Texture creation accordingly.",
+            "dependencies": [],
+            "details": "Change 'new PIXI.BaseTexture(imageElement)' to 'new ImageSource({ resource: imageElement })' and 'new PIXI.Texture(baseTexture)' to 'new Texture({ source })'. Ensure all texture loading and display logic is updated to use the new API.\n<info added on 2025-10-15T20:47:12.756Z>\nNo texture code found in codebase. Project uses only Graphics, Container, and Text primitives - no BaseTexture, Texture, or TextureSource usage. Task 4 complete with no changes required.\n</info added on 2025-10-15T20:47:12.756Z>",
+            "status": "pending",
+            "testStrategy": "Verify that textures load and display correctly without any BaseTexture references in the codebase.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for updating BaseTexture to TextureSource and another for RenderTexture handling.",
+        "updatedAt": "2025-10-15T20:47:15.919Z"
+      },
+      {
+        "id": "5",
+        "title": "Graphics API Migration",
+        "description": "Update Graphics API to v8's shape-then-fill pattern.",
+        "status": "done",
+        "dependencies": [
+          "4"
+        ],
+        "priority": "medium",
+        "details": "Replace 'beginFill().drawRect().endFill()' with 'rect().fill()'. Update method names like drawRect to rect, drawCircle to circle. Use cut() for holes and GraphicsContext for shared graphics. Save any migration documentation, notes, or output files to collab_canvas/docs/ directory alongside other markdown documentation files.",
+        "testStrategy": "Graphics render identically to v7. No beginFill/endFill patterns remain.",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update Drawing Methods to Shape-Then-Fill Pattern",
+            "description": "Replace the old beginFill().drawRect().endFill() pattern with the new rect().fill() approach, and update method names such as drawRect to rect and drawCircle to circle.",
+            "dependencies": [],
+            "details": "Iterate through all graphics-related code in the codebase. Replace instances of beginFill() followed by draw methods and endFill() with the new shape-then-fill syntax. Update method calls like drawRect to rect, drawCircle to circle, etc. Ensure that cut() is used appropriately for creating holes in shapes. This refactoring must maintain visual fidelity and avoid breaking existing functionality. Save any migration documentation, notes, or output files to collab_canvas/docs/ directory alongside other markdown documentation files.\n<info added on 2025-10-15T20:48:47.933Z>\nMigration completed: Updated 7 locations - createRectangle, createCircle, cursor drawing (poly), label background (roundRect), temp object (rect/circle), selection box (2 places). Changed beginFill/lineStyle/drawX/endFill pattern to shape→fill→stroke pattern.\n</info added on 2025-10-15T20:48:47.933Z>",
+            "status": "pending",
+            "testStrategy": "Verify that graphics render identically to the previous version by comparing visual outputs in test scenes. Ensure no beginFill/endFill patterns remain in the codebase through code searches.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for updating drawing methods and another for implementing GraphicsContext.",
+        "updatedAt": "2025-10-15T20:48:50.688Z"
+      },
+      {
+        "id": "6",
+        "title": "Container and Display Object Changes",
+        "description": "Ensure only Containers have children and migrate updateTransform to onRender.",
+        "details": "Wrap Sprites/Graphics in Containers if they have children. Replace updateTransform() overrides with onRender callbacks. Enable culling with cullable properties and use Culler.shared for manual culling.",
+        "testStrategy": "Scene renders correctly. No errors from leaf nodes with children.",
+        "priority": "medium",
+        "dependencies": [
+          "5"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Wrap Sprites and Graphics in Containers",
+            "description": "Identify all Sprites and Graphics objects that have children and wrap them in Container objects to ensure only Containers have children.",
+            "dependencies": [],
+            "details": "Iterate through the scene graph to find Sprites or Graphics with children. Create a new Container for each, move the children to the Container, and replace the original object in the parent with the Container. Ensure the original object's properties are preserved on the Container.\n<info added on 2025-10-15T20:49:29.543Z>\nCode is already v8-compatible. Graphics and Text objects are leaf nodes with no children. All children are properly attached to Containers (objectContainer, cursorContainer). No wrapping needed.\n</info added on 2025-10-15T20:49:29.543Z>",
+            "status": "pending",
+            "testStrategy": "Verify that no Sprites or Graphics have children after wrapping, and scene rendering remains correct.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Migrate updateTransform to onRender and Enable Culling",
+            "description": "Replace all updateTransform() method overrides with onRender callbacks and set up culling properties.",
+            "dependencies": [],
+            "details": "Find all display objects with updateTransform overrides, convert them to onRender callbacks. Set cullable properties on objects for culling and use Culler.shared for manual culling where needed. Ensure performance is maintained.\n<info added on 2025-10-15T20:49:36.699Z>\nNo updateTransform overrides found in codebase. No custom render logic requiring onRender callbacks. Task complete with no changes required.\n</info added on 2025-10-15T20:49:36.699Z>",
+            "status": "pending",
+            "testStrategy": "Check that transforms update correctly in onRender, culling reduces unnecessary renders, and no errors occur.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 2,
+        "expansionPrompt": "Subtasks for wrapping objects in Containers and migrating updateTransform to onRender.",
+        "updatedAt": "2025-10-15T20:49:39.474Z"
+      },
+      {
+        "id": "7",
+        "title": "Event System Updates",
+        "description": "Set explicit eventMode and optimize event handling.",
+        "details": "Set eventMode to 'static' or 'dynamic' on all interactive objects. Use interactiveChildren: false for optimization. Update event listeners to use v8 patterns.",
+        "testStrategy": "Interactions work as before. Event listeners reduced.",
+        "priority": "medium",
+        "dependencies": [
+          "6"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Identify Interactive Objects",
+            "description": "Scan the codebase to identify all objects that have interactive properties or event listeners attached.",
+            "dependencies": [],
+            "details": "Use grep or code search tools to find all instances of interactive: true, event listeners like on('click'), or PIXI objects that handle user input. Document the list of files and objects that need updates.\n<info added on 2025-10-15T20:50:45.576Z>\nEvent system is already v8-compatible. eventMode='static' is set on line 243. Event listeners use .on() which remains valid. No changes needed.\n</info added on 2025-10-15T20:50:45.576Z>",
+            "status": "pending",
+            "testStrategy": "Verify the list covers all interactive elements by cross-referencing with UI components.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Set EventMode on Interactive Objects",
+            "description": "Explicitly set eventMode to 'static' or 'dynamic' on all identified interactive objects based on their usage.",
+            "dependencies": [
+              1
+            ],
+            "details": "For objects that don't change position frequently, set eventMode: 'static'. For dynamic objects, use 'dynamic'. Update the code in each identified file, ensuring compatibility with PixiJS v8.",
+            "status": "pending",
+            "testStrategy": "Check that eventMode is set correctly and no errors occur during rendering.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Optimize with InteractiveChildren False",
+            "description": "Set interactiveChildren: false on containers where child interactions are not needed for performance optimization.",
+            "dependencies": [
+              2
+            ],
+            "details": "Review container objects (like PIXI.Container) and set interactiveChildren: false unless child objects need independent event handling. Apply this to parent containers to reduce event propagation overhead.",
+            "status": "pending",
+            "testStrategy": "Ensure that interactions still work for intended objects and performance improves without breaking child interactions.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Update Event Listeners to V8 Patterns",
+            "description": "Migrate existing event listeners to use PixiJS v8 event handling patterns, such as using addEventListener instead of on().",
+            "dependencies": [
+              3
+            ],
+            "details": "Replace deprecated methods like object.on('event', handler) with object.addEventListener('event', handler). Update any custom event handling code to align with v8 API changes, ensuring all listeners are properly attached.",
+            "status": "pending",
+            "testStrategy": "Test that all events trigger correctly and no deprecation warnings appear in the console.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Test and Validate Event System",
+            "description": "Run comprehensive tests to ensure event handling works as expected and optimizations are effective.",
+            "dependencies": [
+              4
+            ],
+            "details": "Execute unit tests and integration tests focusing on user interactions, event firing, and performance metrics. Compare event listener counts before and after to confirm reduction. Fix any issues found during testing.",
+            "status": "pending",
+            "testStrategy": "Interactions function identically to before, event listeners are reduced, and no performance regressions occur.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 0,
+        "expansionPrompt": "",
+        "updatedAt": "2025-10-15T20:51:14.122Z"
+      },
+      {
+        "id": "8",
+        "title": "Miscellaneous API Changes",
+        "description": "Update remaining v8 API changes like app.view to app.canvas, bounds handling, etc.",
+        "details": "Change app.view to app.canvas. Use bounds.rectangle for getBounds(). Update Ticker callbacks to (ticker) => {}. Replace PIXI constants with strings. Update constructor signatures for Text, etc.",
+        "testStrategy": "All APIs work without errors. Console logs updated values correctly.",
+        "priority": "medium",
+        "dependencies": [
+          "7"
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update App View to Canvas and Bounds Handling",
+            "description": "Change app.view to app.canvas across the codebase. Update bounds handling to use bounds.rectangle for getBounds() method calls.",
+            "dependencies": [],
+            "details": "Search and replace all instances of app.view with app.canvas in the relevant files. For bounds handling, locate all getBounds() calls and modify them to use bounds.rectangle. Ensure compatibility with PixiJS v8 API changes. This includes updating any related logic that depends on these properties.\n<info added on 2025-10-15T20:50:53.636Z>\nUpdated bounds handling: Changed 3 locations to use getBounds() result directly (v8 returns Bounds object). app.view→app.canvas already completed in task 3. All misc API changes complete.\n</info added on 2025-10-15T20:50:53.636Z>",
+            "status": "pending",
+            "testStrategy": "Verify that the app.canvas property is correctly set and accessible. Test getBounds() to ensure it returns bounds.rectangle and renders correctly without errors.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for each category of changes like app.view to app.canvas and bounds handling.",
+        "updatedAt": "2025-10-15T20:51:15.333Z"
+      },
+      {
+        "id": "9",
+        "title": "Extract CanvasManager Class",
+        "description": "Create CanvasManager class to separate PixiJS logic from LiveView hook.",
+        "details": "Move PixiJS-specific code to core/canvas_manager_class.js. Hook becomes thin adapter. Include async initialize() method. Maintain LiveView compatibility.",
+        "testStrategy": "CanvasManager instantiates and initializes app. Hook events still work.",
+        "priority": "medium",
+        "dependencies": [
+          "8"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Extract PixiJS Logic to CanvasManager Class",
+            "description": "Move all PixiJS-specific code from the LiveView hook into a new CanvasManager class in core/canvas_manager_class.js, including initialization, rendering, and event handling logic.",
+            "dependencies": [],
+            "details": "Refactor the existing hook code to isolate PixiJS operations such as app creation, stage management, and ticker usage into the CanvasManager class. Ensure the class has an async initialize() method that sets up the PixiJS application and prepares it for use. This involves moving variables and methods related to canvas rendering, culling, and selection into the class while keeping LiveView-specific interactions separate.",
+            "status": "pending",
+            "testStrategy": "Verify that the CanvasManager class can be instantiated and its initialize method completes without errors, and that PixiJS app is properly set up.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Update LiveView Hook as Thin Adapter",
+            "description": "Refactor the LiveView hook to act as a thin adapter that instantiates and uses the CanvasManager class, maintaining compatibility with LiveView's lifecycle and event handling.",
+            "dependencies": [
+              1
+            ],
+            "details": "Modify the hook to create an instance of CanvasManager, call its async initialize() method during the hook's mount or connected phase, and delegate PixiJS-related operations to the class. Ensure the hook remains focused on LiveView integration, such as handling push events, updating state, and triggering re-renders, while forwarding canvas interactions to the CanvasManager. Preserve all existing LiveView compatibility features.",
+            "status": "pending",
+            "testStrategy": "Confirm that the hook still responds to LiveView events correctly, and that canvas rendering and interactions work as before through the CanvasManager.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 7,
+        "recommendedSubtasks": 2,
+        "expansionPrompt": "Subtasks for extracting code to the class and updating the hook as an adapter."
+      },
+      {
+        "id": "10",
+        "title": "Implement PerformanceMonitor",
+        "description": "Port PerformanceMonitor class for FPS tracking using v8 Ticker.",
+        "details": "Track FPS and frame time over 1-second windows. Use app.ticker.add((ticker) => {}). Expose metrics via console. Minimal overhead.",
+        "testStrategy": "FPS logged accurately. No performance degradation.",
+        "priority": "medium",
+        "dependencies": [
+          "9"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create PerformanceMonitor Class Structure",
+            "description": "Define the basic structure of the PerformanceMonitor class, including necessary properties for tracking FPS and frame time.",
+            "dependencies": [],
+            "details": "Initialize the class with private variables to store frame counts, timestamps, and accumulated frame times. Ensure the class is designed for minimal overhead by avoiding unnecessary computations.",
+            "status": "pending",
+            "testStrategy": "Verify class instantiation without errors and check initial property values.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Integrate with v8 Ticker",
+            "description": "Set up the integration with the app.ticker to monitor frame updates.",
+            "dependencies": [
+              1
+            ],
+            "details": "Use app.ticker.add((ticker) => {}) to register a callback function that gets called on each frame. Inside the callback, capture the delta time from the ticker for frame time tracking.",
+            "status": "pending",
+            "testStrategy": "Confirm the ticker callback is invoked on each frame and delta time is accessible.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Implement FPS and Frame Time Calculation",
+            "description": "Calculate FPS and average frame time over 1-second windows.",
+            "dependencies": [
+              2
+            ],
+            "details": "Accumulate frame times and counts within each 1-second interval. At the end of each second, compute FPS as frames per second and average frame time, then reset counters for the next window.",
+            "status": "pending",
+            "testStrategy": "Log metrics and verify FPS calculation matches expected values based on frame rates, and frame time averages are accurate.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Expose Metrics via Console",
+            "description": "Output the calculated FPS and frame time metrics to the console.",
+            "dependencies": [
+              3
+            ],
+            "details": "At the end of each 1-second window, log the FPS and average frame time to the console using console.log or similar. Format the output for readability, e.g., 'FPS: 60, Avg Frame Time: 16.67ms'.",
+            "status": "pending",
+            "testStrategy": "Check console output for correct metrics at 1-second intervals and ensure no errors in logging.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Optimize for Minimal Overhead",
+            "description": "Ensure the PerformanceMonitor adds negligible performance impact.",
+            "dependencies": [
+              4
+            ],
+            "details": "Profile the implementation to confirm that the ticker callback and calculations do not significantly affect frame rates. Use efficient data structures and avoid heavy computations inside the callback loop.",
+            "status": "pending",
+            "testStrategy": "Measure FPS with and without the monitor active, ensuring no degradation in performance.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 0,
+        "expansionPrompt": ""
+      },
+      {
+        "id": "11",
+        "title": "Implement Visibility Calculation with v8 Culler",
+        "description": "Add viewport culling using Culler.shared for performance.",
+        "details": "Calculate visible bounds with padding. Use Culler.shared.cull() on objectsContainer. Integrate with pan/zoom debounced updates.",
+        "testStrategy": "Off-screen objects culled. FPS maintained with 1000+ objects.",
+        "priority": "medium",
+        "dependencies": [
+          "10"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Calculate Visible Bounds and Integrate Culler.shared",
+            "description": "Implement the calculation of visible bounds with padding and integrate Culler.shared.cull() on objectsContainer for viewport culling.",
+            "dependencies": [],
+            "details": "First, compute the visible bounds based on the current viewport, adding appropriate padding to account for object sizes and movement. Then, apply Culler.shared.cull() to the objectsContainer to efficiently hide off-screen objects, improving performance with large numbers of objects. Ensure this integrates seamlessly with debounced pan/zoom updates to avoid excessive recalculations.",
+            "status": "pending",
+            "testStrategy": "Verify that off-screen objects are properly culled and not rendered, while maintaining FPS with 1000+ objects during pan/zoom operations.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 7,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for calculating bounds and another for integrating Culler.shared."
+      },
+      {
+        "id": "12",
+        "title": "Integrate Culling with Pan/Zoom and Render Groups",
+        "description": "Debounce culling during pan/zoom and use render groups for batching.",
+        "details": "Call updateVisibleObjects() on pan/zoom. Create render groups for visible/culled objects. Use isRenderGroup = true for batching.",
+        "testStrategy": "Smooth pan/zoom with culling. Draw calls reduced.",
+        "priority": "medium",
+        "dependencies": [
+          "11"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Debounced Culling During Pan/Zoom",
+            "description": "Add debouncing mechanism to updateVisibleObjects() calls triggered by pan/zoom events to prevent excessive computations and improve performance.",
+            "dependencies": [],
+            "details": "Integrate a debounce function (e.g., using lodash or custom implementation) to delay updateVisibleObjects() invocations during rapid pan/zoom events, ensuring it only executes after a short idle period (e.g., 100ms). Attach this to the pan/zoom event handlers in the application.",
+            "status": "pending",
+            "testStrategy": "Verify that culling updates occur smoothly during pan/zoom without lag, and that rapid movements do not trigger excessive function calls.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Set Up Render Groups for Batching",
+            "description": "Create and manage render groups for visible and culled objects to enable batching and reduce draw calls.",
+            "dependencies": [],
+            "details": "Modify the rendering logic to categorize objects into render groups based on visibility (visible vs. culled). Set isRenderGroup = true on these groups to leverage Pixi's batching capabilities. Ensure groups are updated dynamically as culling changes during pan/zoom.",
+            "status": "pending",
+            "testStrategy": "Measure reduction in draw calls using browser dev tools or Pixi stats, and confirm that rendering remains accurate with groups enabled.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 7,
+        "recommendedSubtasks": 2,
+        "expansionPrompt": "Subtasks for debouncing during pan/zoom and setting up render groups."
+      },
+      {
+        "id": "13",
+        "title": "Implement Global Event Architecture",
+        "description": "Replace per-object listeners with global stage handlers.",
+        "details": "Add pointermove/pointerup on app.stage. Set eventMode on objects. Track draggedObject state.",
+        "testStrategy": "Drag works with fewer listeners. Memory usage reduced.",
+        "priority": "medium",
+        "dependencies": [
+          "12"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Add Global Stage Event Handlers",
+            "description": "Replace per-object listeners with global stage handlers by adding pointermove and pointerup on app.stage.",
+            "dependencies": [],
+            "details": "In the application code, locate the app.stage and add event listeners for 'pointermove' and 'pointerup'. Ensure that these global handlers manage the events that were previously handled by individual objects. This reduces overhead by centralizing event handling and integrates with setting eventMode on objects.",
+            "status": "pending",
+            "testStrategy": "Test that dragging interactions work correctly with the global handlers, and verify that the number of listeners is reduced, leading to better performance and memory usage.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for adding stage handlers and another for tracking state."
+      },
+      {
+        "id": "14",
+        "title": "Maintain LiveView Integration for Drag",
+        "description": "Ensure drag events sync to backend correctly.",
+        "details": "Throttle updates with setTimeout. Send update_object events. Handle optimistic updates.",
+        "testStrategy": "Positions sync in real-time. No race conditions.",
+        "priority": "medium",
+        "dependencies": [
+          "13"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Set up drag event listeners in LiveView",
+            "description": "Attach event listeners to draggable elements to capture drag start, drag, and drag end events.",
+            "dependencies": [],
+            "details": "In the LiveView component, add event listeners for 'dragstart', 'drag', and 'dragend' on the relevant DOM elements or Pixi.js objects. Ensure events are properly bound to trigger backend synchronization.",
+            "status": "pending",
+            "testStrategy": "Verify that drag events are captured and logged correctly without errors.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Implement throttling for drag updates",
+            "description": "Use setTimeout to throttle frequent drag updates to prevent excessive backend calls.",
+            "dependencies": [
+              1
+            ],
+            "details": "Wrap the update logic in a throttled function using setTimeout with a delay (e.g., 100ms). Accumulate drag position changes and send batched updates only after the timeout expires, resetting on new drag events.",
+            "status": "pending",
+            "testStrategy": "Simulate rapid drag movements and confirm updates are sent at throttled intervals, not on every pixel change.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Send update_object events to backend",
+            "description": "Dispatch LiveView events to the backend with updated object positions during drag.",
+            "dependencies": [
+              2
+            ],
+            "details": "On throttled updates, use pushEvent or similar to send 'update_object' events to the Phoenix backend, including object ID, new position (x, y), and any other relevant data like timestamp for conflict resolution.",
+            "status": "pending",
+            "testStrategy": "Check that events are received by the backend and processed correctly, logging successful updates.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Handle optimistic updates on frontend",
+            "description": "Apply immediate visual updates on the client while waiting for backend confirmation.",
+            "dependencies": [
+              3
+            ],
+            "details": "Update the object's position in the Pixi.js scene immediately upon drag, marking it as 'optimistic'. On backend response, confirm or revert changes if necessary, handling potential conflicts or rejections.",
+            "status": "pending",
+            "testStrategy": "Drag objects and ensure positions update instantly on screen, with no visible lag, and handle server-side corrections gracefully.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Test real-time sync and race condition prevention",
+            "description": "Conduct tests to ensure drag events sync correctly in real-time without race conditions.",
+            "dependencies": [
+              4
+            ],
+            "details": "Use LiveView test helpers to simulate concurrent drag events from multiple users. Verify that updates are batched, throttled, and applied without conflicts, checking for proper sequencing and no lost updates.",
+            "status": "pending",
+            "testStrategy": "Run integration tests confirming positions sync in real-time across clients, with no race conditions or desync issues.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 0,
+        "expansionPrompt": ""
+      },
+      {
+        "id": "15",
+        "title": "Shared Cursor Texture System",
+        "description": "Create shared texture for cursors using generateTexture.",
+        "details": "Draw cursor with Graphics, generate texture once. Use Sprite instances with tint for colors.",
+        "testStrategy": "Cursors render with shared texture. GPU memory reduced.",
+        "priority": "medium",
+        "dependencies": [
+          "14"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Generate Shared Cursor Texture",
+            "description": "Create a shared texture for cursors by drawing the cursor shape using PIXI.Graphics and generating the texture once using generateTexture.",
+            "dependencies": [],
+            "details": "In the implementation, instantiate a PIXI.Graphics object, draw the desired cursor shape (such as an arrow or pointer), and then call the generateTexture() method on the graphics object to produce a single, reusable texture. This texture should be stored in a variable or cache for later use by multiple cursor instances to optimize memory usage.",
+            "status": "pending",
+            "testStrategy": "Verify that the texture is generated without errors, has the correct dimensions and appearance, and can be successfully assigned to PIXI.Sprite objects for rendering.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for generating shared texture and another for using Sprite instances."
+      },
+      {
+        "id": "16",
+        "title": "Cursor Label Optimization",
+        "description": "Efficiently render labels using GraphicsContext and render groups.",
+        "details": "Share GraphicsContext for backgrounds. Use Text with style reuse. Add to render group.",
+        "testStrategy": "Labels update without re-rendering. Performance <1ms for 50 cursors.",
+        "priority": "medium",
+        "dependencies": [
+          "15"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Shared GraphicsContext and Optimized Text Rendering for Cursor Labels",
+            "description": "Create a system to share GraphicsContext for label backgrounds and optimize Text rendering with style reuse, then add them to a render group for efficient rendering.",
+            "dependencies": [
+              15
+            ],
+            "details": "Modify the cursor label rendering code to use a shared GraphicsContext instance for drawing backgrounds of all cursor labels, reducing memory usage. Implement Text objects with reused style objects to avoid creating new styles for each label. Group all label elements into a single render group to leverage PixiJS rendering optimizations. Ensure the implementation integrates with the shared cursor texture system from task 15.",
+            "status": "pending",
+            "testStrategy": "Measure rendering performance with 50 cursors, ensuring update time is under 1ms and no unnecessary re-renders occur. Verify shared contexts reduce GPU memory and style reuse prevents style object duplication.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for sharing GraphicsContext and another for Text rendering."
+      },
+      {
+        "id": "17",
+        "title": "Implement Selection State Management",
+        "description": "Add Set for selected objects and handle Shift+Click.",
+        "details": "Track selectedObjects. On pointerdown, toggle with shift or replace. Update visuals.",
+        "testStrategy": "Shift+Click selects multiple. Selection persists.",
+        "priority": "medium",
+        "dependencies": [
+          "16"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Initialize Selected Objects Set",
+            "description": "Create a Set data structure to track selected objects in the application state.",
+            "dependencies": [],
+            "details": "Define a selectedObjects Set in the main application class or state manager to hold references to selected objects. Ensure it is accessible for adding, removing, and checking selections.",
+            "status": "pending",
+            "testStrategy": "Verify the Set is initialized and can store object references without errors.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Add Pointerdown Event Handler",
+            "description": "Attach pointerdown event listeners to selectable objects to detect click interactions.",
+            "dependencies": [
+              1
+            ],
+            "details": "For each selectable object, add an event listener for 'pointerdown' that captures the event, checks for Shift key, and calls appropriate selection logic. Ensure event propagation is handled correctly.",
+            "status": "pending",
+            "testStrategy": "Click on objects triggers the handler, and Shift key state is detected accurately.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Implement Selection Toggle with Shift+Click",
+            "description": "When Shift is held during click, toggle the selection state of the clicked object.",
+            "dependencies": [
+              2
+            ],
+            "details": "In the pointerdown handler, if Shift is pressed, check if the object is in selectedObjects; if yes, remove it; if no, add it. Do not clear other selections. Update the Set accordingly.",
+            "status": "pending",
+            "testStrategy": "Shift+Click on unselected object adds it to selection; on selected object removes it, without affecting others.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Implement Selection Replacement without Shift",
+            "description": "When clicking without Shift, replace the entire selection with the clicked object.",
+            "dependencies": [
+              2
+            ],
+            "details": "In the pointerdown handler, if Shift is not pressed, clear the selectedObjects Set and add only the clicked object to it. This ensures single selection mode.",
+            "status": "pending",
+            "testStrategy": "Click without Shift selects only the clicked object, deselecting all others.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Update Visual Indicators for Selection",
+            "description": "Reflect the selection state in the UI by updating object visuals or highlights.",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "After modifying selectedObjects, iterate through all objects and apply visual changes (e.g., borders, colors) based on whether they are in the Set. Ensure visuals update immediately after selection changes.",
+            "status": "pending",
+            "testStrategy": "Selected objects show visual highlights; deselected objects do not. Changes are visible after each selection action.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 0,
+        "expansionPrompt": ""
+      },
+      {
+        "id": "18",
+        "title": "Create Selection Visuals with GraphicsContext",
+        "description": "Use shared GraphicsContext for selection outlines.",
+        "details": "Create GraphicsContext for blue outlines. Position highlights to match objects. Use render group.",
+        "testStrategy": "Selected objects show outlines. Batching efficient.",
+        "priority": "medium",
+        "dependencies": [
+          "17"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create GraphicsContext for Blue Selection Outlines",
+            "description": "Set up a shared GraphicsContext specifically for rendering blue outlines around selected objects, ensuring it integrates with the render group for efficient batching.",
+            "dependencies": [],
+            "details": "Initialize a new GraphicsContext instance in the CanvasManager class, configure it to draw blue outlines (e.g., using stroke color #0000FF and appropriate line width). Ensure the context is shared across selection visuals to avoid redundant creations. Integrate it with the render group to optimize rendering performance by grouping selection draws.",
+            "status": "pending",
+            "testStrategy": "Verify that selected objects display blue outlines correctly, and check that the GraphicsContext is reused without creating new instances for each selection.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for creating GraphicsContext and another for positioning highlights."
+      },
+      {
+        "id": "19",
+        "title": "Implement Multi-Object Dragging",
+        "description": "Move all selected objects together with render groups.",
+        "details": "Store start positions, apply delta to all. Update highlights. Send batch updates.",
+        "testStrategy": "All selected move maintaining positions. No lag with 50 objects.",
+        "priority": "medium",
+        "dependencies": [
+          "18"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Apply Delta to Selected Objects",
+            "description": "Calculate and apply the movement delta to all selected objects while maintaining their relative positions.",
+            "dependencies": [],
+            "details": "Store the initial positions of all selected objects at the start of the drag. On pointermove, compute the delta from the initial pointer position, apply this delta to each selected object's position, and update their render groups accordingly. Ensure highlights are refreshed for visual feedback.",
+            "status": "pending",
+            "testStrategy": "Verify that all selected objects move together maintaining their relative positions, with no visual glitches or performance issues during dragging.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for applying deltas and another for batch updates."
+      },
+      {
+        "id": "20",
+        "title": "Backend Batch Update Support",
+        "description": "Handle batch position updates in Elixir backend.",
+        "details": "Add handle_event for update_objects_batch. Use Repo.transaction. Broadcast single event.",
+        "testStrategy": "Batch updates persist. Single transaction succeeds.",
+        "priority": "medium",
+        "dependencies": [
+          "19"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement handle_event for update_objects_batch",
+            "description": "Add a new handle_event function in the Elixir backend to process batch position updates for objects.",
+            "dependencies": [],
+            "details": "In the relevant module (likely a GenServer or similar), add a handle_event clause that matches the update_objects_batch event. This should parse the batch data, prepare the updates, and trigger the transaction handling. Ensure it integrates with the existing event handling structure.",
+            "status": "pending",
+            "testStrategy": null,
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for adding handle_event and another for transaction handling."
+      },
+      {
+        "id": "21",
+        "title": "Unit Tests for CanvasManager",
+        "description": "Test v8 initialization, culling, selection, etc.",
+        "status": "pending",
+        "dependencies": [
+          "20"
+        ],
+        "priority": "medium",
+        "details": "Use Puppeteer for browser-based frontend testing since CanvasManager involves PixiJS and canvas rendering. Mock PixiJS appropriately. Test async init, Culler usage, drag deltas.",
+        "testStrategy": "All tests pass. Coverage >80%.",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Test V8 Initialization",
+            "description": "Verify that the CanvasManager initializes correctly with PixiJS v8 async pattern, including app creation and basic rendering.",
+            "dependencies": [],
+            "details": "Use Puppeteer to launch a browser, load the CanvasManager, and check that the PIXI.Application initializes without errors. Mock PixiJS components if needed. Assert that the canvas element is attached and basic scene renders post-init.",
+            "status": "pending",
+            "testStrategy": "Ensure initialization completes without throwing errors and canvas is visible.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Test Culling Functionality",
+            "description": "Test the culling mechanism in CanvasManager, ensuring objects are hidden/shown based on visibility during pan/zoom.",
+            "dependencies": [
+              1
+            ],
+            "details": "In Puppeteer tests, simulate pan/zoom events on the canvas. Verify that updateVisibleObjects() is called and render groups are updated correctly. Check that culled objects are not rendered, reducing draw calls.",
+            "status": "pending",
+            "testStrategy": "Measure performance during pan/zoom and confirm culling reduces visible objects appropriately.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Test Selection and Drag Interactions",
+            "description": "Test selection visuals and drag deltas in CanvasManager using Puppeteer for browser simulation.",
+            "dependencies": [
+              1
+            ],
+            "details": "Use Puppeteer to interact with the canvas: select objects to show blue outlines via GraphicsContext, and perform drag operations. Assert that selection highlights appear correctly and drag deltas are calculated and applied. Mock PixiJS for isolated testing.",
+            "status": "pending",
+            "testStrategy": "Validate that selections display outlines and drags update object positions accurately.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 8,
+        "recommendedSubtasks": 3,
+        "expansionPrompt": "Subtasks for testing initialization, culling, selection, and drag using Puppeteer."
+      },
+      {
+        "id": "22",
+        "title": "Integration Tests for LiveView",
+        "description": "Test LiveView sync, batch updates, real-time cursors.",
+        "details": "Use Phoenix test helpers. Simulate events. Check PubSub broadcasts.",
+        "testStrategy": "Events sync correctly. No conflicts.",
+        "priority": "medium",
+        "dependencies": [
+          "21"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Simulate LiveView Events",
+            "description": "Set up Phoenix test helpers to simulate user events such as mouse clicks, keyboard inputs, and batch updates in a multi-user scenario to test LiveView synchronization.",
+            "dependencies": [],
+            "details": "Use Phoenix.ConnTest and Phoenix.LiveViewTest to create test connections and live views. Simulate events like position updates and cursor movements using the test helpers. Ensure the setup handles concurrent users by mocking multiple sessions.",
+            "status": "pending",
+            "testStrategy": "Verify that events are triggered correctly and state changes are reflected in the LiveView.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Verify PubSub Broadcasts",
+            "description": "Check that PubSub broadcasts are correctly sent and received for real-time sync, batch updates, and cursor positions in the integration tests.",
+            "dependencies": [
+              1
+            ],
+            "details": "After simulating events, assert that PubSub messages are broadcasted via Phoenix.PubSub. Use test assertions to confirm broadcasts include correct data for sync and updates. Test in a multi-user setup to ensure no conflicts occur.",
+            "status": "pending",
+            "testStrategy": "Confirm broadcasts are received by subscribers and data integrity is maintained without race conditions.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 7,
+        "recommendedSubtasks": 2,
+        "expansionPrompt": "Subtasks for simulating events and checking broadcasts."
+      },
+      {
+        "id": "23",
+        "title": "Performance Tests",
+        "description": "Benchmark v7 vs v8 with 1000/2000/10,000 objects, cursors.",
+        "status": "pending",
+        "dependencies": [
+          "22"
+        ],
+        "priority": "medium",
+        "details": "Use PerformanceMonitor. Measure FPS, memory at scales of 1000, 2000, and 10,000 objects. Compare baselines.",
+        "testStrategy": "v8 shows improvements. Targets met.",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Benchmark FPS for v7 and v8 with 1000 objects",
+            "description": "Run performance tests to measure FPS using PerformanceMonitor for version 7 and 8 with 1000 objects, including cursor interactions.",
+            "dependencies": [],
+            "details": "Set up test scenes with 1000 objects and simulate cursor interactions. Use PerformanceMonitor to track FPS over 1-second windows. Run tests for both v7 and v8, logging metrics via console. Compare FPS results against established baselines to identify improvements.",
+            "status": "pending",
+            "testStrategy": "Verify FPS is logged accurately for both versions, with v8 showing expected improvements and no performance degradation from cursor handling.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Benchmark memory usage for v7 and v8 with 2000 objects",
+            "description": "Measure memory consumption for version 7 and 8 with 2000 objects using PerformanceMonitor, including cursor interactions.",
+            "dependencies": [],
+            "details": "Create test scenarios with 2000 objects and incorporate cursor interactions. Utilize PerformanceMonitor to monitor memory usage over time. Execute tests for v7 and v8, exposing metrics via console. Compare memory usage against baselines to assess efficiency gains in v8.",
+            "status": "pending",
+            "testStrategy": "Ensure memory metrics are captured correctly, baselines are compared, and v8 demonstrates memory optimizations without regressions.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Benchmark performance for v7 and v8 with 10,000 objects",
+            "description": "Run performance tests to measure FPS and memory usage using PerformanceMonitor for version 7 and 8 with 10,000 objects, including cursor interactions.",
+            "dependencies": [],
+            "details": "Set up test scenes with 10,000 objects and simulate cursor interactions. Use PerformanceMonitor to track FPS and memory usage over time. Run tests for both v7 and v8, logging metrics via console. Compare results against established baselines to evaluate performance at scale.",
+            "status": "pending",
+            "testStrategy": "Verify FPS and memory metrics are logged accurately for both versions, with v8 showing expected improvements at scale and no performance degradation.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 7,
+        "recommendedSubtasks": 2,
+        "expansionPrompt": "Subtasks for benchmarking FPS and memory comparisons."
+      },
+      {
+        "id": "24",
+        "title": "Manual Testing Checklist",
+        "description": "Verify basic functionality, multi-user, performance.",
+        "status": "pending",
+        "dependencies": [
+          "23"
+        ],
+        "priority": "medium",
+        "details": "Test create/drag/select. Check with 50 users. Ensure smooth rendering with minimum 60 FPS and target 100 FPS.",
+        "testStrategy": "All items checked. No regressions.",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Set Up Manual Testing Environment",
+            "description": "Prepare the testing setup including necessary tools, test data, and environment configuration for manual testing of the application.",
+            "dependencies": [],
+            "details": "Install required software, configure test accounts, prepare sample data sets for create/drag/select operations, and ensure the application is running in a testable state with PixiJS v8 integrated.",
+            "status": "pending",
+            "testStrategy": "Verify environment setup by running a basic smoke test to confirm the app loads without errors.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Test Basic Create Functionality",
+            "description": "Manually verify the create feature by performing various creation actions and checking for correct behavior.",
+            "dependencies": [
+              1
+            ],
+            "details": "Execute create operations such as adding new objects or elements in the application. Check for proper instantiation, positioning, and initial state. Document any issues with creation logic or UI responsiveness.",
+            "status": "pending",
+            "testStrategy": "Checklist verification: Object created successfully, appears in correct location, no errors in console.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Test Drag Functionality",
+            "description": "Manually test the drag feature to ensure objects can be dragged smoothly and accurately.",
+            "dependencies": [
+              2
+            ],
+            "details": "Perform drag operations on various objects, testing edge cases like dragging to boundaries, overlapping elements, and multi-touch if applicable. Measure responsiveness and accuracy of drag movements.",
+            "status": "pending",
+            "testStrategy": "Checklist: Objects drag smoothly without lag, snap correctly if required, and maintain state after drag.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Test Select Functionality",
+            "description": "Verify the select feature by testing selection of single and multiple objects under different conditions.",
+            "dependencies": [
+              3
+            ],
+            "details": "Test selecting objects individually, in groups, and via different input methods (e.g., click, lasso). Ensure selection highlights correctly and persists through interactions like drag.",
+            "status": "pending",
+            "testStrategy": "Checklist: Selection works for single/multi objects, highlights properly, and selections are maintained during other operations.",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "Test Multi-User and Performance with 50 Users",
+            "description": "Simulate multi-user environment and assess performance to ensure smooth rendering with 50 concurrent users.",
+            "dependencies": [
+              4
+            ],
+            "details": "Set up a test scenario with 50 simulated users performing create/drag/select operations simultaneously. Monitor FPS, memory usage, and rendering smoothness. Ensure no crashes or significant slowdowns occur.",
+            "status": "pending",
+            "testStrategy": "Performance metrics: Maintain at least 60 FPS (target 100 FPS), memory stable, no rendering artifacts, and all basic functionalities work under load.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 4,
+        "recommendedSubtasks": 0,
+        "expansionPrompt": ""
+      },
+      {
+        "id": "25",
+        "title": "Documentation and Migration Guide",
+        "description": "Update docs, create v8 migration guide.",
+        "details": "Document new APIs, performance gains. Include rollback plan.",
+        "testStrategy": "Docs accurate. Guide helps future migrations.",
+        "priority": "medium",
+        "dependencies": [
+          "24"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update Documentation",
+            "description": "Update the existing documentation to include new APIs and performance gains from PixiJS v8.",
+            "dependencies": [],
+            "details": "Document new APIs introduced in v8, highlight performance gains, and ensure all changes are accurately reflected in the docs. Include any necessary code examples or references to help users understand the updates.",
+            "status": "pending",
+            "testStrategy": "Verify that the documentation is accurate and up-to-date by checking against the actual code changes and ensuring no outdated information remains.",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 1,
+        "expansionPrompt": "Subtask for updating docs and another for creating the guide."
+      }
+    ],
+    "metadata": {
+      "version": "1.0.0",
+      "lastModified": "2025-10-15T20:51:15.334Z",
+      "taskCount": 25,
+      "completedCount": 8,
+      "tags": [
+        "frontend-perf"
+      ]
+    }
   }
 }

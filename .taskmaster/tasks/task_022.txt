@@ -1,0 +1,48 @@
+# Task ID: 22
+# Title: Fix Event Listener Memory Leaks in Canvas Manager
+# Status: done
+# Dependencies: 14
+# Priority: medium
+# Description: Fix memory leaks in the canvas_manager.js file by properly storing and removing event listener references in the setupEventListeners and destroyed methods.
+# Details:
+In the canvas_manager.js file (collab_canvas/assets/js/hooks/canvas_manager.js), modify the setupEventListeners() method (around line 96) to store bound function references as instance properties. For example, add: this.boundHandleKeyDown = this.handleKeyDown.bind(this); this.boundHandleKeyUp = this.handleKeyUp.bind(this); this.boundHandleResize = this.handleResize.bind(this);. Then, when adding event listeners, use these stored references, e.g., window.addEventListener('keydown', this.boundHandleKeyDown);. In the destroyed() method (around line 926), remove listeners using the same stored references, e.g., window.removeEventListener('keydown', this.boundHandleKeyDown);. This ensures the original bound functions are removed, preventing memory leaks. Ensure all relevant event listeners (keydown, keyup, resize) are handled consistently. After changes, verify no syntax errors and that the code follows the existing structure.
+
+# Test Strategy:
+After implementing the fix, run the application locally and open a canvas page. Use browser developer tools to monitor memory usage (e.g., via Performance tab or Memory tab) while interacting with the canvas (e.g., drawing, zooming). Check that event listeners are properly added and removed by inspecting the event listeners in the Elements tab or using console logs in setupEventListeners and destroyed. Simulate component destruction (e.g., navigating away or closing the canvas) and verify no memory leaks by ensuring memory usage stabilizes and no lingering references to the bound functions. Test in multiple browser tabs to confirm real-time collaboration still works without issues.
+
+# Subtasks:
+## 1. Store and Remove Event Listener References in Canvas Manager [pending]
+### Dependencies: 22.14
+### Description: Modify the setupEventListeners method to store bound function references as instance properties and update the destroyed method to remove listeners using these references to prevent memory leaks.
+### Details:
+In canvas_manager.js, around line 96 in setupEventListeners(), add bound function references like this.boundHandleKeyDown = this.handleKeyDown.bind(this); for keydown, keyup, and resize events. Use these references when adding event listeners, e.g., window.addEventListener('keydown', this.boundHandleKeyDown). In the destroyed() method around line 926, remove listeners using the same references, e.g., window.removeEventListener('keydown', this.boundHandleKeyDown). Ensure consistency for all relevant events and verify no syntax errors.
+<info added on 2025-10-14T16:11:52.223Z>
+Successfully fixed the event listener memory leaks:
+
+Changes made:
+
+1. In setupEventListeners() (lines 96-134):
+   - Added 10 instance properties to store bound function references (lines 100-109)
+   - Updated all addEventListener calls to use the stored references (lines 112-127)
+   
+2. In destroyed() method (lines 938-965):
+   - Completely rewrote event listener cleanup to use stored bound references
+   - Added canvas event listener removal (7 canvas events)
+   - Updated window event listener removal (3 window events)
+   - Reordered cleanup to remove listeners before destroying app
+   
+Technical details:
+- The issue was that .bind(this) creates a NEW function reference each time
+- Adding listeners with one reference and removing with another doesn't work
+- Solution: Store the bound references as instance properties once during setup
+- Use the same stored references for both adding and removing listeners
+
+Result:
+- Event listeners now properly removed on component destruction
+- Memory leaks eliminated - no orphaned listeners remain after navigation
+- All 10 event handlers properly cleaned up
+
+File: collab_canvas/assets/js/hooks/canvas_manager.js
+Lines modified: 96-134, 938-965
+</info added on 2025-10-14T16:11:52.223Z>
+
