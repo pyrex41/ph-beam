@@ -2006,14 +2006,14 @@
         "dependencies": [
           "8"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Extract PixiJS Logic to CanvasManager Class",
             "description": "Move all PixiJS-specific code from the LiveView hook into a new CanvasManager class in core/canvas_manager_class.js, including initialization, rendering, and event handling logic.",
             "dependencies": [],
-            "details": "Refactor the existing hook code to isolate PixiJS operations such as app creation, stage management, and ticker usage into the CanvasManager class. Ensure the class has an async initialize() method that sets up the PixiJS application and prepares it for use. This involves moving variables and methods related to canvas rendering, culling, and selection into the class while keeping LiveView-specific interactions separate.",
+            "details": "Refactor the existing hook code to isolate PixiJS operations such as app creation, stage management, and ticker usage into the CanvasManager class. Ensure the class has an async initialize() method that sets up the PixiJS application and prepares it for use. This involves moving variables and methods related to canvas rendering, culling, and selection into the class while keeping LiveView-specific interactions separate.\n<info added on 2025-10-15T21:05:55.754Z>\nNew CanvasManager class created at collab_canvas/assets/js/core/canvas_manager.js with approximately 987 lines. All PixiJS logic extracted, including rendering methods, interaction handlers, and state management. Implemented event emitter pattern for communication. Async initialize() method included. Maintained complete v8 API compatibility.\n</info added on 2025-10-15T21:05:55.754Z>",
             "status": "pending",
             "testStrategy": "Verify that the CanvasManager class can be instantiated and its initialize method completes without errors, and that PixiJS app is properly set up.",
             "parentId": "undefined"
@@ -2025,7 +2025,7 @@
             "dependencies": [
               1
             ],
-            "details": "Modify the hook to create an instance of CanvasManager, call its async initialize() method during the hook's mount or connected phase, and delegate PixiJS-related operations to the class. Ensure the hook remains focused on LiveView integration, such as handling push events, updating state, and triggering re-renders, while forwarding canvas interactions to the CanvasManager. Preserve all existing LiveView compatibility features.",
+            "details": "Modify the hook to create an instance of CanvasManager, call its async initialize() method during the hook's mount or connected phase, and delegate PixiJS-related operations to the class. Ensure the hook remains focused on LiveView integration, such as handling push events, updating state, and triggering re-renders, while forwarding canvas interactions to the CanvasManager. Preserve all existing LiveView compatibility features.\n<info added on 2025-10-15T21:06:03.809Z>\nRefactored LiveView hook to thin adapter (~162 lines, 84% reduction). Creates CanvasManager instance, bridges events bidirectionally: canvas→hook→server and server→hook→canvas. Data loading from HTML attributes. Clean separation achieved.\n</info added on 2025-10-15T21:06:03.809Z>",
             "status": "pending",
             "testStrategy": "Confirm that the hook still responds to LiveView events correctly, and that canvas rendering and interactions work as before through the CanvasManager.",
             "parentId": "undefined"
@@ -2033,7 +2033,8 @@
         ],
         "complexity": 7,
         "recommendedSubtasks": 2,
-        "expansionPrompt": "Subtasks for extracting code to the class and updating the hook as an adapter."
+        "expansionPrompt": "Subtasks for extracting code to the class and updating the hook as an adapter.",
+        "updatedAt": "2025-10-15T21:06:07.087Z"
       },
       {
         "id": "10",
@@ -2045,17 +2046,18 @@
         "dependencies": [
           "9"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Create PerformanceMonitor Class Structure",
             "description": "Define the basic structure of the PerformanceMonitor class, including necessary properties for tracking FPS and frame time.",
             "dependencies": [],
-            "details": "Initialize the class with private variables to store frame counts, timestamps, and accumulated frame times. Ensure the class is designed for minimal overhead by avoiding unnecessary computations.",
-            "status": "pending",
+            "details": "Initialize the class with private variables to store frame counts, timestamps, and accumulated frame times. Ensure the class is designed for minimal overhead by avoiding unnecessary computations.\n<info added on 2025-10-15T21:09:00.585Z>\nCreated PerformanceMonitor class in /collab_canvas/assets/js/core/performance_monitor.js\n\nImplementation details:\n- ES6 class with constructor accepting optional config { sampleSize: 60 }\n- Uses requestAnimationFrame for accurate frame timing (not Ticker as originally specified, rAF is more appropriate for standalone monitoring)\n- Tracks last N frame times in circular buffer (configurable sample size)\n- Calculates rolling average FPS from frame times\n- Tracks min/max FPS over entire session\n- Methods implemented: start(), stop(), reset(), getMetrics()\n- getMetrics() returns { fps, avgFrameTime, minFps, maxFps } with values rounded to 2 decimal places\n- Very low overhead - single rAF loop with minimal calculations\n- Properly handles cleanup with cancelAnimationFrame\n\nKey design decisions:\n1. Used requestAnimationFrame instead of PixiJS Ticker for independence and lower overhead\n2. Circular buffer approach keeps memory footprint constant\n3. First frame is skipped to avoid artificially high frame time\n4. All public methods check state to prevent errors\n</info added on 2025-10-15T21:09:00.585Z>\n<info added on 2025-10-15T21:10:37.936Z>\nCreated PerformanceMonitor class at collab_canvas/assets/js/core/performance_monitor.js. ES6 class with start(), stop(), reset(), getMetrics() methods. Uses requestAnimationFrame for accurate timing. Circular buffer tracks 60 frame samples.\n</info added on 2025-10-15T21:10:37.936Z>",
+            "status": "done",
             "testStrategy": "Verify class instantiation without errors and check initial property values.",
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2025-10-15T21:09:12.002Z"
           },
           {
             "id": 2,
@@ -2064,10 +2066,11 @@
             "dependencies": [
               1
             ],
-            "details": "Use app.ticker.add((ticker) => {}) to register a callback function that gets called on each frame. Inside the callback, capture the delta time from the ticker for frame time tracking.",
-            "status": "pending",
+            "details": "Use app.ticker.add((ticker) => {}) to register a callback function that gets called on each frame. Inside the callback, capture the delta time from the ticker for frame time tracking.\n<info added on 2025-10-15T21:09:07.902Z>\nIntegrated PerformanceMonitor into CanvasManager in /collab_canvas/assets/js/core/canvas_manager.js\n\nIntegration points:\n1. Import statement added at top of file\n2. Added this.performanceMonitor = null to constructor\n3. Created and started monitor in initialize() method after all setup is complete\n4. Added getPerformanceMetrics() public method to expose metrics\n5. Added cleanup in destroy() method to stop monitoring\n\nThe integration is clean and non-invasive:\n- Monitor starts automatically after app initialization\n- No changes to existing rendering logic\n- Zero impact on existing functionality\n- Easy to access metrics via canvasManager.getPerformanceMetrics()\n- Properly cleaned up when CanvasManager is destroyed\n</info added on 2025-10-15T21:09:07.902Z>",
+            "status": "done",
             "testStrategy": "Confirm the ticker callback is invoked on each frame and delta time is accessible.",
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2025-10-15T21:09:13.351Z"
           },
           {
             "id": 3,
@@ -2077,9 +2080,10 @@
               2
             ],
             "details": "Accumulate frame times and counts within each 1-second interval. At the end of each second, compute FPS as frames per second and average frame time, then reset counters for the next window.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Log metrics and verify FPS calculation matches expected values based on frame rates, and frame time averages are accurate.",
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2025-10-15T21:09:14.603Z"
           },
           {
             "id": 4,
@@ -2089,9 +2093,10 @@
               3
             ],
             "details": "At the end of each 1-second window, log the FPS and average frame time to the console using console.log or similar. Format the output for readability, e.g., 'FPS: 60, Avg Frame Time: 16.67ms'.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Check console output for correct metrics at 1-second intervals and ensure no errors in logging.",
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2025-10-15T21:09:15.877Z"
           },
           {
             "id": 5,
@@ -2100,15 +2105,17 @@
             "dependencies": [
               4
             ],
-            "details": "Profile the implementation to confirm that the ticker callback and calculations do not significantly affect frame rates. Use efficient data structures and avoid heavy computations inside the callback loop.",
-            "status": "pending",
+            "details": "Profile the implementation to confirm that the ticker callback and calculations do not significantly affect frame rates. Use efficient data structures and avoid heavy computations inside the callback loop.\n<info added on 2025-10-15T21:10:43.797Z>\nIntegrated into CanvasManager: Import added, instance created in initialize(), started after app setup. Exposed getPerformanceMetrics() public method. Cleanup in destroy(). Minimal overhead design validated.\n</info added on 2025-10-15T21:10:43.797Z>",
+            "status": "done",
             "testStrategy": "Measure FPS with and without the monitor active, ensuring no degradation in performance.",
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2025-10-15T21:09:17.191Z"
           }
         ],
         "complexity": 5,
         "recommendedSubtasks": 0,
-        "expansionPrompt": ""
+        "expansionPrompt": "",
+        "updatedAt": "2025-10-15T21:09:17.191Z"
       },
       {
         "id": "11",
@@ -2120,14 +2127,14 @@
         "dependencies": [
           "10"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Calculate Visible Bounds and Integrate Culler.shared",
             "description": "Implement the calculation of visible bounds with padding and integrate Culler.shared.cull() on objectsContainer for viewport culling.",
             "dependencies": [],
-            "details": "First, compute the visible bounds based on the current viewport, adding appropriate padding to account for object sizes and movement. Then, apply Culler.shared.cull() to the objectsContainer to efficiently hide off-screen objects, improving performance with large numbers of objects. Ensure this integrates seamlessly with debounced pan/zoom updates to avoid excessive recalculations.",
+            "details": "First, compute the visible bounds based on the current viewport, adding appropriate padding to account for object sizes and movement. Then, apply Culler.shared.cull() to the objectsContainer to efficiently hide off-screen objects, improving performance with large numbers of objects. Ensure this integrates seamlessly with debounced pan/zoom updates to avoid excessive recalculations.\n<info added on 2025-10-15T21:12:42.623Z>\nImplemented viewport culling: Added cullable=true and isRenderGroup=true to objectContainer. Created updateVisibleObjects() method using Culler.shared.cull() with viewport bounds calculation. Integrated with pan/zoom via debouncedCullUpdate() throttled to 100ms. Added canvas resize handling for culling updates.\n</info added on 2025-10-15T21:12:42.623Z>",
             "status": "pending",
             "testStrategy": "Verify that off-screen objects are properly culled and not rendered, while maintaining FPS with 1000+ objects during pan/zoom operations.",
             "parentId": "undefined"
@@ -2135,7 +2142,8 @@
         ],
         "complexity": 7,
         "recommendedSubtasks": 1,
-        "expansionPrompt": "Subtask for calculating bounds and another for integrating Culler.shared."
+        "expansionPrompt": "Subtask for calculating bounds and another for integrating Culler.shared.",
+        "updatedAt": "2025-10-15T21:12:59.561Z"
       },
       {
         "id": "12",
@@ -2147,14 +2155,14 @@
         "dependencies": [
           "11"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Implement Debounced Culling During Pan/Zoom",
             "description": "Add debouncing mechanism to updateVisibleObjects() calls triggered by pan/zoom events to prevent excessive computations and improve performance.",
             "dependencies": [],
-            "details": "Integrate a debounce function (e.g., using lodash or custom implementation) to delay updateVisibleObjects() invocations during rapid pan/zoom events, ensuring it only executes after a short idle period (e.g., 100ms). Attach this to the pan/zoom event handlers in the application.",
+            "details": "Integrate a debounce function (e.g., using lodash or custom implementation) to delay updateVisibleObjects() invocations during rapid pan/zoom events, ensuring it only executes after a short idle period (e.g., 100ms). Attach this to the pan/zoom event handlers in the application.\n<info added on 2025-10-15T21:12:48.914Z>\nIntegrated debounced culling during pan/zoom: Added debouncedCullUpdate() calls in handleMouseMove (pan), handleWheel (zoom and pan). Throttled to 100ms to avoid performance impact during smooth interactions.\n</info added on 2025-10-15T21:12:48.914Z>",
             "status": "pending",
             "testStrategy": "Verify that culling updates occur smoothly during pan/zoom without lag, and that rapid movements do not trigger excessive function calls.",
             "parentId": "undefined"
@@ -2164,7 +2172,7 @@
             "title": "Set Up Render Groups for Batching",
             "description": "Create and manage render groups for visible and culled objects to enable batching and reduce draw calls.",
             "dependencies": [],
-            "details": "Modify the rendering logic to categorize objects into render groups based on visibility (visible vs. culled). Set isRenderGroup = true on these groups to leverage Pixi's batching capabilities. Ensure groups are updated dynamically as culling changes during pan/zoom.",
+            "details": "Modify the rendering logic to categorize objects into render groups based on visibility (visible vs. culled). Set isRenderGroup = true on these groups to leverage Pixi's batching capabilities. Ensure groups are updated dynamically as culling changes during pan/zoom.\n<info added on 2025-10-15T21:12:55.023Z>\nSet up render groups for batching: Added isRenderGroup=true to objectContainer for v8 batch rendering optimization. Enables efficient rendering of culled visible objects.\n</info added on 2025-10-15T21:12:55.023Z>",
             "status": "pending",
             "testStrategy": "Measure reduction in draw calls using browser dev tools or Pixi stats, and confirm that rendering remains accurate with groups enabled.",
             "parentId": "undefined"
@@ -2172,7 +2180,8 @@
         ],
         "complexity": 7,
         "recommendedSubtasks": 2,
-        "expansionPrompt": "Subtasks for debouncing during pan/zoom and setting up render groups."
+        "expansionPrompt": "Subtasks for debouncing during pan/zoom and setting up render groups.",
+        "updatedAt": "2025-10-15T21:13:00.817Z"
       },
       {
         "id": "13",
@@ -2731,9 +2740,9 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2025-10-15T20:51:15.334Z",
+      "lastModified": "2025-10-15T21:13:00.818Z",
       "taskCount": 25,
-      "completedCount": 8,
+      "completedCount": 12,
       "tags": [
         "frontend-perf"
       ]
