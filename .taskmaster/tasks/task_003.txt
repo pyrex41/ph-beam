@@ -1,0 +1,31 @@
+# Task ID: 3
+# Title: Configure Phoenix Presence
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Set up Phoenix Presence for tracking online users and cursors in real-time.
+# Details:
+Create lib/collab_canvas_web/presence.ex using Phoenix.Presence with the PubSub server. Add it to the application supervisor in application.ex. This enables CRDT-backed presence tracking for collaborative features.
+
+# Test Strategy:
+Start the app and use Phoenix.Presence API to track a test user, verifying presence list updates correctly.
+
+# Subtasks:
+## 1. Create Phoenix Presence Module [done]
+### Dependencies: 3.1
+### Description: Implement the presence module in lib/collab_canvas_web/presence.ex using Phoenix.Presence with the PubSub server to enable CRDT-backed tracking.
+### Details:
+Create a new file lib/collab_canvas_web/presence.ex and define a module that uses Phoenix.Presence, configuring it with the application's PubSub server for real-time tracking of online users and cursors.
+<info added on 2025-10-13T21:19:04.682Z>
+Created CollabCanvasWeb.Presence module in lib/collab_canvas_web/presence.ex. The module uses Phoenix.Presence with the CollabCanvas.PubSub server for CRDT-backed presence tracking. Includes comprehensive documentation on usage for tracking users, cursors, and metadata in canvas rooms.
+</info added on 2025-10-13T21:19:04.682Z>
+
+## 2. Integrate Presence into Supervisor and Test [done]
+### Dependencies: 3.1
+### Description: Add the presence module to the application supervisor in application.ex and verify presence tracking functionality.
+### Details:
+Update application.ex to include the presence module in the supervision tree under the main supervisor. Then, start the application and use the Phoenix.Presence API to track a test user, ensuring the presence list updates correctly in real-time.
+<info added on 2025-10-13T21:21:09.157Z>
+Successfully integrated CollabCanvasWeb.Presence into the application supervisor in lib/collab_canvas/application.ex. The Presence module is now started as part of the supervision tree after PubSub and before the Endpoint. Tested presence tracking functionality with a comprehensive test script that verified: 1) Tracking users with metadata (cursor position, color, name), 2) Listing presence for a topic, 3) Tracking multiple users simultaneously, 4) Getting presence for specific users. All tests passed successfully, confirming CRDT-backed presence tracking is working correctly.
+</info added on 2025-10-13T21:21:09.157Z>
+

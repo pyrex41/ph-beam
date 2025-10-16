@@ -21,8 +21,8 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
-// Import PixiJS for WebGL rendering
-import * as PIXI from "pixi.js"
+// Import PixiJS for WebGL rendering (using vendor bundle to avoid module resolution issues)
+import * as PIXI from "../vendor/pixi.min.mjs"
 // Import Canvas Manager hook
 import CanvasManager from "./hooks/canvas_manager"
 

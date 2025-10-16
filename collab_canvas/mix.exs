@@ -50,7 +50,6 @@ defmodule CollabCanvas.MixProject do
       {:phoenix_live_view, "~> 1.1.0"},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:phoenix_live_dashboard, "~> 0.8.3"},
-      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:heroicons,
        github: "tailwindlabs/heroicons",
@@ -68,7 +67,8 @@ defmodule CollabCanvas.MixProject do
       {:gettext, "~> 0.26"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:dotenvy, "~> 0.8"}
     ]
   end
 
@@ -84,11 +84,11 @@ defmodule CollabCanvas.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
-      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind collab_canvas", "esbuild collab_canvas"],
+      "assets.setup": ["tailwind.install --if-missing", "cmd npm install --prefix assets"],
+      "assets.build": ["compile", "cmd npm run build --prefix assets", "tailwind collab_canvas"],
       "assets.deploy": [
+        "cmd npm run build --prefix assets",
         "tailwind collab_canvas --minify",
-        "esbuild collab_canvas --minify",
         "phx.digest"
       ],
       precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "test"]

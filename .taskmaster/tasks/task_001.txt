@@ -1,0 +1,31 @@
+# Task ID: 1
+# Title: Install Phoenix and Create Project
+# Status: done
+# Dependencies: None
+# Priority: high
+# Description: Set up a new Phoenix project with the required configuration, including Ecto with SQLite instead of Redis, excluding Mailer as per the tech stack.
+# Details:
+Run 'mix archive.install hex phx_new' to install Phoenix, then create the project with 'mix phx.new collab_canvas --database sqlite3'. Update mix.exs with dependencies for Phoenix, Ecto (phoenix_ecto, ecto_sql, ecto_sqlite3), Auth0 (Ueberauth), HTTP client (Req), and build tools (esbuild, tailwind). Install dependencies with 'mix deps.get' and setup assets with 'mix assets.setup'.
+
+# Test Strategy:
+Verify project compiles without errors by running 'mix compile' and check that all dependencies are installed correctly.
+
+# Subtasks:
+## 1. Install Phoenix Framework [pending]
+### Dependencies: None
+### Description: Install the Phoenix framework using the Hex package manager to enable project creation.
+### Details:
+Run the command 'mix archive.install hex phx_new' in the terminal to download and install the Phoenix new project generator archive.
+
+## 2. Create New Phoenix Project with SQLite [pending]
+### Dependencies: 1.1
+### Description: Generate a new Phoenix project named 'collab_canvas' configured to use SQLite3 as the database instead of the default.
+### Details:
+Execute 'mix phx.new collab_canvas --database sqlite3' to create the project structure with SQLite3 database adapter, excluding Mailer as per tech stack requirements.
+
+## 3. Update Dependencies and Setup Assets [pending]
+### Dependencies: 1.2
+### Description: Modify mix.exs to include necessary dependencies, install them, and configure assets for the project.
+### Details:
+Update mix.exs to add dependencies for Phoenix, Ecto (phoenix_ecto, ecto_sql, ecto_sqlite3), Auth0 (Ueberauth), HTTP client (Req), and build tools (esbuild, tailwind). Then run 'mix deps.get' to install dependencies and 'mix assets.setup' to configure assets.
+

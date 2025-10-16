@@ -1,0 +1,55 @@
+# Task ID: 10
+# Title: Create Canvas LiveView
+# Status: done
+# Dependencies: 9, 3
+# Priority: medium
+# Description: Build the main canvas LiveView for real-time collaboration.
+# Details:
+Implement lib/collab_canvas_web/live/canvas_live.ex with mount, handle_event for object operations, AI commands, cursor updates, and presence. Handle PubSub broadcasts and terminate for cleanup. Include HTML template with toolbar, canvas container, and AI panel.
+
+# Test Strategy:
+Access a canvas URL, verify LiveView mounts, create objects via events, and check real-time updates in multiple browser tabs.
+
+# Subtasks:
+## 1. Set up Canvas LiveView module structure [pending]
+### Dependencies: None
+### Description: Create the basic structure for the Canvas LiveView module, including the file and initial imports.
+### Details:
+Create lib/collab_canvas_web/live/canvas_live.ex with necessary imports for Phoenix.LiveView, aliases for contexts, and basic module definition. Ensure the file is set up to handle real-time collaboration features.
+
+## 2. Implement mount function [pending]
+### Dependencies: 10.1
+### Description: Implement the mount function to initialize the LiveView with necessary assigns and subscriptions.
+### Details:
+In canvas_live.ex, define the mount/3 function to set up initial state, subscribe to PubSub topics for real-time updates, and initialize presence tracking. Handle user authentication and canvas data loading.
+
+## 3. Implement handle_event for object operations [pending]
+### Dependencies: 10.2
+### Description: Add handle_event functions to manage canvas object creation, updates, and deletions.
+### Details:
+Implement handle_event callbacks in canvas_live.ex for events like 'create_object', 'update_object', and 'delete_object'. Ensure changes are broadcasted via PubSub to synchronize across clients.
+
+## 4. Implement handle_event for AI commands [pending]
+### Dependencies: 10.2
+### Description: Add handle_event functions to process AI-related commands on the canvas.
+### Details:
+In canvas_live.ex, define handle_event for AI commands such as generating or modifying objects based on AI inputs. Integrate with any AI service and broadcast results to all connected users.
+
+## 5. Implement handle_event for cursor updates [pending]
+### Dependencies: 10.2
+### Description: Add handle_event functions to track and update user cursors on the canvas.
+### Details:
+Implement handle_event for cursor movements and updates in canvas_live.ex. Use presence to track cursor positions and broadcast changes to enable collaborative cursor visibility.
+
+## 6. Handle PubSub broadcasts and terminate for cleanup [pending]
+### Dependencies: 10.3, 10.4, 10.5
+### Description: Implement PubSub broadcasting for events and add terminate function for proper cleanup.
+### Details:
+In canvas_live.ex, ensure all handle_event functions broadcast changes using Phoenix.PubSub. Add a terminate/2 function to handle cleanup, such as unsubscribing from topics and clearing presence data.
+
+## 7. Create HTML template with UI elements [pending]
+### Dependencies: 10.1
+### Description: Develop the HTML template including toolbar, canvas container, and AI panel.
+### Details:
+Create canvas_live.html.heex with a toolbar for tools, a canvas container for rendering objects, and an AI panel for commands. Use Phoenix LiveView assigns to dynamically render collaborative elements.
+

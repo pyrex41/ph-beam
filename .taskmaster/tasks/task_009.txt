@@ -1,0 +1,43 @@
+# Task ID: 9
+# Title: Implement Canvas Context with Ecto
+# Status: done
+# Dependencies: 2, 6
+# Priority: medium
+# Description: Develop the core canvas operations module using Ecto and SQLite for state management.
+# Details:
+Create lib/collab_canvas/canvases.ex with functions for create_canvas, get_canvas, list_user_canvases, create_object, update_object, delete_object, and list_objects. Create Canvas and Object Ecto schemas with proper relationships. Use Ecto queries instead of Redis commands. Focus on persistent canvas and object data only.
+
+# Test Strategy:
+Create a canvas, add objects, update them, and verify data in SQLite. Test Ecto queries for CRUD operations.
+
+# Subtasks:
+## 1. Create Ecto Schemas for Canvas and Object [pending]
+### Dependencies: None
+### Description: Define Ecto schemas for Canvas and Object models with proper relationships, including fields for user association, canvas metadata, and object properties.
+### Details:
+Create lib/collab_canvas/canvas.ex with schema fields like id, user_id, name, created_at. Create lib/collab_canvas/object.ex with fields like id, canvas_id, type, data, position. Establish belongs_to and has_many relationships. Ensure schemas are properly configured for SQLite via Ecto.
+
+## 2. Implement Canvas Creation and Retrieval Functions [pending]
+### Dependencies: 9.1
+### Description: Develop the create_canvas and get_canvas functions in the canvases context module to handle canvas creation and fetching.
+### Details:
+In lib/collab_canvas/canvases.ex, implement create_canvas(user_id, name) to insert a new canvas record using Ecto. Implement get_canvas(id) to retrieve a canvas by ID with proper error handling. Use Ecto queries for database operations instead of Redis.
+
+## 3. Implement List User Canvases Function [pending]
+### Dependencies: 9.1
+### Description: Add the list_user_canvases function to fetch all canvases belonging to a specific user.
+### Details:
+In canvases.ex, implement list_user_canvases(user_id) using Ecto query to filter canvases by user_id. Return a list of canvases with metadata. Ensure efficient querying for user-specific data.
+
+## 4. Implement Object CRUD Functions [pending]
+### Dependencies: 9.1
+### Description: Develop create_object, update_object, delete_object, and list_objects functions for managing canvas objects.
+### Details:
+In canvases.ex, implement create_object(canvas_id, type, data) to insert new objects. Implement update_object(id, updates) and delete_object(id) for modifications and removal. Implement list_objects(canvas_id) to query objects by canvas. Use Ecto for all persistent operations.
+
+## 5. Test Canvas Context CRUD Operations [pending]
+### Dependencies: 9.1, 9.2, 9.3, 9.4
+### Description: Conduct comprehensive testing of all CRUD functions to ensure data integrity.
+### Details:
+Write unit tests for each function in canvases.ex, integration tests for full workflows like creating a canvas and adding objects. Run tests to verify Ecto queries work with SQLite.
+

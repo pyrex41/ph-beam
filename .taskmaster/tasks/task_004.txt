@@ -1,0 +1,58 @@
+# Task ID: 4
+# Title: Set Up Auth0 Application
+# Status: done
+# Dependencies: None
+# Priority: high
+# Description: Configure Auth0 for authentication, including creating an application and setting callback URLs. The setup is now fully documented with detailed implementation notes for all subtasks, including a complete step-by-step guide in AUTH0_SETUP_GUIDE.md and a verification checklist in AUTH0_SETUP_CHECKLIST.md.
+# Details:
+Sign up for Auth0, create a new application as 'Regular Web Application', copy Domain, Client ID, and Client Secret. Configure allowed callback URLs for localhost and production, enable Google and GitHub social logins. Note the credentials for environment variables. The setup process is fully documented: Created AUTH0_SETUP_GUIDE.md with complete step-by-step instructions for all Auth0 configuration. Created AUTH0_SETUP_CHECKLIST.md for verification. Updated .env.example with AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, and AUTH0_CALLBACK_URL placeholders. Verified .gitignore includes .env to prevent credential exposure. User must now complete the actual Auth0 dashboard configuration by following AUTH0_SETUP_GUIDE.md, then copy credentials to .env file. Once all steps are verified using AUTH0_SETUP_CHECKLIST.md, mark task as done.
+
+# Test Strategy:
+Follow AUTH0_SETUP_CHECKLIST.md to verify all Auth0 configurations, including dashboard settings and credential setup; test login flow manually in a browser after completion.
+
+# Subtasks:
+## 1. Sign up for Auth0 account [pending]
+### Dependencies: None
+### Description: Create a new account on Auth0 if not already registered, to access the dashboard for configuration.
+### Details:
+Visit the Auth0 website, sign up for a free account using email and password, and verify the account via email confirmation. This step is required before any application setup can begin.
+<info added on 2025-10-13T21:11:19.992Z>
+Auth0 account setup - This is an external configuration step. User needs to visit https://auth0.com/ and either sign up for a new account or log in to existing account. Free tier is sufficient for development. Once logged in, user should have access to the Auth0 dashboard at https://manage.auth0.com/. This subtask is complete when user has verified dashboard access.
+</info added on 2025-10-13T21:11:19.992Z>
+
+## 2. Create a new Regular Web Application in Auth0 [pending]
+### Dependencies: 4.1
+### Description: Set up a new application in Auth0 configured as a Regular Web Application for authentication purposes.
+### Details:
+In the Auth0 dashboard, navigate to Applications, click 'Create Application', select 'Regular Web Application', enter a name like 'Collab Canvas App', and save the application. This creates the base app structure.
+<info added on 2025-10-13T21:12:32.508Z>
+Navigate to the Applications section in the Auth0 dashboard and click 'Create Application'. Select 'Regular Web Application' as the application type, enter 'Collab Canvas App' as the name, and save the application. This process will generate the application along with its credentials. After creation, the application should appear in the Applications list. Reference: AUTH0_SETUP_GUIDE.md Step 2.
+</info added on 2025-10-13T21:12:32.508Z>
+
+## 3. Configure allowed callback URLs [pending]
+### Dependencies: 4.2
+### Description: Set up the callback URLs for localhost development and production environments in the application settings.
+### Details:
+In the application settings, under 'Allowed Callback URLs', add URLs such as 'http://localhost:4000/auth/callback' for development and the production domain callback URL. Save the changes to enable proper redirect after authentication.
+<info added on 2025-10-13T21:12:49.948Z>
+In the Application Settings tab, locate the 'Application URIs' section. Add 'http://localhost:4000/auth/callback' to 'Allowed Callback URLs'. Add 'http://localhost:4000' to 'Allowed Logout URLs'. Add 'http://localhost:4000' to 'Allowed Web Origins'. Click Save Changes. These URLs enable Auth0 to redirect back to the application after authentication. Reference: AUTH0_SETUP_GUIDE.md Step 3.
+</info added on 2025-10-13T21:12:49.948Z>
+
+## 4. Enable Google and GitHub social logins [pending]
+### Dependencies: 4.2
+### Description: Integrate Google and GitHub as social login providers in the Auth0 application.
+### Details:
+In the Auth0 dashboard, go to Authentication > Social, enable Google and GitHub connections, configure their respective client IDs and secrets obtained from the providers' developer consoles, and link them to the application.
+<info added on 2025-10-13T21:13:11.312Z>
+Enable Google and GitHub social logins in Auth0. Navigate to Authentication > Social. For Google: Click Google connection, toggle Enable, optionally use Auth0 Dev Keys or configure your own Google OAuth credentials from Google Cloud Console. For GitHub: Click GitHub connection, create GitHub OAuth App at github.com/settings/developers with callback URL https://YOUR_AUTH0_DOMAIN/login/callback, paste Client ID and Secret into Auth0. For both: Go to Applications tab in connection settings and enable 'Collab Canvas App'. Click Save Changes for each. Reference: AUTH0_SETUP_GUIDE.md Steps 4-5.
+</info added on 2025-10-13T21:13:11.312Z>
+
+## 5. Copy and note Auth0 credentials [pending]
+### Dependencies: 4.2
+### Description: Retrieve and securely store the Domain, Client ID, and Client Secret for environment variable configuration.
+### Details:
+From the application settings in Auth0, copy the Domain, Client ID, and Client Secret. Note these down securely for use in environment variables like AUTH0_DOMAIN, AUTH0_CLIENT_ID, and AUTH0_CLIENT_SECRET in the project.
+<info added on 2025-10-13T21:13:37.324Z>
+Copy Auth0 credentials from application settings. In Auth0 Dashboard, go to Applications > Collab Canvas App > Settings tab. Copy three credentials: Domain (e.g., dev-abc123.us.auth0.com), Client ID (long alphanumeric string), Client Secret (click Show to reveal, then copy). Create .env file from .env.example: cp .env.example .env. Fill in the three Auth0 values in .env file: AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET. IMPORTANT: Never commit .env to git. Verify .gitignore excludes .env. These credentials will be used by the backend for authentication. Reference: AUTH0_SETUP_GUIDE.md Step 6.
+</info added on 2025-10-13T21:13:37.324Z>
+

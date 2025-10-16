@@ -1,0 +1,58 @@
+# Task ID: 6
+# Title: Create Accounts Context with Ecto
+# Status: done
+# Dependencies: 2
+# Priority: high
+# Description: Build an Ecto-backed user accounts system for storing and retrieving user data.
+# Details:
+Implement lib/collab_canvas/accounts.ex with functions for find_or_create_user, create_user, get_user, update_last_login, and list_users. Use Ecto schemas and queries for user data storage. Create a Users table with fields: email, name, avatar, provider, provider_uid, and last_login timestamps. Handle user creation from Auth0 data.
+
+# Test Strategy:
+Create a test user via code, retrieve it, and verify data persistence in the SQLite database. Check that user data is correctly stored and retrievable.
+
+# Subtasks:
+## 1. Set up Accounts Context Module [pending]
+### Dependencies: None
+### Description: Create the lib/collab_canvas/accounts.ex module with basic structure and Ecto setup.
+### Details:
+Initialize the accounts context module, include necessary imports for Ecto, and set up the User schema with fields: email, name, avatar, provider, provider_uid, last_login. Define the module structure to hold functions for user management.
+<info added on 2025-10-13T21:29:32.828Z>
+Implemented Accounts context module at lib/collab_canvas/accounts.ex with all required Ecto imports and User schema. Created User schema at lib/collab_canvas/accounts/user.ex with fields: email, name, avatar, provider, provider_uid, last_login. Included proper validations (email format, uniqueness constraints) and timestamps.
+</info added on 2025-10-13T21:29:32.828Z>
+
+## 2. Implement User Creation Function [pending]
+### Dependencies: 6.1
+### Description: Implement the create_user function to create and insert user data using Ecto.
+### Details:
+Define create_user function that takes user data and uses Ecto to insert into the Users table. Handle data validation with changesets and ensure proper field mapping.
+<info added on 2025-10-13T21:29:48.122Z>
+Implemented create_user/1 function using Ecto changesets. Function validates email format, checks uniqueness constraints, and inserts user into database. Returns {:ok, user} on success or {:error, changeset} on validation failure. Tested successfully with various inputs.
+</info added on 2025-10-13T21:29:48.122Z>
+
+## 3. Implement Get User and List Users Functions [pending]
+### Dependencies: 6.1, 6.2
+### Description: Implement get_user and list_users functions for retrieving user data using Ecto queries.
+### Details:
+For get_user, retrieve user data from database by id or email. For list_users, use Ecto query to list all users. Ensure functions return structured data matching the user schema fields.
+<info added on 2025-10-13T21:30:10.221Z>
+Implemented get_user/1 function with overloads for ID (integer) and email (string) lookups. Implemented list_users/0 to return all users. Both functions use Ecto.Query and Repo operations. Tested successfully with database queries.
+</info added on 2025-10-13T21:30:10.221Z>
+
+## 4. Implement Find or Create User with Auth0 Integration [pending]
+### Dependencies: 6.1, 6.2, 6.3
+### Description: Implement find_or_create_user function to handle user lookup or creation from Auth0 data using Ecto.
+### Details:
+Parse Auth0 user data, check if user exists in database using Ecto query, if not create new user using create_user. Integrate with Auth0 callback data to populate fields like provider_uid. Handle cases where user already exists.
+<info added on 2025-10-13T21:30:17.462Z>
+Implemented find_or_create_user/1 function with Auth0 integration. Normalizes Auth0 data structure (handles both :sub and :provider_uid, :picture and :avatar). First checks by provider+provider_uid, falls back to email lookup. Creates new user with last_login timestamp if not found, updates last_login for existing users. Tested with Auth0 format data successfully.
+</info added on 2025-10-13T21:30:17.462Z>
+
+## 5. Implement Update Last Login [pending]
+### Dependencies: 6.1, 6.2, 6.3, 6.4
+### Description: Implement update_last_login function using Ecto updates.
+### Details:
+Update the last_login timestamp in the database for a user using Ecto changeset and update.
+<info added on 2025-10-13T21:30:24.988Z>
+Implemented update_last_login/1 with overloads for User struct and user_id (integer). Uses dedicated login_changeset for timestamp updates. Returns {:ok, user} on success, {:error, :not_found} for invalid ID. Integrated into find_or_create_user flow. Tested successfully with timestamp updates.
+</info added on 2025-10-13T21:30:24.988Z>
+

@@ -31,15 +31,9 @@ config :collab_canvas, CollabCanvasWeb.Endpoint,
 # at the `config/runtime.exs`.
 config :collab_canvas, CollabCanvas.Mailer, adapter: Swoosh.Adapters.Local
 
-# Configure esbuild (the version is required)
-config :esbuild,
-  version: "0.25.4",
-  collab_canvas: [
-    args:
-      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
-    cd: Path.expand("../assets", __DIR__),
-    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
-  ]
+# Configure Vite for better ESM support (recommended for PixiJS v8)
+# Note: Vite runs via npm scripts, Phoenix just needs to know about the watcher
+# The actual build happens via: npm run build (production) or npm run dev (development)
 
 # Configure tailwind (the version is required)
 config :tailwind,

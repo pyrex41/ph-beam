@@ -1,0 +1,40 @@
+# Task ID: 2
+# Title: Configure SQLite Database with Ecto
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Configure Ecto with SQLite3 adapter for database handling in the collaborative canvas application.
+# Details:
+Create/verify lib/collab_canvas/repo.ex exists and configure it with SQLite3 adapter. Update application.ex to include Ecto.Repo in the supervision tree. Create initial database migrations for users, canvases, and objects schemas to set up the database structure.
+
+# Test Strategy:
+Verify Ecto setup by running the application and checking that the database connects successfully, perhaps by querying the repo or running migrations.
+
+# Subtasks:
+## 1. Create lib/collab_canvas/repo.ex [done]
+### Dependencies: None
+### Description: Create the Ecto.Repo module file with SQLite3 adapter configuration.
+### Details:
+Ensure lib/collab_canvas/repo.ex exists with proper Ecto.Repo setup, including database path and adapter settings for SQLite3.
+<info added on 2025-10-13T21:20:52.058Z>
+Verified complete: The file lib/collab_canvas/repo.ex already exists with proper SQLite3 adapter configuration: uses Ecto.Repo with otp_app :collab_canvas and adapter Ecto.Adapters.SQLite3. Database configuration in config/dev.exs specifies database path as collab_canvas_dev.db with pool_size 5.
+</info added on 2025-10-13T21:20:52.058Z>
+
+## 2. Update application.ex for Ecto.Repo [done]
+### Dependencies: 2.1
+### Description: Modify application.ex to start the Ecto.Repo supervisor.
+### Details:
+Add the CollabCanvas.Repo to the children list in application.ex to ensure it starts with the application.
+<info added on 2025-10-13T21:21:27.291Z>
+Verified complete. The file lib/collab_canvas/application.ex already includes CollabCanvas.Repo in the supervision tree children list at line 12, and also includes Ecto.Migrator for automatic migrations. The Repo is configured properly to start with the application.
+</info added on 2025-10-13T21:21:27.291Z>
+
+## 3. Create database migrations [done]
+### Dependencies: 2.2
+### Description: Generate and run initial migrations for users, canvases, and objects schemas.
+### Details:
+Use mix ecto.gen.migration to create migrations for users table (with fields like id, email, name), canvases table (with id, title, user_id), and objects table (with id, canvas_id, type, data). Run mix ecto.migrate to apply them.
+<info added on 2025-10-13T21:22:19.991Z>
+Subtask 2.3 completed successfully. Created three database migrations: 1) 20251013211812_create_users.exs - creates users table with fields: email (unique, not null), name, avatar, provider, provider_uid (unique composite with provider), last_login, and timestamps; 2) 20251013211824_create_canvases.exs - creates canvases table with name (not null), user_id foreign key to users (with cascade delete), and timestamps; 3) 20251013211830_create_objects.exs - creates objects table with canvas_id foreign key to canvases (with cascade delete), type (not null), data (text), position (map), and timestamps. All migrations ran successfully with mix ecto.migrate. Database schema verified with sqlite3 showing proper table structures, foreign keys, and indexes.
+</info added on 2025-10-13T21:22:19.991Z>
+

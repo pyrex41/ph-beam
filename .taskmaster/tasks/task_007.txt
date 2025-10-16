@@ -1,0 +1,37 @@
+# Task ID: 7
+# Title: Create Auth Controller and Plug
+# Status: done
+# Dependencies: 5, 6
+# Priority: high
+# Description: Implement authentication controller and plug for handling Auth0 callbacks and session management.
+# Details:
+Create lib/collab_canvas_web/controllers/auth_controller.ex for callback and logout handling. Implement lib/collab_canvas_web/plugs/auth.ex with authentication plug and LiveView mount hooks. Update router.ex with auth routes and browser pipeline.
+
+# Test Strategy:
+Start the app, navigate to login, complete Auth0 flow, and verify user session is created and accessible in LiveViews.
+
+# Subtasks:
+## 1. Create Auth Controller [pending]
+### Dependencies: None
+### Description: Implement the authentication controller to handle Auth0 callbacks and logout functionality.
+### Details:
+Create lib/collab_canvas_web/controllers/auth_controller.ex with actions for handling OAuth callbacks from Auth0, processing user authentication, and managing logout by clearing sessions.
+
+## 2. Implement Auth Plug [pending]
+### Dependencies: None
+### Description: Develop the authentication plug for session management and LiveView integration.
+### Details:
+Implement lib/collab_canvas_web/plugs/auth.ex with a plug that checks for authenticated users, assigns user data to connections, and provides hooks for mounting in LiveViews to ensure protected access.
+
+## 3. Update Router with Auth Routes and Pipeline [pending]
+### Dependencies: None
+### Description: Modify the router to include authentication routes and update the browser pipeline.
+### Details:
+Update router.ex to add routes for auth callbacks and logout, and configure the browser pipeline to include the auth plug for protecting routes that require authentication.
+
+## 4. Test Full Auth Flow [pending]
+### Dependencies: 7.1, 7.2, 7.3
+### Description: Verify the complete authentication flow from login to session management.
+### Details:
+Start the Phoenix application, navigate to the login endpoint, complete the Auth0 authentication flow, and confirm that user sessions are created and accessible in LiveViews, ensuring proper callback handling and logout functionality.
+

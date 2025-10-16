@@ -7,8 +7,38 @@ import Config
 # any compile-time configuration in here, as it won't be applied.
 # The block below contains prod specific runtime configuration.
 
-# Configure Auth0 for all environments
-if System.get_env("AUTH0_DOMAIN") do
+# Load .env file in development
+if config_env() == :dev do
+  env_file = Path.expand("../.env", __DIR__)
+  if File.exists?(env_file) do
+    # Load .env file into System environment
+    env_file
+    |> File.read!()
+    |> String.split("\n")
+    |> Enum.each(fn line ->
+      line = String.trim(line)
+      # Skip empty lines and comments
+      unless line == "" or String.starts_with?(line, "#") do
+        case String.split(line, "=", parts: 2) do
+          [key, value] ->
+            key = String.trim(key)
+            value = String.trim(value)
+            System.put_env(key, value)
+          _ -> :ok
+        end
+      end
+    end)
+  end
+
+  # Configure Auth0 for development (after loading .env)
+  config :ueberauth, Ueberauth.Strategy.Auth0.OAuth,
+    domain: System.get_env("AUTH0_DOMAIN") || "dev-placeholder.us.auth0.com",
+    client_id: System.get_env("AUTH0_CLIENT_ID") || "your-client-id",
+    client_secret: System.get_env("AUTH0_CLIENT_SECRET") || "your-client-secret"
+end
+
+# Configure Auth0 for production
+if config_env() == :prod and System.get_env("AUTH0_DOMAIN") do
   config :ueberauth, Ueberauth.Strategy.Auth0.OAuth,
     domain: System.get_env("AUTH0_DOMAIN"),
     client_id: System.get_env("AUTH0_CLIENT_ID"),

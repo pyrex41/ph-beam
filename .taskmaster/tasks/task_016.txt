@@ -1,0 +1,46 @@
+# Task ID: 16
+# Title: Implement AI Agent Module
+# Status: done
+# Dependencies: 9
+# Priority: medium
+# Description: Build the AI agent for executing natural language commands using Claude API.
+# Details:
+Create lib/collab_canvas/ai/agent.ex with execute_command function that calls Claude API with function calling. Process tool calls to execute canvas operations like create_shape, create_text, move_shape, etc.
+
+# Test Strategy:
+Test AI commands like 'create a rectangle' by calling the agent and verifying objects are created in the canvas.
+
+# Subtasks:
+## 1. Create AI Agent Module Structure [pending]
+### Dependencies: 16.9
+### Description: Set up the basic structure for the AI agent module in lib/collab_canvas/ai/agent.ex, including necessary imports and module definition.
+### Details:
+Initialize the agent.ex file with the module declaration, required aliases for Claude API and canvas operations, and placeholder for the execute_command function. Ensure the file is properly integrated into the project structure.
+<info added on 2025-10-13T21:44:36.536Z>
+Directory lib/collab_canvas/ai/ created. Agent.ex module implemented with complete structure, including Claude API integration, necessary imports, and aliases for Canvases context.
+</info added on 2025-10-13T21:44:36.536Z>
+
+## 2. Implement execute_command Function with Claude API [pending]
+### Dependencies: 16.1
+### Description: Develop the execute_command function to handle natural language commands by making calls to the Claude API using function calling.
+### Details:
+Implement the execute_command function that takes a natural language command as input, constructs the API request with appropriate tools for canvas operations, sends it to Claude API, and handles the response. Include error handling for API failures.
+<info added on 2025-10-13T21:44:48.749Z>
+Implemented execute_command/2 function with full Claude API integration. Configured Req HTTP client with proper headers (x-api-key, anthropic-version). Constructed API request with function calling tools. Added comprehensive error handling for API failures, missing keys, and invalid responses.
+</info added on 2025-10-13T21:44:48.749Z>
+
+## 3. Process Tool Calls for Canvas Operations [pending]
+### Dependencies: 16.2
+### Description: Add logic to process tool calls returned from Claude API and execute corresponding canvas operations like create_shape, create_text, move_shape.
+### Details:
+Extend the execute_command function to parse the tool calls from the Claude response, map them to specific canvas operations (e.g., create_shape, move_shape), and invoke the appropriate functions from the canvas context. Ensure proper data extraction and execution flow.
+<info added on 2025-10-13T21:44:57.807Z>
+Implemented process_tool_calls/2 to parse tool calls from Claude API response. Mapped all four tool operations: create_shape -> Canvases.create_object, create_text -> Canvases.create_object, move_shape -> Canvases.update_object, resize_shape -> Canvases.update_object. Each tool call properly transforms input parameters to canvas operation attributes (position, data maps).
+</info added on 2025-10-13T21:44:57.807Z>
+
+## 4. Test AI Command Execution [pending]
+### Dependencies: 16.3
+### Description: Create and run tests to verify that the AI agent correctly executes natural language commands and performs canvas operations.
+### Details:
+Write unit tests for the agent module, focusing on mocking Claude API responses and verifying that tool calls lead to correct canvas operations. Include integration tests to simulate commands like 'create a rectangle' and check if objects are created in the canvas.
+

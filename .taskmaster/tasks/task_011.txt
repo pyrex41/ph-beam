@@ -1,0 +1,37 @@
+# Task ID: 11
+# Title: Implement Real-Time Sync with PubSub
+# Status: done
+# Dependencies: 10
+# Priority: medium
+# Description: Set up Phoenix PubSub for broadcasting canvas updates to all connected users.
+# Details:
+Ensure PubSub is configured in endpoint.exs. In Canvas LiveView, subscribe to canvas topics on mount and broadcast changes on object operations. Handle incoming messages for object updates, deletions, and cursor movements.
+
+# Test Strategy:
+Open canvas in two browsers, perform actions in one, and verify instant updates in the other without page refresh.
+
+# Subtasks:
+## 1. Configure Phoenix PubSub in Endpoint [done]
+### Dependencies: None
+### Description: Set up PubSub configuration in endpoint.exs to enable broadcasting capabilities for the canvas application.
+### Details:
+Modify endpoint.exs to include PubSub configuration, ensuring it uses the appropriate adapter (e.g., Phoenix.PubSub.PG2 (default adapter)). Verify that the PubSub is properly supervised in the application.exs supervision tree.
+
+## 2. Subscribe to Canvas Topics in LiveView [done]
+### Dependencies: 11.1
+### Description: Implement subscription to canvas-specific topics in the Canvas LiveView module during mount.
+### Details:
+In the Canvas LiveView, add code to subscribe to topics like 'canvas:<canvas_id>' on mount. Ensure the subscription handles user-specific or canvas-specific channels for real-time updates.
+
+## 3. Broadcast Changes on Object Operations [done]
+### Dependencies: 11.2
+### Description: Add broadcasting logic for canvas object operations such as create, update, delete, and cursor movements.
+### Details:
+In the Canvas LiveView, after performing operations like creating or updating objects, broadcast messages to the subscribed topic. Include details like object ID, changes, and user info in the broadcast payload.
+
+## 4. Handle Incoming Messages for Updates [done]
+### Dependencies: 11.3
+### Description: Implement message handling in LiveView to process incoming broadcasts for object updates, deletions, and cursor movements.
+### Details:
+Add handle_info callbacks in the Canvas LiveView to receive and process messages from PubSub. Update the socket assigns or trigger re-renders based on the message type, ensuring UI reflects changes instantly.
+

@@ -23,7 +23,7 @@ config :collab_canvas, CollabCanvasWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "CQPu1mFoqMKdCSJNFEDBk2GGpwDiqpi+cUPqSiYhQM3nmqOVlR00+8RcCxcQFpJL",
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:collab_canvas, ~w(--sourcemap=inline --watch)]},
+    vite: {System, :cmd, ["npm", ["run", "dev"], [cd: Path.expand("../assets", __DIR__)]]},
     tailwind: {Tailwind, :install_and_run, [:collab_canvas, ~w(--watch)]}
   ]
 
@@ -84,3 +84,5 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+# Auth0 configuration is handled in config/runtime.exs via .env file

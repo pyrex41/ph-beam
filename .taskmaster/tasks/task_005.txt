@@ -1,0 +1,25 @@
+# Task ID: 5
+# Title: Implement Ueberauth for Auth0
+# Status: done
+# Dependencies: 1, 4
+# Priority: high
+# Description: Integrate Ueberauth with Auth0 strategy for OAuth authentication.
+# Details:
+Add Ueberauth configuration to config/config.exs and runtime.exs with Auth0 domain, client ID, and secret. Ensure environment variables are set for local and production. This handles OAuth callbacks and user info extraction.
+
+# Test Strategy:
+Set environment variables, start the app, and attempt login via Auth0 to check for successful authentication without errors.
+
+# Subtasks:
+## 1. Add Ueberauth configuration to config files [pending]
+### Dependencies: None
+### Description: Configure Ueberauth in config/config.exs and runtime.exs with Auth0 strategy, including domain, client ID, and secret.
+### Details:
+Edit config/config.exs to add Ueberauth configuration with Auth0 provider settings. Also update runtime.exs to handle runtime configuration for Auth0 credentials, ensuring proper OAuth callback handling and user info extraction.
+
+## 2. Set environment variables and test authentication flow [pending]
+### Dependencies: 5.1
+### Description: Ensure environment variables for Auth0 are set for local and production environments, then test the OAuth authentication flow.
+### Details:
+Set AUTH0_DOMAIN, AUTH0_CLIENT_ID, and AUTH0_CLIENT_SECRET as environment variables in local .env files and production deployment configs. Start the app, attempt login via Auth0, and verify successful authentication without errors, including callback processing.
+

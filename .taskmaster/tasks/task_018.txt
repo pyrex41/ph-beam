@@ -1,0 +1,31 @@
+# Task ID: 18
+# Title: Add Complex AI Component Creation
+# Status: done
+# Dependencies: 16, 17
+# Priority: medium
+# Description: Implement functions for creating complex UI components like login forms and nav bars.
+# Details:
+In AI agent, add logic for create_login_form, create_nav_bar, and create_card that execute multiple tool calls. Handle component positioning and styling defaults.
+
+# Test Strategy:
+Execute AI commands for complex components and verify all sub-objects are created correctly in the canvas.
+
+# Subtasks:
+## 1. Implement Core Functions for Complex Components [pending]
+### Dependencies: None
+### Description: Develop the basic functions for create_login_form, create_nav_bar, and create_card in the AI agent, focusing on their core logic without multiple tool calls yet.
+### Details:
+In the AI agent module, add skeleton functions for each component type. Define default parameters for positioning (e.g., x, y coordinates) and styling (e.g., colors, fonts). Ensure each function returns a component object structure.
+
+## 2. Integrate Multiple Tool Calls for Component Creation [pending]
+### Dependencies: 18.1
+### Description: Extend the component creation functions to execute multiple tool calls, such as creating shapes, texts, and positioning them accordingly.
+### Details:
+Modify create_login_form, create_nav_bar, and create_card to call multiple AI tools (e.g., create_shape, create_text, move_shape) in sequence. Handle orchestration of these calls, ensuring components are assembled correctly with proper positioning and styling defaults applied.
+
+## 3. Test and Validate Component Creation Accuracy [pending]
+### Dependencies: 18.2
+### Description: Conduct comprehensive testing to ensure complex components are created accurately, including edge cases and multi-user scenarios.
+### Details:
+Run tests in a simulated canvas environment, checking for correct rendering, positioning, and styling. Validate that components handle multiple tool calls without errors and sync properly in real-time if applicable.
+
