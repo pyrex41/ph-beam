@@ -264,6 +264,16 @@ export class CanvasManager {
     graphics.x = position.x;
     graphics.y = position.y;
 
+    // Apply rotation if specified (Task 8: rotate_object support)
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, width, height);
+    }
+
+    // Apply opacity if specified (Task 8: change_style support)
+    if (data.opacity !== undefined) {
+      graphics.alpha = data.opacity;
+    }
+
     return graphics;
   }
 
@@ -288,6 +298,16 @@ export class CanvasManager {
     graphics.x = position.x;
     graphics.y = position.y;
 
+    // Apply rotation if specified (Task 8: rotate_object support)
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, radius * 2, radius * 2);
+    }
+
+    // Apply opacity if specified (Task 8: change_style support)
+    if (data.opacity !== undefined) {
+      graphics.alpha = data.opacity;
+    }
+
     return graphics;
   }
 
@@ -302,14 +322,100 @@ export class CanvasManager {
       fontFamily: data.font_family || 'Arial',
       fontSize: data.font_size || 16,
       fill: data.color || '#000000',
-      align: data.align || 'left'
+      align: data.align || 'left',
+      // Task 8: Support bold and italic from update_text command
+      fontWeight: data.bold ? 'bold' : 'normal',
+      fontStyle: data.italic ? 'italic' : 'normal'
     });
 
     const text = new PIXI.Text(data.text || 'Text', style);
     text.x = position.x;
     text.y = position.y;
 
+    // Apply rotation if specified (Task 8: rotate_object support)
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      const bounds = text.getBounds();
+      this.applyRotation(text, data.rotation, data.pivot_point, bounds.width, bounds.height);
+    }
+
+    // Apply opacity if specified (Task 8: change_style support)
+    if (data.opacity !== undefined) {
+      text.alpha = data.opacity;
+    }
+
     return text;
+  }
+
+  /**
+   * Apply rotation to a PixiJS object based on pivot point
+   * @param {PIXI.DisplayObject} object - Object to rotate
+   * @param {number} angle - Rotation angle in degrees
+   * @param {string} pivotPoint - Pivot point (center, top-left, top-right, bottom-left, bottom-right)
+   * @param {number} width - Object width
+   * @param {number} height - Object height
+   */
+  applyRotation(object, angle, pivotPoint = 'center', width, height) {
+    // Convert degrees to radians
+    object.angle = angle;
+
+    // Set pivot based on pivot_point
+    switch (pivotPoint) {
+      case 'top-left':
+        object.pivot.set(0, 0);
+        break;
+      case 'top-right':
+        object.pivot.set(width, 0);
+        break;
+      case 'bottom-left':
+        object.pivot.set(0, height);
+        break;
+      case 'bottom-right':
+        object.pivot.set(width, height);
+        break;
+      case 'center':
+      default:
+        object.pivot.set(width / 2, height / 2);
+        // Adjust position to compensate for pivot change
+        object.x += width / 2;
+        object.y += height / 2;
+        break;
+    }
+  }
+
+  /**
+   * Show visual feedback animation for AI-modified objects (Task 8)
+   * @param {number} objectId - ID of the modified object
+   */
+  showAIFeedback(objectId) {
+    const pixiObject = this.objects.get(objectId);
+    if (!pixiObject) return;
+
+    // Create a temporary highlight effect
+    const bounds = pixiObject.getBounds();
+    const highlight = new PIXI.Graphics();
+
+    // Draw a glowing border around the object
+    highlight.rect(
+      bounds.x - 4,
+      bounds.y - 4,
+      bounds.width + 8,
+      bounds.height + 8
+    ).stroke({ width: 3, color: 0x10b981 }); // Green highlight
+
+    this.objectContainer.addChild(highlight);
+
+    // Animate the highlight (fade out and remove)
+    let alpha = 1.0;
+    const fadeInterval = setInterval(() => {
+      alpha -= 0.05;
+      highlight.alpha = alpha;
+
+      if (alpha <= 0) {
+        clearInterval(fadeInterval);
+        this.objectContainer.removeChild(highlight);
+        highlight.destroy();
+      }
+    }, 50);
   }
 
   /**
@@ -345,6 +451,9 @@ export class CanvasManager {
     if (objectData.data) {
       this.deleteObject(objectData.id);
       this.createObject(objectData);
+
+      // Show AI feedback for data changes (Task 8)
+      this.showAIFeedback(objectData.id);
     }
   }
 
@@ -1127,6 +1236,14 @@ export class CanvasManager {
       };
     }
     return this.performanceMonitor.getMetrics();
+  }
+
+  /**
+   * Get IDs of currently selected objects
+   * @returns {Array<string>} Array of selected object IDs
+   */
+  getSelectedObjectIds() {
+    return Array.from(this.selectedObjects).map(obj => obj.objectId);
   }
 
   /**

@@ -73,6 +73,96 @@ export default {
     this.canvasManager.on('tool_changed', (data) => {
       this.safePushEvent('select_tool', data);
     });
+
+    // Setup drag-and-drop for component instantiation
+    this.setupComponentDragAndDrop();
+
+    // Setup AI command button to inject selected object IDs
+    this.setupAICommandButton();
+  },
+
+  /**
+   * Setup drag-and-drop event listeners for component instantiation
+   */
+  setupComponentDragAndDrop() {
+    const canvasElement = this.el;
+
+    // Allow dropping on canvas
+    canvasElement.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+
+    // Handle component drop
+    canvasElement.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Get component ID from dataTransfer
+      const componentId = e.dataTransfer.getData('application/component-id') ||
+                          e.dataTransfer.getData('text/plain');
+
+      if (componentId) {
+        // Get canvas coordinates from drop position
+        const rect = canvasElement.getBoundingClientRect();
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+
+        // Transform screen coordinates to canvas world space
+        const canvasPosition = this.canvasManager.screenToCanvas(screenX, screenY);
+
+        console.log('Component dropped:', {
+          componentId,
+          screenPosition: { x: screenX, y: screenY },
+          canvasPosition
+        });
+
+        // Notify server to instantiate the component
+        this.safePushEvent('instantiate_component', {
+          component_id: componentId,
+          position: canvasPosition
+        });
+      }
+    });
+
+    // Prevent dragenter from interfering
+    canvasElement.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+    });
+  },
+
+  /**
+   * Setup AI command button to inject selected object IDs
+   */
+  setupAICommandButton() {
+    // Find the AI execute button in the DOM
+    const aiButton = document.getElementById('ai-execute-button');
+
+    if (aiButton) {
+      // Intercept click events to handle AI command with selected objects
+      aiButton.addEventListener('click', (e) => {
+        // Only intercept if button is not disabled
+        if (aiButton.disabled) {
+          return;
+        }
+
+        // Prevent default Phoenix click handler
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Get the command from the textarea
+        const command = aiButton.getAttribute('phx-value-command');
+
+        // Get selected object IDs from canvas manager
+        const selectedIds = this.canvasManager.getSelectedObjectIds();
+
+        // Push event to server with both command and selected IDs
+        this.safePushEvent('execute_ai_command', {
+          command: command,
+          selected_ids: selectedIds
+        });
+      }, true); // Use capture phase to run before any other handlers
+    }
   },
 
   /**
@@ -117,6 +207,13 @@ export default {
     // Handle object updated events
     this.handleEvent('object_updated', (data) => {
       this.canvasManager.updateObject(data.object);
+    });
+
+    // Handle batch object updates (for layout operations)
+    this.handleEvent('objects_updated_batch', (data) => {
+      console.log('Batch update received:', data.objects.length, 'objects');
+      // Update all objects in the batch
+      data.objects.forEach(obj => this.canvasManager.updateObject(obj));
     });
 
     // Handle object deleted events

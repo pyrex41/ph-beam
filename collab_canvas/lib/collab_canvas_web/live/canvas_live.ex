@@ -657,11 +657,13 @@ defmodule CollabCanvasWeb.CanvasLive do
 
   ## Parameters
 
-  - `params` - Map containing "command" key with natural language instruction
+  - `params` - Map containing:
+    - "command" - Natural language instruction
+    - "selected_ids" - Optional list of selected object IDs for context
 
   ## Async Processing
 
-  1. Spawns Task.async to call Agent.execute_command/2
+  1. Spawns Task.async to call Agent.execute_command/3
   2. Sets 30-second timeout with Process.send_after/3
   3. Task completion handled by handle_info({ref, result}, socket)
   4. Task crash handled by handle_info({:DOWN, ref, ...}, socket)
@@ -676,10 +678,14 @@ defmodule CollabCanvasWeb.CanvasLive do
 
   - "Create a blue rectangle"
   - "Add a green circle"
-  - "Make a text box saying Hello World"
+  - "Arrange selected objects horizontally"
+  - "Align these objects to the top"
   """
   @impl true
-  def handle_event("execute_ai_command", %{"command" => command}, socket) do
+  def handle_event("execute_ai_command", params, socket) do
+    command = params["command"]
+    selected_ids = Map.get(params, "selected_ids", [])
+
     # Prevent duplicate AI commands while one is in progress
     if socket.assigns.ai_loading do
       {:noreply, put_flash(socket, :warning, "AI command already in progress, please wait...")}
@@ -689,7 +695,7 @@ defmodule CollabCanvasWeb.CanvasLive do
       # Start async task with timeout (Task.async automatically links to current process)
       task =
         Task.async(fn ->
-          Agent.execute_command(command, canvas_id)
+          Agent.execute_command(command, canvas_id, selected_ids)
         end)
 
       # Set loading state and store task reference for timeout monitoring
@@ -764,6 +770,60 @@ defmodule CollabCanvasWeb.CanvasLive do
     end)
 
     {:noreply, socket}
+  end
+
+  @doc """
+  Handles component instantiation via drag-and-drop from the components panel.
+
+  Creates instances of the component at the specified position on the current canvas.
+  Broadcasts the instantiation to all connected clients.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "component_id" - ID of component to instantiate
+    - "position" - Map with x, y coordinates for placement
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message
+  """
+  @impl true
+  def handle_event("instantiate_component", params, socket) do
+    component_id = params["component_id"]
+    component_id = if is_binary(component_id), do: String.to_integer(component_id), else: component_id
+
+    position = params["position"]
+    position = %{x: position["x"], y: position["y"]}
+
+    canvas_id = socket.assigns.canvas_id
+
+    case CollabCanvas.Components.instantiate_component(component_id, position, canvas_id: canvas_id) do
+      {:ok, instances} ->
+        # Broadcast to all connected clients
+        Enum.each(instances, fn instance ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            socket.assigns.topic,
+            {:object_created, instance}
+          )
+        end)
+
+        # Update local state
+        updated_objects = instances ++ socket.assigns.objects
+
+        {:noreply,
+         socket
+         |> assign(:objects, updated_objects)
+         |> put_flash(:info, "Component instantiated (#{length(instances)} objects created)")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Component not found")}
+
+      {:error, reason} ->
+        Logger.error("Failed to instantiate component: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to instantiate component")}
+    end
   end
 
   @doc """
@@ -1393,6 +1453,7 @@ defmodule CollabCanvasWeb.CanvasLive do
             </div>
 
             <button
+              id="ai-execute-button"
               phx-click="execute_ai_command"
               phx-value-command={@ai_command}
               disabled={@ai_command == "" || @ai_loading}
@@ -1440,7 +1501,15 @@ defmodule CollabCanvasWeb.CanvasLive do
               <li>• "Create a rectangle"</li>
               <li>• "Add a circle"</li>
               <li>• "Make a blue square"</li>
+              <li class="text-blue-600 font-medium">• "Arrange selected horizontally"</li>
+              <li class="text-blue-600 font-medium">• "Align selected objects to top"</li>
+              <li class="text-blue-600 font-medium">• "Distribute vertically with 20px spacing"</li>
             </ul>
+            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p class="text-xs text-blue-700">
+                Tip: Select multiple objects (Shift+click) before using layout commands!
+              </p>
+            </div>
           </div>
         </div>
         <!-- Objects List -->
