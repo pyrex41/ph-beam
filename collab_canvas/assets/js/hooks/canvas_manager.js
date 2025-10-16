@@ -136,7 +136,7 @@ export default {
 
     // Handle tool selection updates from server
     this.handleEvent('tool_selected', (data) => {
-      this.canvasManager.setTool(data.tool);
+      this.canvasManager.setTool(data.tool, true); // Pass true to indicate this is from server
     });
 
     // Handle object lock updates from server

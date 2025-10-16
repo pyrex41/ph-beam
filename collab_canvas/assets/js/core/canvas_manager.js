@@ -1,4 +1,4 @@
-import * as PIXI from 'pixi.js';
+import * as PIXI from '../../vendor/pixi.min.mjs';
 import { PerformanceMonitor } from './performance_monitor.js';
 
 /**
@@ -478,8 +478,15 @@ export class CanvasManager {
   /**
    * Set the current tool
    * @param {string} tool - Tool name
+   * @param {boolean} fromServer - Whether this change came from the server (default: false)
    */
-  setTool(tool) {
+  setTool(tool, fromServer = false) {
+    // Prevent feedback loop: don't emit if tool hasn't changed or if update is from server
+    if (this.currentTool === tool || fromServer) {
+      this.currentTool = tool;
+      return;
+    }
+
     this.currentTool = tool;
     this.emit('tool_changed', { tool });
   }
