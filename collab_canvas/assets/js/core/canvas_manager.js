@@ -1048,8 +1048,10 @@ export class CanvasManager {
 
     // Remove all selection boxes
     this.selectionBoxes.forEach((box, objectId) => {
-      this.objectContainer.removeChild(box);
-      box.destroy();
+      if (box.parent) {
+        box.parent.removeChild(box);
+      }
+      box.destroy({ children: true });
     });
 
     this.selectedObjects.clear();
@@ -1087,8 +1089,10 @@ export class CanvasManager {
       // Remove selection box
       const box = this.selectionBoxes.get(object.objectId);
       if (box) {
-        this.objectContainer.removeChild(box);
-        box.destroy();
+        if (box.parent) {
+          box.parent.removeChild(box);
+        }
+        box.destroy({ children: true });
         this.selectionBoxes.delete(object.objectId);
       }
     } else {
@@ -1104,6 +1108,14 @@ export class CanvasManager {
    * @param {PIXI.DisplayObject} object - Object to create selection box for
    */
   createSelectionBox(object) {
+    // Remove any existing selection box for this object first
+    const existingBox = this.selectionBoxes.get(object.objectId);
+    if (existingBox) {
+      this.objectContainer.removeChild(existingBox);
+      existingBox.destroy();
+      this.selectionBoxes.delete(object.objectId);
+    }
+
     const selectionBox = new PIXI.Graphics();
 
     // Use local bounds (container-relative) instead of global bounds
