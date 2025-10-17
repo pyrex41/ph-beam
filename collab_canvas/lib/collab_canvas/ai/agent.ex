@@ -770,7 +770,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a move_shape tool call to reposition an object on the canvas.
   #
   # Updates the object's position to the new x,y coordinates specified in input.
-  defp execute_tool_call(%{name: "move_shape", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "move_shape", input: input}, canvas_id, _current_color) do
     # Get object_id from either shape_id or object_id (for backwards compatibility)
     object_id = input["shape_id"] || input["object_id"]
 
@@ -783,6 +783,17 @@ defmodule CollabCanvas.AI.Agent do
 
     result = Canvases.update_object(object_id, attrs)
 
+    # Broadcast update to all connected clients for real-time sync
+    case result do
+      {:ok, updated_object} ->
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          "canvas:#{canvas_id}",
+          {:object_updated, updated_object}
+        )
+      _ -> :ok
+    end
+
     %{
       tool: "move_shape",
       input: input,
@@ -794,7 +805,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Fetches existing object, merges width/height into data, and updates.
   # Returns error if object not found.
-  defp execute_tool_call(%{name: "resize_shape", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "resize_shape", input: input}, canvas_id, _current_color) do
     # Get object_id from either shape_id or object_id (for backwards compatibility)
     object_id = input["shape_id"] || input["object_id"]
 
@@ -821,6 +832,17 @@ defmodule CollabCanvas.AI.Agent do
         }
 
         result = Canvases.update_object(object_id, attrs)
+
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
 
         %{
           tool: "resize_shape",
@@ -927,7 +949,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Fetches existing object, calculates new dimensions (with aspect ratio if requested),
   # merges into data, and updates. Returns error if object not found.
-  defp execute_tool_call(%{name: "resize_object", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "resize_object", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -960,6 +982,17 @@ defmodule CollabCanvas.AI.Agent do
 
         attrs = %{data: Jason.encode!(updated_data)}
         result = Canvases.update_object(input["object_id"], attrs)
+
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
 
         %{
           tool: "resize_object",
@@ -1018,7 +1051,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a change_style tool call to modify styling properties of an object.
   #
   # Supports fill, stroke, stroke_width, opacity, font properties, and color changes.
-  defp execute_tool_call(%{name: "change_style", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "change_style", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1054,6 +1087,17 @@ defmodule CollabCanvas.AI.Agent do
         attrs = %{data: Jason.encode!(updated_data)}
         result = Canvases.update_object(input["object_id"], attrs)
 
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
+
         %{
           tool: "change_style",
           input: input,
@@ -1065,7 +1109,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes an update_text tool call to modify text content and formatting.
   #
   # Updates text content and any formatting options provided (font_size, font_family, color, etc.).
-  defp execute_tool_call(%{name: "update_text", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "update_text", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1098,6 +1142,17 @@ defmodule CollabCanvas.AI.Agent do
           attrs = %{data: Jason.encode!(updated_data)}
           result = Canvases.update_object(input["object_id"], attrs)
 
+          # Broadcast update to all connected clients for real-time sync
+          case result do
+            {:ok, updated_object} ->
+              Phoenix.PubSub.broadcast(
+                CollabCanvas.PubSub,
+                "canvas:#{canvas_id}",
+                {:object_updated, updated_object}
+              )
+            _ -> :ok
+          end
+
           %{
             tool: "update_text",
             input: input,
@@ -1110,7 +1165,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a move_object tool call to reposition an object using delta or absolute coordinates.
   #
   # Supports both relative movement (delta_x, delta_y) and absolute positioning (x, y).
-  defp execute_tool_call(%{name: "move_object", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "move_object", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1147,6 +1202,17 @@ defmodule CollabCanvas.AI.Agent do
         }
 
         result = Canvases.update_object(input["object_id"], attrs)
+
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
 
         %{
           tool: "move_object",
