@@ -248,8 +248,46 @@ export default {
 
     // Handle object label toggle
     this.handleEvent('toggle_object_labels', (data) => {
+      console.log('[Hook] toggle_object_labels event received:', data);
       this.canvasManager.toggleObjectLabels(data.show, data.labels);
     });
+
+    // Handle viewport restoration
+    this.handleEvent('restore_viewport', (data) => {
+      this.canvasManager.restoreViewport(data.x, data.y, data.zoom);
+    });
+
+    // Setup debounced viewport saving
+    this.setupViewportSaving();
+  },
+
+  /**
+   * Setup debounced viewport saving after pan/zoom operations
+   */
+  setupViewportSaving() {
+    // Debounce timeout
+    let saveTimeout = null;
+
+    // Listen to viewport changes from the canvas manager
+    const saveViewport = () => {
+      // Clear any pending save
+      if (saveTimeout) {
+        clearTimeout(saveTimeout);
+      }
+
+      // Debounce for 1 second after last pan/zoom
+      saveTimeout = setTimeout(() => {
+        const viewport = this.canvasManager.getViewportState();
+        this.safePushEvent('save_viewport', {
+          x: viewport.x,
+          y: viewport.y,
+          zoom: viewport.zoom
+        });
+      }, 1000);
+    };
+
+    // Hook into viewport changes
+    this.canvasManager.on('viewport_changed', saveViewport);
   },
 
   /**

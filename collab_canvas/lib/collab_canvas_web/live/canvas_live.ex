@@ -150,20 +150,37 @@ defmodule CollabCanvasWeb.CanvasLive do
         {:error, {:already_tracked, _, _, _}} -> :ok
       end
 
+      # Load user's saved viewport position for this canvas
+      viewport = Canvases.get_viewport(user.id, canvas_id)
+
       # Initialize socket state
-      {:ok,
-       socket
-       |> assign(:canvas, canvas)
-       |> assign(:canvas_id, canvas_id)
-       |> assign(:objects, canvas.objects)
-       |> assign(:user_id, user_id)
-       |> assign(:topic, topic)
-       |> assign(:presences, %{})
-       |> assign(:selected_tool, "select")
-       |> assign(:ai_command, "")
-       |> assign(:ai_loading, false)
-       |> assign(:ai_task_ref, nil)
-       |> assign(:show_labels, false)}
+      socket =
+        socket
+        |> assign(:canvas, canvas)
+        |> assign(:canvas_id, canvas_id)
+        |> assign(:objects, canvas.objects)
+        |> assign(:user_id, user_id)
+        |> assign(:topic, topic)
+        |> assign(:presences, %{})
+        |> assign(:selected_tool, "select")
+        |> assign(:ai_command, "")
+        |> assign(:ai_loading, false)
+        |> assign(:ai_task_ref, nil)
+        |> assign(:show_labels, false)
+
+      # If viewport position exists, push it to the client to restore position
+      socket =
+        if viewport do
+          push_event(socket, "restore_viewport", %{
+            x: viewport.viewport_x,
+            y: viewport.viewport_y,
+            zoom: viewport.zoom
+          })
+        else
+          socket
+        end
+
+      {:ok, socket}
     else
       # Canvas not found or user not authenticated
       {:ok,
@@ -771,6 +788,40 @@ defmodule CollabCanvasWeb.CanvasLive do
     # Update presence with new cursor position
     Presence.update(self(), topic, user_id, fn meta ->
       Map.put(meta, :cursor, %{x: x, y: y})
+    end)
+
+    {:noreply, socket}
+  end
+
+  @doc """
+  Handles viewport position save events from the client.
+
+  Saves the user's current viewport position and zoom level for this canvas,
+  so they can return to the same position when they reload or revisit.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "x" - Viewport X coordinate
+    - "y" - Viewport Y coordinate
+    - "zoom" - Zoom level
+
+  ## Returns
+
+  `{:noreply, socket}` - State unchanged, viewport saved to database
+  """
+  @impl true
+  def handle_event("save_viewport", %{"x" => x, "y" => y, "zoom" => zoom}, socket) do
+    user = socket.assigns.current_user
+    canvas_id = socket.assigns.canvas_id
+
+    # Save viewport position asynchronously (don't block on response)
+    Task.start(fn ->
+      Canvases.save_viewport(user.id, canvas_id, %{
+        viewport_x: x,
+        viewport_y: y,
+        zoom: zoom
+      })
     end)
 
     {:noreply, socket}

@@ -93,8 +93,8 @@ export class CanvasManager {
 
     // Create main container for objects
     this.objectContainer = new PIXI.Container();
-    // Enable culling for performance with many objects
-    this.objectContainer.cullable = true;
+    // Disable culling for now - it was causing objects to disappear during interactions
+    // this.objectContainer.cullable = true;
     this.objectContainer.isRenderGroup = true; // v8 render groups for batching
     this.app.stage.addChild(this.objectContainer);
 
@@ -130,8 +130,8 @@ export class CanvasManager {
     this.performanceMonitor = new PerformanceMonitor({ sampleSize: 60 });
     this.performanceMonitor.start();
 
-    // Initial viewport culling
-    this.updateVisibleObjects();
+    // Initial viewport culling (disabled for now)
+    // this.updateVisibleObjects();
   }
 
   /**
@@ -249,6 +249,11 @@ export class CanvasManager {
 
     this.objects.set(objectData.id, pixiObject);
     this.objectContainer.addChild(pixiObject);
+
+    // Create label for this object if labels are currently visible
+    if (this.labelsVisible) {
+      this.createLabelForObject(objectData.id, pixiObject);
+    }
   }
 
   /**
@@ -459,9 +464,10 @@ export class CanvasManager {
       if (this.labelsVisible) {
         const label = this.objectLabels.get(objectData.id);
         if (label) {
-          const bounds = pixiObject.getBounds();
-          label.container.x = bounds.x + bounds.width / 2 - label.container.width / 2;
-          label.container.y = bounds.y - label.container.height - 5;
+          // Use local bounds and object position (same as selection boxes)
+          const bounds = pixiObject.getLocalBounds();
+          label.container.x = pixiObject.x + bounds.width / 2 - label.container.width / 2;
+          label.container.y = pixiObject.y - label.container.height - 5;
         }
       }
     }
@@ -511,6 +517,14 @@ export class CanvasManager {
       this.objectContainer.removeChild(pixiObject);
       pixiObject.destroy();
       this.objects.delete(objectId);
+    }
+
+    // Also remove the label if it exists
+    const label = this.objectLabels.get(objectId);
+    if (label) {
+      this.labelContainer.removeChild(label.container);
+      label.container.destroy();
+      this.objectLabels.delete(objectId);
     }
   }
 
@@ -732,8 +746,11 @@ export class CanvasManager {
 
       this.panStart = { x: event.clientX, y: event.clientY };
 
-      // Debounced culling during pan (every 100ms)
-      this.debouncedCullUpdate();
+      // Emit viewport changed event for saving
+      this.emit('viewport_changed');
+
+      // Debounced culling during pan (disabled for now)
+      // this.debouncedCullUpdate();
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
@@ -822,8 +839,11 @@ export class CanvasManager {
       this.labelContainer.scale.set(newZoom, newZoom);
       this.cursorContainer.scale.set(newZoom, newZoom);
 
-      // Debounced culling during zoom
-      this.debouncedCullUpdate();
+      // Emit viewport changed event for saving
+      this.emit('viewport_changed');
+
+      // Debounced culling during zoom (disabled for now)
+      // this.debouncedCullUpdate();
     } else {
       // Pan with trackpad scroll or mouse wheel
       this.viewOffset.x -= event.deltaX;
@@ -835,8 +855,11 @@ export class CanvasManager {
       this.cursorContainer.x = this.viewOffset.x;
       this.cursorContainer.y = this.viewOffset.y;
 
-      // Debounced culling during pan
-      this.debouncedCullUpdate();
+      // Emit viewport changed event for saving
+      this.emit('viewport_changed');
+
+      // Debounced culling during pan (disabled for now)
+      // this.debouncedCullUpdate();
     }
   }
 
@@ -1176,9 +1199,10 @@ export class CanvasManager {
     this.objectLabels.forEach((label, objectId) => {
       const obj = this.objects.get(objectId);
       if (obj) {
-        const bounds = obj.getBounds();
-        label.container.x = bounds.x + bounds.width / 2 - label.container.width / 2;
-        label.container.y = bounds.y - label.container.height - 5; // 5px above object
+        // Use local bounds and object position (same as selection boxes)
+        const bounds = obj.getLocalBounds();
+        label.container.x = obj.x + bounds.width / 2 - label.container.width / 2;
+        label.container.y = obj.y - label.container.height - 5; // 5px above object
       }
     });
   }
@@ -1203,8 +1227,8 @@ export class CanvasManager {
         this.canvasWidth = width;
         this.canvasHeight = height;
 
-        // Update culling after resize
-        this.updateVisibleObjects();
+        // Update culling after resize (disabled for now)
+        // this.updateVisibleObjects();
       }
     });
   }
@@ -1227,8 +1251,8 @@ export class CanvasManager {
   updateVisibleObjects() {
     if (!this.objectContainer || !this.app) return;
 
-    // Calculate visible viewport bounds with padding
-    const padding = 100; // Extra padding to cull slightly off-screen objects
+    // Calculate visible viewport bounds with generous padding to prevent disappearing objects during pan
+    const padding = 500; // Extra padding to keep objects visible during pan/zoom (increased from 100)
     const viewportBounds = new PIXI.Rectangle(
       -this.viewOffset.x / this.zoomLevel - padding,
       -this.viewOffset.y / this.zoomLevel - padding,
@@ -1343,11 +1367,107 @@ export class CanvasManager {
   }
 
   /**
+   * Restore viewport to a saved position
+   * @param {number} x - Viewport X position
+   * @param {number} y - Viewport Y position
+   * @param {number} zoom - Zoom level
+   */
+  restoreViewport(x, y, zoom) {
+    // Set zoom level
+    this.zoomLevel = zoom;
+    this.objectContainer.scale.set(zoom, zoom);
+    this.labelContainer.scale.set(zoom, zoom);
+    this.cursorContainer.scale.set(zoom, zoom);
+
+    // Set viewport offset
+    this.viewOffset = { x, y };
+    this.objectContainer.x = x;
+    this.objectContainer.y = y;
+    this.labelContainer.x = x;
+    this.labelContainer.y = y;
+    this.cursorContainer.x = x;
+    this.cursorContainer.y = y;
+  }
+
+  /**
+   * Get current viewport state
+   * @returns {Object} {x, y, zoom}
+   */
+  getViewportState() {
+    return {
+      x: this.viewOffset.x,
+      y: this.viewOffset.y,
+      zoom: this.zoomLevel
+    };
+  }
+
+  /**
+   * Create a label for a single object
+   * @param {number} objectId - Object ID
+   * @param {PIXI.DisplayObject} pixiObject - The PixiJS object
+   * @param {string} labelText - Optional label text (if not provided, retrieves from stored label or generates default)
+   */
+  createLabelForObject(objectId, pixiObject, labelText = null) {
+    // If no labelText provided, try to get it from existing label or use default
+    if (!labelText) {
+      const existingLabel = this.objectLabels.get(objectId);
+      labelText = existingLabel?.labelText || `Object ${objectId}`;
+    }
+
+    // Remove existing label if present
+    const existingLabel = this.objectLabels.get(objectId);
+    if (existingLabel) {
+      this.labelContainer.removeChild(existingLabel.container);
+      existingLabel.container.destroy();
+    }
+
+    // Create label container
+    const labelContainer = new PIXI.Container();
+
+    // Create text label
+    const text = new PIXI.Text({
+      text: labelText,
+      style: new PIXI.TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 14,
+        fill: 0xffffff,
+        fontWeight: 'bold'
+      })
+    });
+
+    // Create background for label
+    const padding = 4;
+    const bg = new PIXI.Graphics();
+    bg.roundRect(0, 0, text.width + padding * 2, text.height + padding * 2, 4)
+      .fill({ color: 0x3b82f6, alpha: 0.9 });
+
+    // Position text on top of background
+    text.x = padding;
+    text.y = padding;
+
+    labelContainer.addChild(bg);
+    labelContainer.addChild(text);
+
+    // Position label above the object using local bounds and object position
+    // (similar to how selection boxes are positioned)
+    const bounds = pixiObject.getLocalBounds();
+    labelContainer.x = pixiObject.x + bounds.width / 2 - labelContainer.width / 2;
+    labelContainer.y = pixiObject.y - labelContainer.height - 5; // 5px above object
+
+    // Store label reference with text for persistence
+    this.objectLabels.set(objectId, { container: labelContainer, text, bg, labelText });
+
+    // Add to label container (renders on top of objects)
+    this.labelContainer.addChild(labelContainer);
+  }
+
+  /**
    * Toggle visual labels on canvas objects
    * @param {boolean} show - Whether to show or hide labels
    * @param {Object} labels - Map of object_id => display_name (e.g., "Rectangle 1")
    */
   toggleObjectLabels(show, labels) {
+    console.log('[CanvasManager] toggleObjectLabels called - show:', show, 'labels:', labels, 'labelsVisible:', this.labelsVisible);
     if (show) {
       // Show labels
       this.labelsVisible = true;
@@ -1355,51 +1475,7 @@ export class CanvasManager {
       // Create label for each object
       this.objects.forEach((pixiObject, objectId) => {
         const labelText = labels[objectId] || `Object ${objectId}`;
-
-        // Remove existing label if present
-        const existingLabel = this.objectLabels.get(objectId);
-        if (existingLabel) {
-          this.labelContainer.removeChild(existingLabel.container);
-          existingLabel.container.destroy();
-        }
-
-        // Create label container
-        const labelContainer = new PIXI.Container();
-
-        // Create text label
-        const text = new PIXI.Text({
-          text: labelText,
-          style: new PIXI.TextStyle({
-            fontFamily: 'Arial',
-            fontSize: 14,
-            fill: 0xffffff,
-            fontWeight: 'bold'
-          })
-        });
-
-        // Create background for label
-        const padding = 4;
-        const bg = new PIXI.Graphics();
-        bg.roundRect(0, 0, text.width + padding * 2, text.height + padding * 2, 4)
-          .fill({ color: 0x3b82f6, alpha: 0.9 });
-
-        // Position text on top of background
-        text.x = padding;
-        text.y = padding;
-
-        labelContainer.addChild(bg);
-        labelContainer.addChild(text);
-
-        // Position label above the object
-        const bounds = pixiObject.getBounds();
-        labelContainer.x = bounds.x + bounds.width / 2 - labelContainer.width / 2;
-        labelContainer.y = bounds.y - labelContainer.height - 5; // 5px above object
-
-        // Store label reference
-        this.objectLabels.set(objectId, { container: labelContainer, text, bg });
-
-        // Add to label container (renders on top of objects)
-        this.labelContainer.addChild(labelContainer);
+        this.createLabelForObject(objectId, pixiObject, labelText);
       });
     } else {
       // Hide labels

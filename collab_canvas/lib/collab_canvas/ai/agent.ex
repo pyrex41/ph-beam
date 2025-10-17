@@ -503,10 +503,39 @@ defmodule CollabCanvas.AI.Agent do
       * Large objects (> 200px): spacing = 40
       * Mixed sizes: use spacing >= largest dimension difference
 
-    IMPORTANT - RESPONDING TO USER:
-    - If you CAN'T perform an action because you don't have the right tool, respond with text explaining what you can't do and suggest alternatives
-    - ALWAYS respond with text when you can't fulfill a request - never return nothing
-    - You CAN show visual labels on canvas objects using the show_object_labels tool when users ask to see object IDs or names
+    TOOL USAGE PHILOSOPHY - BE CREATIVE:
+    - Your layout tools are HIGHLY FLEXIBLE - don't give up just because a pattern isn't explicitly named!
+    - For complex formations (triangles, pyramids, spirals, custom patterns):
+      * Use `arrange_objects_with_pattern` with line/diagonal/wave/arc patterns
+      * Use `define_object_relationships` to build shapes with spatial constraints
+      * Make MULTIPLE tool calls if needed to build complex shapes row by row or layer by layer
+    - CRITICAL: How to create TRIANGLE/PYRAMID formations:
+      * TRIANGLE = pyramid shape with rows getting wider (1 at top, 2 below, 3 below that, etc.)
+      * For 6 objects triangle: Row 1 (1 object), Row 2 (2 objects), Row 3 (3 objects)
+      * For 10 objects triangle: Rows of 1, 2, 3, 4 objects
+      * METHOD 1: Make MULTIPLE `arrange_objects_with_pattern` calls - one line/horizontal per row
+      * METHOD 2: Use `define_object_relationships` with "below" and "left_of"/"right_of" constraints
+      * NEVER use just "diagonal" for triangles - that creates a diagonal LINE, not a triangle
+    - Other examples:
+      * Zigzag: `arrange_objects_with_pattern` with diagonal pattern alternating directions
+      * Custom formations: Combine tools creatively or make sequential calls
+    - Default to ATTEMPTING a layout with available tools before saying you can't do it
+    - Only respond with text if the request is truly impossible with available tools
+
+    CRITICAL EXECUTION RULES:
+    - NEVER ask for permission or confirmation - JUST DO IT
+    - NEVER respond with "Should I proceed?" or "Let me know if you'd like me to..." - EXECUTE IMMEDIATELY
+    - When creating shapes/objects: Calculate positions and CALL create_shape/create_text tools multiple times
+    - For grids/patterns: Make MULTIPLE tool calls in sequence with calculated x,y positions for each object
+    - Example: "10x10 grid of circles" = make 100 create_shape tool calls with calculated positions (0,0), (50,0), (100,0)... etc.
+
+    WHEN TO RESPOND WITH TEXT VS TOOLS:
+    - USE TOOLS (ALWAYS PREFERRED): For any spatial arrangement, creation, or manipulation task
+    - MAKE MULTIPLE TOOL CALLS: When creating patterns or grids, calculate positions and call create_shape for each object
+    - USE TEXT ONLY WHEN: Truly impossible with available tools (e.g., "delete the database") or genuinely ambiguous (e.g., "that one" with no context)
+    - You CAN show visual labels using show_object_labels tool when users ask to see IDs or names
+
+    IMPORTANT: Your job is to EXECUTE, not to explain plans or ask permission. Users expect ACTION, not proposals.
 
     USER COMMAND: #{command}
     """
@@ -714,6 +743,9 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Updates the object's position to the new x,y coordinates specified in input.
   defp execute_tool_call(%{name: "move_shape", input: input}, _canvas_id) do
+    # Get object_id from either shape_id or object_id (for backwards compatibility)
+    object_id = input["shape_id"] || input["object_id"]
+
     attrs = %{
       position: %{
         x: input["x"],
@@ -721,7 +753,7 @@ defmodule CollabCanvas.AI.Agent do
       }
     }
 
-    result = Canvases.update_object(input["object_id"], attrs)
+    result = Canvases.update_object(object_id, attrs)
 
     %{
       tool: "move_shape",
@@ -735,8 +767,11 @@ defmodule CollabCanvas.AI.Agent do
   # Fetches existing object, merges width/height into data, and updates.
   # Returns error if object not found.
   defp execute_tool_call(%{name: "resize_shape", input: input}, _canvas_id) do
+    # Get object_id from either shape_id or object_id (for backwards compatibility)
+    object_id = input["shape_id"] || input["object_id"]
+
     # First get the existing object to merge data
-    case Canvases.get_object(input["object_id"]) do
+    case Canvases.get_object(object_id) do
       nil ->
         %{
           tool: "resize_shape",
@@ -757,7 +792,7 @@ defmodule CollabCanvas.AI.Agent do
           data: Jason.encode!(updated_data)
         }
 
-        result = Canvases.update_object(input["object_id"], attrs)
+        result = Canvases.update_object(object_id, attrs)
 
         %{
           tool: "resize_shape",
@@ -1086,7 +1121,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Supports horizontal, vertical, grid, circular, and stack layouts.
   # Applies layout algorithms from CollabCanvas.AI.Layout module and batch updates all objects.
-  defp execute_tool_call(%{name: "arrange_objects", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "arrange_objects", input: input}, canvas_id) do
     object_ids = input["object_ids"]
     layout_type = input["layout_type"]
 
@@ -1178,6 +1213,17 @@ defmodule CollabCanvas.AI.Agent do
         Canvases.update_object(update.id, attrs)
       end)
 
+      # Broadcast updates to all connected clients for real-time sync
+      Enum.each(results, fn
+        {:ok, updated_object} ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            "canvas:#{canvas_id}",
+            {:object_updated, updated_object}
+          )
+        _ -> :ok
+      end)
+
       # Check if any updates failed
       failed = Enum.any?(results, fn
         {:error, _} -> true
@@ -1222,6 +1268,178 @@ defmodule CollabCanvas.AI.Agent do
       input: input,
       result: {:ok, {:toggle_labels, show}}
     }
+  end
+
+  # Executes an arrange_objects_with_pattern tool call for flexible programmatic layouts.
+  #
+  # Supports custom patterns like line, diagonal, wave, arc for arrangements not covered by standard layouts.
+  defp execute_tool_call(%{name: "arrange_objects_with_pattern", input: input}, canvas_id) do
+    object_ids = input["object_ids"]
+    pattern = input["pattern"]
+
+    start_time = System.monotonic_time(:millisecond)
+
+    # Fetch all objects to arrange
+    objects = Enum.map(object_ids, fn id ->
+      case Canvases.get_object(id) do
+        nil -> nil
+        obj ->
+          data = if is_binary(obj.data) do
+            Jason.decode!(obj.data)
+          else
+            obj.data || %{}
+          end
+
+          %{
+            id: obj.id,
+            position: obj.position,
+            data: data
+          }
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+
+    if length(objects) == 0 do
+      %{
+        tool: "arrange_objects_with_pattern",
+        input: input,
+        result: {:error, :no_objects_found}
+      }
+    else
+      # Apply pattern-based layout
+      updates = Layout.pattern_layout(objects, pattern, input)
+
+      # Batch update all objects
+      results = Enum.map(updates, fn update ->
+        attrs = %{position: update.position}
+        Canvases.update_object(update.id, attrs)
+      end)
+
+      # Broadcast updates to all connected clients for real-time sync
+      Enum.each(results, fn
+        {:ok, updated_object} ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            "canvas:#{canvas_id}",
+            {:object_updated, updated_object}
+          )
+        _ -> :ok
+      end)
+
+      failed = Enum.any?(results, fn
+        {:error, _} -> true
+        _ -> false
+      end)
+
+      end_time = System.monotonic_time(:millisecond)
+      duration_ms = end_time - start_time
+
+      Logger.info("Pattern layout operation completed: #{pattern} for #{length(results)} objects in #{duration_ms}ms")
+
+      if failed do
+        %{
+          tool: "arrange_objects_with_pattern",
+          input: input,
+          result: {:error, :partial_update_failure}
+        }
+      else
+        %{
+          tool: "arrange_objects_with_pattern",
+          input: input,
+          result: {:ok, %{updated: length(results), pattern: pattern, duration_ms: duration_ms}}
+        }
+      end
+    end
+  end
+
+  # Executes a define_object_relationships tool call for constraint-based positioning.
+  #
+  # Uses declarative constraints (above, below, left_of, etc.) to calculate object positions.
+  defp execute_tool_call(%{name: "define_object_relationships", input: input}, canvas_id) do
+    relationships = input["relationships"]
+    apply_constraints = Map.get(input, "apply_constraints", true)
+
+    start_time = System.monotonic_time(:millisecond)
+
+    # Collect all unique object IDs from relationships
+    object_ids = relationships
+    |> Enum.flat_map(fn rel ->
+      [rel["subject_id"], rel["reference_id"], Map.get(rel, "reference_id_2")]
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+
+    # Fetch all objects involved
+    objects = Enum.map(object_ids, fn id ->
+      case Canvases.get_object(id) do
+        nil -> nil
+        obj ->
+          data = if is_binary(obj.data) do
+            Jason.decode!(obj.data)
+          else
+            obj.data || %{}
+          end
+
+          %{
+            id: obj.id,
+            position: obj.position,
+            data: data
+          }
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+
+    if length(objects) == 0 do
+      %{
+        tool: "define_object_relationships",
+        input: input,
+        result: {:error, :no_objects_found}
+      }
+    else
+      # Apply relationship-based positioning
+      updates = Layout.apply_relationships(objects, relationships, apply_constraints)
+
+      # Batch update all objects
+      results = Enum.map(updates, fn update ->
+        attrs = %{position: update.position}
+        Canvases.update_object(update.id, attrs)
+      end)
+
+      # Broadcast updates to all connected clients for real-time sync
+      Enum.each(results, fn
+        {:ok, updated_object} ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            "canvas:#{canvas_id}",
+            {:object_updated, updated_object}
+          )
+        _ -> :ok
+      end)
+
+      failed = Enum.any?(results, fn
+        {:error, _} -> true
+        _ -> false
+      end)
+
+      end_time = System.monotonic_time(:millisecond)
+      duration_ms = end_time - start_time
+
+      Logger.info("Relationship layout completed: #{length(relationships)} constraints for #{length(results)} objects in #{duration_ms}ms")
+
+      if failed do
+        %{
+          tool: "define_object_relationships",
+          input: input,
+          result: {:error, :partial_update_failure}
+        }
+      else
+        %{
+          tool: "define_object_relationships",
+          input: input,
+          result: {:ok, %{updated: length(results), relationships: length(relationships), duration_ms: duration_ms}}
+        }
+      end
+    end
   end
 
   # Fallback handler for unknown tool calls.
