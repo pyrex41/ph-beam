@@ -33,6 +33,12 @@ export class CanvasManager {
     this.tempObject = null;
     this.currentColor = '#000000'; // Current color from color picker
 
+    // Rotation handle state
+    this.rotationHandles = new Map(); // Map of objectId -> rotation handle graphics
+    this.isRotating = false;
+    this.rotatingObject = null;
+    this.rotationStartAngle = 0;
+
     // Pan and zoom state
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
@@ -735,7 +741,7 @@ export class CanvasManager {
     const position = this.getMousePosition(event);
 
     // Update cursor position for other users (throttled to avoid spam)
-    if (!this.isPanning && (!this.lastCursorUpdate || Date.now() - this.lastCursorUpdate > 50)) {
+    if (!this.isPanning && !this.isRotating && (!this.lastCursorUpdate || Date.now() - this.lastCursorUpdate > 50)) {
       this.emit('cursor_move', { position });
       this.lastCursorUpdate = Date.now();
     }
@@ -761,6 +767,33 @@ export class CanvasManager {
 
       // Debounced culling during pan (disabled for now)
       // this.debouncedCullUpdate();
+    } else if (this.isRotating && this.rotatingObject) {
+      // Calculate rotation angle from mouse position
+      const obj = this.rotatingObject;
+      const objCenter = { x: obj.x, y: obj.y };
+
+      // Calculate angle between object center and mouse position
+      const dx = position.x - objCenter.x;
+      const dy = position.y - objCenter.y;
+      let angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+
+      // Snap to 15-degree increments if Shift key is held
+      if (event.shiftKey) {
+        angle = Math.round(angle / 15) * 15;
+      }
+
+      // Normalize angle to 0-360 range
+      if (angle < 0) angle += 360;
+      if (angle >= 360) angle -= 360;
+
+      // Update object rotation
+      obj.angle = angle;
+
+      // Update selection box to match rotation
+      const selectionBox = this.selectionBoxes.get(obj.objectId);
+      if (selectionBox) {
+        selectionBox.angle = angle;
+      }
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
@@ -808,6 +841,35 @@ export class CanvasManager {
       // Restore cursor based on spacebar state
       this.app.canvas.style.cursor = this.spacePressed ? 'grab' : 'default';
       return; // Early return after handling pan
+    }
+
+    // Handle rotation finish
+    if (this.isRotating && this.rotatingObject) {
+      const obj = this.rotatingObject;
+
+      // Get the object's current rotation in the data
+      const objectData = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+      if (objectData) {
+        const [objectId, pixiObj] = objectData;
+
+        // Emit update with new rotation angle
+        this.emit('update_object', {
+          object_id: objectId,
+          data: {
+            rotation: Math.round(obj.angle) // Round to nearest degree
+          }
+        });
+      }
+
+      // Reset rotation handle cursor
+      const handle = this.rotationHandles.get(obj.objectId);
+      if (handle) {
+        handle.cursor = 'grab';
+      }
+
+      this.isRotating = false;
+      this.rotatingObject = null;
+      return;
     }
 
     // Only get mouse position if we need it
@@ -1093,8 +1155,17 @@ export class CanvasManager {
       box.destroy({ children: true });
     });
 
+    // Remove all rotation handles
+    this.rotationHandles.forEach((handle, objectId) => {
+      if (handle.parent) {
+        handle.parent.removeChild(handle);
+      }
+      handle.destroy({ children: true });
+    });
+
     this.selectedObjects.clear();
     this.selectionBoxes.clear();
+    this.rotationHandles.clear();
   }
 
   /**
@@ -1134,6 +1205,16 @@ export class CanvasManager {
         box.destroy({ children: true });
         this.selectionBoxes.delete(object.objectId);
       }
+
+      // Remove rotation handle
+      const handle = this.rotationHandles.get(object.objectId);
+      if (handle) {
+        if (handle.parent) {
+          handle.parent.removeChild(handle);
+        }
+        handle.destroy({ children: true });
+        this.rotationHandles.delete(object.objectId);
+      }
     } else {
       // Add to selection
       this.selectedObjects.add(object);
@@ -1153,6 +1234,14 @@ export class CanvasManager {
       this.objectContainer.removeChild(existingBox);
       existingBox.destroy();
       this.selectionBoxes.delete(object.objectId);
+    }
+
+    // Remove existing rotation handle
+    const existingHandle = this.rotationHandles.get(object.objectId);
+    if (existingHandle) {
+      this.objectContainer.removeChild(existingHandle);
+      existingHandle.destroy();
+      this.rotationHandles.delete(object.objectId);
     }
 
     const selectionBox = new PIXI.Graphics();
@@ -1178,10 +1267,41 @@ export class CanvasManager {
 
     this.objectContainer.addChild(selectionBox);
     this.selectionBoxes.set(object.objectId, selectionBox);
+
+    // Create rotation handle (small circle above the object)
+    const rotationHandle = new PIXI.Graphics();
+
+    // Draw circle with white fill and blue border
+    rotationHandle.circle(0, 0, 8)
+      .fill({ color: 0xffffff })
+      .stroke({ width: 2, color: 0x3b82f6 });
+
+    // Draw a small rotation icon inside
+    rotationHandle.moveTo(-3, 0)
+      .lineTo(3, 0)
+      .moveTo(0, -3)
+      .lineTo(0, 3)
+      .stroke({ width: 1, color: 0x3b82f6 });
+
+    // Position rotation handle above the object (20px above the top edge)
+    const handleDistance = 20;
+    rotationHandle.x = object.x;
+    rotationHandle.y = object.y - bounds.height / 2 - handleDistance;
+
+    // Make handle interactive
+    rotationHandle.eventMode = 'static';
+    rotationHandle.cursor = 'grab';
+    rotationHandle.objectId = object.objectId;
+
+    // Add rotation handle event listeners
+    rotationHandle.on('pointerdown', this.onRotationHandleDown.bind(this));
+
+    this.objectContainer.addChild(rotationHandle);
+    this.rotationHandles.set(object.objectId, rotationHandle);
   }
 
   /**
-   * Update all selection boxes to match object positions
+   * Update all selection boxes and rotation handles to match object positions
    */
   updateSelectionBoxes() {
     this.selectionBoxes.forEach((box, objectId) => {
@@ -1204,6 +1324,14 @@ export class CanvasManager {
         // Update rotation and pivot to match object (for rotated objects)
         box.angle = obj.angle;
         box.pivot.set(obj.pivot.x, obj.pivot.y);
+
+        // Update rotation handle position
+        const handle = this.rotationHandles.get(objectId);
+        if (handle) {
+          const handleDistance = 20;
+          handle.x = obj.x;
+          handle.y = obj.y - bounds.height / 2 - handleDistance;
+        }
       }
     });
   }
@@ -1333,6 +1461,31 @@ export class CanvasManager {
 
   onObjectPointerUp(event) {
     // Handled by global mouse up handler
+  }
+
+  /**
+   * Handle rotation handle pointer down
+   * @param {PIXI.FederatedPointerEvent} event - PixiJS pointer event
+   */
+  onRotationHandleDown(event) {
+    event.stopPropagation();
+
+    const handle = event.currentTarget;
+    const objectId = handle.objectId;
+    const object = this.objects.get(objectId);
+
+    if (!object) return;
+
+    // Start rotating
+    this.isRotating = true;
+    this.rotatingObject = object;
+    this.rotationStartAngle = object.angle || 0;
+
+    // Change cursor to grabbing
+    handle.cursor = 'grabbing';
+
+    // Prevent object dragging while rotating
+    this.isDragging = false;
   }
 
   /**
