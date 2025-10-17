@@ -1347,22 +1347,15 @@ defmodule CollabCanvasWeb.CanvasLive do
 
   @doc false
   # Private helper to generate human-readable labels for canvas objects.
-  # Groups objects by type and numbers them sequentially.
-  # Returns a map of object_id => display_name (e.g., "Rectangle 1", "Circle 2")
+  # Numbers all objects sequentially by creation time.
+  # Returns a map of object_id => display_name (e.g., "Object 1", "Object 2")
   defp generate_object_labels(objects) do
-    # Group objects by type and count occurrences
+    # Sort by insertion time (oldest first) and number sequentially
     objects
-    |> Enum.group_by(& &1.type)
-    |> Enum.flat_map(fn {type, objects_of_type} ->
-      # Sort by ID to maintain consistent ordering
-      objects_of_type
-      |> Enum.sort_by(& &1.id)
-      |> Enum.with_index(1)
-      |> Enum.map(fn {object, index} ->
-        # Capitalize type name (e.g., "rectangle" -> "Rectangle")
-        type_name = String.capitalize(type)
-        {object.id, "#{type_name} #{index}"}
-      end)
+    |> Enum.sort_by(& &1.inserted_at, DateTime)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {object, index} ->
+      {object.id, "Object #{index}"}
     end)
     |> Map.new()
   end
