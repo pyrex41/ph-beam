@@ -738,6 +738,12 @@ export class CanvasManager {
    * @param {MouseEvent} event
    */
   handleMouseMove(event) {
+    // Safety check for null/undefined events
+    if (!event || event.clientX === undefined || event.clientY === undefined) {
+      console.warn('[CanvasManager] handleMouseMove called with invalid event:', event);
+      return;
+    }
+
     const position = this.getMousePosition(event);
 
     // Update cursor position for other users (throttled to avoid spam)
@@ -1583,6 +1589,12 @@ export class CanvasManager {
    * @returns {Object} {x, y} position
    */
   getMousePosition(event) {
+    // Safety check for null/undefined events
+    if (!event || event.clientX === undefined || event.clientY === undefined) {
+      console.warn('[CanvasManager] getMousePosition called with invalid event:', event);
+      return { x: 0, y: 0 };
+    }
+
     const rect = this.app.canvas.getBoundingClientRect();
     return {
       x: (event.clientX - rect.left - this.viewOffset.x) / this.zoomLevel,
