@@ -972,7 +972,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a rotate_object tool call to rotate an object by a specified angle.
   #
   # Stores rotation angle and pivot point in object data. Frontend will apply the rotation.
-  defp execute_tool_call(%{name: "rotate_object", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "rotate_object", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -995,6 +995,17 @@ defmodule CollabCanvas.AI.Agent do
 
         attrs = %{data: Jason.encode!(updated_data)}
         result = Canvases.update_object(input["object_id"], attrs)
+
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
 
         %{
           tool: "rotate_object",
