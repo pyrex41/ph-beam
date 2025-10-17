@@ -1294,8 +1294,9 @@ export class CanvasManager {
     rotationHandle.objectId = object.objectId;
 
     // Add rotation handle event listeners
+    // Note: We only need pointerdown and pointerup. The global handleMouseMove (DOM event)
+    // handles the actual rotation while dragging, so we don't need pointermove here.
     rotationHandle.on('pointerdown', this.onRotationHandleDown.bind(this));
-    rotationHandle.on('pointermove', this.onRotationHandleMove.bind(this));
     rotationHandle.on('pointerup', this.onRotationHandleUp.bind(this));
     rotationHandle.on('pointerupoutside', this.onRotationHandleUp.bind(this));
 
