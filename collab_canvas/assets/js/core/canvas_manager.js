@@ -1295,6 +1295,9 @@ export class CanvasManager {
 
     // Add rotation handle event listeners
     rotationHandle.on('pointerdown', this.onRotationHandleDown.bind(this));
+    rotationHandle.on('pointermove', this.onRotationHandleMove.bind(this));
+    rotationHandle.on('pointerup', this.onRotationHandleUp.bind(this));
+    rotationHandle.on('pointerupoutside', this.onRotationHandleUp.bind(this));
 
     this.objectContainer.addChild(rotationHandle);
     this.rotationHandles.set(object.objectId, rotationHandle);
@@ -1486,6 +1489,79 @@ export class CanvasManager {
 
     // Prevent object dragging while rotating
     this.isDragging = false;
+  }
+
+  /**
+   * Handle rotation handle pointer move
+   * @param {PIXI.FederatedPointerEvent} event - PixiJS pointer event
+   */
+  onRotationHandleMove(event) {
+    if (!this.isRotating || !this.rotatingObject) return;
+
+    event.stopPropagation();
+
+    const obj = this.rotatingObject;
+    const globalPos = event.data.global;
+    const position = this.screenToCanvas(globalPos);
+
+    // Calculate rotation angle from pointer position
+    const objCenter = { x: obj.x, y: obj.y };
+    const dx = position.x - objCenter.x;
+    const dy = position.y - objCenter.y;
+    let angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+
+    // Snap to 15-degree increments if Shift key is held
+    if (event.shiftKey) {
+      angle = Math.round(angle / 15) * 15;
+    }
+
+    // Normalize angle to 0-360 range
+    if (angle < 0) angle += 360;
+    if (angle >= 360) angle -= 360;
+
+    // Update object rotation
+    obj.angle = angle;
+
+    // Update selection box to match rotation
+    const selectionBox = this.selectionBoxes.get(obj.objectId);
+    if (selectionBox) {
+      selectionBox.angle = angle;
+    }
+  }
+
+  /**
+   * Handle rotation handle pointer up
+   * @param {PIXI.FederatedPointerEvent} event - PixiJS pointer event
+   */
+  onRotationHandleUp(event) {
+    if (!this.isRotating || !this.rotatingObject) return;
+
+    event.stopPropagation();
+
+    const obj = this.rotatingObject;
+
+    // Get the object's ID
+    const objectData = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+    if (objectData) {
+      const [objectId, pixiObj] = objectData;
+
+      // Emit update with new rotation angle
+      this.emit('update_object', {
+        object_id: objectId,
+        data: {
+          rotation: Math.round(obj.angle) // Round to nearest degree
+        }
+      });
+    }
+
+    // Reset rotation handle cursor
+    const handle = event.currentTarget;
+    if (handle) {
+      handle.cursor = 'grab';
+    }
+
+    this.isRotating = false;
+    this.rotatingObject = null;
   }
 
   /**
