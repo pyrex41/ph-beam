@@ -5,7 +5,7 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   Tracks a user's color history, favorites, and default color for canvas objects.
   Each user can have:
   - Up to 8 recent colors (automatically managed LIFO queue)
-  - Unlimited favorite colors (manually pinned)
+  - Up to 20 favorite colors (manually pinned)
   - One default color for new objects
   """
 
@@ -15,6 +15,7 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   alias CollabCanvas.Accounts.User
 
   @max_recent_colors 8
+  @max_favorite_colors 20
 
   schema "user_color_preferences" do
     belongs_to :user, User
@@ -93,7 +94,10 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   def decode_recent_colors(preference) do
     case Jason.decode(preference.recent_colors) do
       {:ok, colors} -> colors
-      {:error, _} -> []
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Failed to decode recent colors for user #{preference.user_id}: #{inspect(reason)}")
+        []
     end
   end
 
@@ -103,7 +107,10 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   def decode_favorite_colors(preference) do
     case Jason.decode(preference.favorite_colors) do
       {:ok, colors} -> colors
-      {:error, _} -> []
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Failed to decode favorite colors for user #{preference.user_id}: #{inspect(reason)}")
+        []
     end
   end
 
@@ -115,6 +122,10 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
     recent_colors =
       case Jason.decode(recent_colors_json) do
         {:ok, colors} when is_list(colors) -> colors
+        {:error, reason} ->
+          require Logger
+          Logger.warning("Failed to decode recent colors when adding new color: #{inspect(reason)}")
+          []
         _ -> []
       end
 

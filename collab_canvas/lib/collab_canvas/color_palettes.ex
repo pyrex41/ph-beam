@@ -156,6 +156,10 @@ defmodule CollabCanvas.ColorPalettes do
     favorite_colors =
       case Jason.decode(preferences.favorite_colors) do
         {:ok, colors} when is_list(colors) -> colors
+        {:error, reason} ->
+          require Logger
+          Logger.warning("Failed to decode favorite colors for user #{user_id}: #{inspect(reason)}")
+          []
         _ -> []
       end
 
@@ -163,8 +167,15 @@ defmodule CollabCanvas.ColorPalettes do
     if color in favorite_colors do
       {:ok, preferences}
     else
-      updated_favorites = Jason.encode!([color | favorite_colors])
-      update_preferences(preferences, %{favorite_colors: updated_favorites})
+      # Check if we've reached the maximum favorite colors limit
+      max_favorites = 20
+
+      if length(favorite_colors) >= max_favorites do
+        {:error, :max_favorites_reached}
+      else
+        updated_favorites = Jason.encode!([color | favorite_colors])
+        update_preferences(preferences, %{favorite_colors: updated_favorites})
+      end
     end
   end
 
@@ -191,6 +202,10 @@ defmodule CollabCanvas.ColorPalettes do
     favorite_colors =
       case Jason.decode(preferences.favorite_colors) do
         {:ok, colors} when is_list(colors) -> colors
+        {:error, reason} ->
+          require Logger
+          Logger.warning("Failed to decode favorite colors for user #{user_id}: #{inspect(reason)}")
+          []
         _ -> []
       end
 

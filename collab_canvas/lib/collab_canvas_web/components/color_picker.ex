@@ -23,7 +23,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
      |> assign(:hex_color, "#FF0000")
      |> assign(:recent_colors, [])
      |> assign(:favorite_colors, [])
-     |> assign(:default_color, "#000000")}
+     |> assign(:default_color, "#000000")
+     |> assign(:save_timer, nil)}
   end
 
   @impl true
@@ -68,12 +69,13 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     hue = String.to_integer(hue_str)
     hex_color = hsl_to_hex(hue, socket.assigns.saturation, socket.assigns.lightness)
 
-    # Auto-save as default color
-    ColorPalettes.set_default_color(socket.assigns.user_id, hex_color)
-    # Send to parent with user_id in correct format
+    # Send to parent immediately for UI updates
     send(self(), {:color_changed, hex_color, "user_#{socket.assigns.user_id}"})
 
-    {:noreply, socket |> assign(:hue, hue) |> assign(:hex_color, hex_color) |> assign(:default_color, hex_color)}
+    # Schedule debounced database save
+    socket = schedule_save(socket, hex_color)
+
+    {:noreply, socket |> assign(:hue, hue) |> assign(:hex_color, hex_color)}
   end
 
   @impl true
@@ -81,11 +83,13 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     saturation = String.to_integer(sat_str)
     hex_color = hsl_to_hex(socket.assigns.hue, saturation, socket.assigns.lightness)
 
-    # Auto-save as default color
-    ColorPalettes.set_default_color(socket.assigns.user_id, hex_color)
+    # Send to parent immediately for UI updates
     send(self(), {:color_changed, hex_color, "user_#{socket.assigns.user_id}"})
 
-    {:noreply, socket |> assign(:saturation, saturation) |> assign(:hex_color, hex_color) |> assign(:default_color, hex_color)}
+    # Schedule debounced database save
+    socket = schedule_save(socket, hex_color)
+
+    {:noreply, socket |> assign(:saturation, saturation) |> assign(:hex_color, hex_color)}
   end
 
   @impl true
@@ -93,11 +97,13 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     lightness = String.to_integer(light_str)
     hex_color = hsl_to_hex(socket.assigns.hue, socket.assigns.saturation, lightness)
 
-    # Auto-save as default color
-    ColorPalettes.set_default_color(socket.assigns.user_id, hex_color)
+    # Send to parent immediately for UI updates
     send(self(), {:color_changed, hex_color, "user_#{socket.assigns.user_id}"})
 
-    {:noreply, socket |> assign(:lightness, lightness) |> assign(:hex_color, hex_color) |> assign(:default_color, hex_color)}
+    # Schedule debounced database save
+    socket = schedule_save(socket, hex_color)
+
+    {:noreply, socket |> assign(:lightness, lightness) |> assign(:hex_color, hex_color)}
   end
 
   @impl true
@@ -108,17 +114,18 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     case valid_hex?(normalized) do
       true ->
         {h, s, l} = hex_to_hsl(normalized)
-        # Auto-save as default color
-        ColorPalettes.set_default_color(socket.assigns.user_id, normalized)
+        # Send to parent immediately for UI updates
         send(self(), {:color_changed, normalized, "user_#{socket.assigns.user_id}"})
+
+        # Schedule debounced database save
+        socket = schedule_save(socket, normalized)
 
         {:noreply,
          socket
          |> assign(:hex_color, normalized)
          |> assign(:hue, h)
          |> assign(:saturation, s)
-         |> assign(:lightness, l)
-         |> assign(:default_color, normalized)}
+         |> assign(:lightness, l)}
 
       false ->
         {:noreply, socket}
@@ -128,7 +135,7 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
   @impl true
   def handle_event("select_color", %{"color" => color}, socket) do
     {h, s, l} = hex_to_hsl(color)
-    # Auto-save as default color
+    # Save immediately for deliberate color selection (not slider dragging)
     ColorPalettes.set_default_color(socket.assigns.user_id, color)
     send(self(), {:color_changed, color, "user_#{socket.assigns.user_id}"})
 
@@ -143,10 +150,16 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
 
   @impl true
   def handle_event("add_to_favorites", _params, socket) do
-    {:ok, _} = ColorPalettes.add_favorite_color(socket.assigns.user_id, socket.assigns.hex_color)
-    favorite_colors = ColorPalettes.get_favorite_colors(socket.assigns.user_id)
+    case ColorPalettes.add_favorite_color(socket.assigns.user_id, socket.assigns.hex_color) do
+      {:ok, _} ->
+        favorite_colors = ColorPalettes.get_favorite_colors(socket.assigns.user_id)
+        {:noreply, assign(socket, :favorite_colors, favorite_colors)}
 
-    {:noreply, assign(socket, :favorite_colors, favorite_colors)}
+      {:error, :max_favorites_reached} ->
+        # Send error message to parent LiveView
+        send(self(), {:show_error, "Maximum of 20 favorite colors reached"})
+        {:noreply, socket}
+    end
   end
 
   @impl true
@@ -164,11 +177,33 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
 
     hex_color = hsl_to_hex(socket.assigns.hue, saturation, lightness)
 
-    # Auto-save as default color
-    ColorPalettes.set_default_color(socket.assigns.user_id, hex_color)
+    # Send to parent immediately for UI updates
     send(self(), {:color_changed, hex_color, "user_#{socket.assigns.user_id}"})
 
-    {:noreply, socket |> assign(:saturation, saturation) |> assign(:lightness, lightness) |> assign(:hex_color, hex_color) |> assign(:default_color, hex_color)}
+    # Schedule debounced database save
+    socket = schedule_save(socket, hex_color)
+
+    {:noreply, socket |> assign(:saturation, saturation) |> assign(:lightness, lightness) |> assign(:hex_color, hex_color)}
+  end
+
+  @impl true
+  def handle_info({:save_default_color, color}, socket) do
+    # Save to database after debounce delay
+    ColorPalettes.set_default_color(socket.assigns.user_id, color)
+    {:noreply, socket |> assign(:save_timer, nil) |> assign(:default_color, color)}
+  end
+
+  # Helper function to schedule debounced save
+  defp schedule_save(socket, color) do
+    # Cancel existing timer if any
+    if socket.assigns.save_timer do
+      Process.cancel_timer(socket.assigns.save_timer)
+    end
+
+    # Schedule new save after 500ms
+    timer_ref = Process.send_after(self(), {:save_default_color, color}, 500)
+
+    assign(socket, :save_timer, timer_ref)
   end
 
   @impl true

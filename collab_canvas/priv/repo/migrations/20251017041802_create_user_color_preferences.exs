@@ -4,7 +4,7 @@ defmodule CollabCanvas.Repo.Migrations.CreateUserColorPreferences do
   def change do
     create table(:user_color_preferences) do
       add :user_id, references(:users, on_delete: :delete_all), null: false
-      add :recent_colors, :text, default: "[]", null: false  # JSON array of up to 10 recent hex colors
+      add :recent_colors, :text, default: "[]", null: false  # JSON array of up to 8 recent hex colors
       add :favorite_colors, :text, default: "[]", null: false  # JSON array of pinned favorite hex colors
       add :default_color, :string, default: "#000000", null: false  # Default color for new objects
 
