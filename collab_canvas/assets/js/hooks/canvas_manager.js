@@ -18,6 +18,10 @@ export default {
     this.canvasManager = new CanvasManager();
     await this.canvasManager.initialize(this.el, this.currentUserId);
 
+    // Set initial current color from data attribute
+    const currentColor = this.el.dataset.currentColor || '#000000';
+    this.canvasManager.setCurrentColor(currentColor);
+
     // Setup event listeners to bridge CanvasManager events to LiveView
     this.setupCanvasEventListeners();
 
@@ -73,6 +77,96 @@ export default {
     this.canvasManager.on('tool_changed', (data) => {
       this.safePushEvent('select_tool', data);
     });
+
+    // Setup drag-and-drop for component instantiation
+    this.setupComponentDragAndDrop();
+
+    // Setup AI command button to inject selected object IDs
+    this.setupAICommandButton();
+  },
+
+  /**
+   * Setup drag-and-drop event listeners for component instantiation
+   */
+  setupComponentDragAndDrop() {
+    const canvasElement = this.el;
+
+    // Allow dropping on canvas
+    canvasElement.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+
+    // Handle component drop
+    canvasElement.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Get component ID from dataTransfer
+      const componentId = e.dataTransfer.getData('application/component-id') ||
+                          e.dataTransfer.getData('text/plain');
+
+      if (componentId) {
+        // Get canvas coordinates from drop position
+        const rect = canvasElement.getBoundingClientRect();
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+
+        // Transform screen coordinates to canvas world space
+        const canvasPosition = this.canvasManager.screenToCanvas(screenX, screenY);
+
+        console.log('Component dropped:', {
+          componentId,
+          screenPosition: { x: screenX, y: screenY },
+          canvasPosition
+        });
+
+        // Notify server to instantiate the component
+        this.safePushEvent('instantiate_component', {
+          component_id: componentId,
+          position: canvasPosition
+        });
+      }
+    });
+
+    // Prevent dragenter from interfering
+    canvasElement.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+    });
+  },
+
+  /**
+   * Setup AI command button to inject selected object IDs
+   */
+  setupAICommandButton() {
+    // Find the AI execute button in the DOM
+    const aiButton = document.getElementById('ai-execute-button');
+
+    if (aiButton) {
+      // Intercept click events to handle AI command with selected objects
+      aiButton.addEventListener('click', (e) => {
+        // Only intercept if button is not disabled
+        if (aiButton.disabled) {
+          return;
+        }
+
+        // Prevent default Phoenix click handler
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Get the command from the textarea
+        const command = aiButton.getAttribute('phx-value-command');
+
+        // Get selected object IDs from canvas manager
+        const selectedIds = this.canvasManager.getSelectedObjectIds();
+
+        // Push event to server with both command and selected IDs
+        this.safePushEvent('execute_ai_command', {
+          command: command,
+          selected_ids: selectedIds
+        });
+      }, true); // Use capture phase to run before any other handlers
+    }
   },
 
   /**
@@ -116,7 +210,14 @@ export default {
 
     // Handle object updated events
     this.handleEvent('object_updated', (data) => {
-      this.canvasManager.updateObject(data.object);
+      this.canvasManager.updateObject(data.object, { animate: data.animate });
+    });
+
+    // Handle batch object updates (for layout operations)
+    this.handleEvent('objects_updated_batch', (data) => {
+      console.log('Batch update received:', data.objects.length, 'objects');
+      // Update all objects in the batch with animation
+      data.objects.forEach(obj => this.canvasManager.updateObject(obj, { animate: true }));
     });
 
     // Handle object deleted events
@@ -148,6 +249,54 @@ export default {
     this.handleEvent('object_unlocked', (data) => {
       this.canvasManager.updateObject(data.object);
     });
+
+    // Handle object label toggle
+    this.handleEvent('toggle_object_labels', (data) => {
+      console.log('[Hook] toggle_object_labels event received:', data);
+      this.canvasManager.toggleObjectLabels(data.show, data.labels);
+    });
+
+    // Handle viewport restoration
+    this.handleEvent('restore_viewport', (data) => {
+      this.canvasManager.restoreViewport(data.x, data.y, data.zoom);
+    });
+
+    // Handle color changes from color picker
+    this.handleEvent('color_changed', (data) => {
+      this.canvasManager.setCurrentColor(data.color);
+    });
+
+    // Setup debounced viewport saving
+    this.setupViewportSaving();
+  },
+
+  /**
+   * Setup debounced viewport saving after pan/zoom operations
+   */
+  setupViewportSaving() {
+    // Debounce timeout
+    let saveTimeout = null;
+
+    // Listen to viewport changes from the canvas manager
+    const saveViewport = () => {
+      // Clear any pending save
+      if (saveTimeout) {
+        clearTimeout(saveTimeout);
+      }
+
+      // Debounce for 1 second after last pan/zoom
+      saveTimeout = setTimeout(() => {
+        const viewport = this.canvasManager.getViewportState();
+        this.safePushEvent('save_viewport', {
+          x: viewport.x,
+          y: viewport.y,
+          zoom: viewport.zoom
+        });
+      }, 1000);
+    };
+
+    // Hook into viewport changes
+    this.canvasManager.on('viewport_changed', saveViewport);
   },
 
   /**

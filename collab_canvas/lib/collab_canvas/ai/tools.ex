@@ -21,6 +21,11 @@ defmodule CollabCanvas.AI.Tools do
     login forms, sidebars) with theme support
   - `delete_object` - Removes objects from the canvas
   - `group_objects` - Combines multiple objects into a named group for organization
+  - `resize_object` - Resizes objects with optional aspect ratio preservation
+  - `rotate_object` - Rotates objects by a specified angle around a pivot point
+  - `change_style` - Changes styling properties (fill, stroke, opacity, fonts, etc.)
+  - `update_text` - Updates text content and formatting options
+  - `move_object` - Moves objects using delta or absolute coordinates
 
   ## Tool Schema Format
 
@@ -116,12 +121,13 @@ defmodule CollabCanvas.AI.Tools do
 
       iex> tools = CollabCanvas.AI.Tools.get_tool_definitions()
       iex> length(tools)
-      7
+      12
 
       iex> tools = CollabCanvas.AI.Tools.get_tool_definitions()
       iex> Enum.map(tools, & &1.name)
       ["create_shape", "create_text", "move_shape", "resize_shape",
-       "create_component", "delete_object", "group_objects"]
+       "create_component", "delete_object", "group_objects", "resize_object",
+       "rotate_object", "change_style", "update_text", "move_object"]
   """
   def get_tool_definitions do
     [
@@ -221,7 +227,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             shape_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the shape to move"
             },
             x: %{
@@ -243,7 +249,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             shape_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the shape to resize"
             },
             width: %{
@@ -317,7 +323,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             object_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the object to delete"
             }
           },
@@ -333,7 +339,7 @@ defmodule CollabCanvas.AI.Tools do
             object_ids: %{
               type: "array",
               description: "List of object IDs to group",
-              items: %{type: "string"}
+              items: %{type: "integer"}
             },
             group_name: %{
               type: "string",
@@ -341,6 +347,313 @@ defmodule CollabCanvas.AI.Tools do
             }
           },
           required: ["object_ids"]
+        }
+      },
+      %{
+        name: "resize_object",
+        description: "Resize an object with optional aspect ratio preservation",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            object_id: %{
+              type: "integer",
+              description: "ID of the object to resize"
+            },
+            width: %{
+              type: "number",
+              description: "New width for the object"
+            },
+            height: %{
+              type: "number",
+              description: "New height for the object"
+            },
+            maintain_aspect_ratio: %{
+              type: "boolean",
+              description: "Whether to maintain the object's aspect ratio when resizing",
+              default: false
+            }
+          },
+          required: ["object_id", "width"]
+        }
+      },
+      %{
+        name: "rotate_object",
+        description: "Rotate an object by a specified angle",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            object_id: %{
+              type: "integer",
+              description: "ID of the object to rotate"
+            },
+            angle: %{
+              type: "number",
+              description: "Rotation angle in degrees (0-360, positive = clockwise)"
+            },
+            pivot_point: %{
+              type: "string",
+              enum: ["center", "top-left", "top-right", "bottom-left", "bottom-right"],
+              description: "Point around which to rotate the object",
+              default: "center"
+            }
+          },
+          required: ["object_id", "angle"]
+        }
+      },
+      %{
+        name: "change_style",
+        description: "Change styling properties of an object",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            object_id: %{
+              type: "integer",
+              description: "ID of the object to style"
+            },
+            property: %{
+              type: "string",
+              enum: ["fill", "stroke", "stroke_width", "opacity", "font_size", "font_family", "color"],
+              description: "The style property to change"
+            },
+            value: %{
+              type: "string",
+              description: "The new value for the property (e.g., '#ff0000' for colors, '2' for widths)"
+            }
+          },
+          required: ["object_id", "property", "value"]
+        }
+      },
+      %{
+        name: "update_text",
+        description: "Update text content and formatting of a text object",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            object_id: %{
+              type: "integer",
+              description: "ID of the text object to update"
+            },
+            new_text: %{
+              type: "string",
+              description: "New text content"
+            },
+            font_size: %{
+              type: "number",
+              description: "Font size in pixels"
+            },
+            font_family: %{
+              type: "string",
+              description: "Font family name"
+            },
+            color: %{
+              type: "string",
+              description: "Text color in hex format"
+            },
+            align: %{
+              type: "string",
+              enum: ["left", "center", "right"],
+              description: "Text alignment"
+            },
+            bold: %{
+              type: "boolean",
+              description: "Whether text should be bold"
+            },
+            italic: %{
+              type: "boolean",
+              description: "Whether text should be italic"
+            }
+          },
+          required: ["object_id"]
+        }
+      },
+      %{
+        name: "move_object",
+        description: "Move an object to a new position using delta or absolute coordinates",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            object_id: %{
+              type: "integer",
+              description: "ID of the object to move"
+            },
+            delta_x: %{
+              type: "number",
+              description: "Relative X movement (positive = right, negative = left)"
+            },
+            delta_y: %{
+              type: "number",
+              description: "Relative Y movement (positive = down, negative = up)"
+            },
+            x: %{
+              type: "number",
+              description: "Absolute X coordinate (used if delta_x not provided)"
+            },
+            y: %{
+              type: "number",
+              description: "Absolute Y coordinate (used if delta_y not provided)"
+            }
+          },
+          required: ["object_id"]
+        }
+      },
+      %{
+        name: "arrange_objects",
+        description: "Arranges selected objects in specified layout pattern (horizontal, vertical, grid, circular)",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            object_ids: %{
+              type: "array",
+              items: %{type: "integer"},
+              description: "IDs of objects to arrange"
+            },
+            layout_type: %{
+              type: "string",
+              enum: ["horizontal", "vertical", "grid", "circular", "stack"],
+              description: "Type of layout to apply"
+            },
+            spacing: %{
+              type: "number",
+              description: "Spacing between objects in pixels (default: 20)",
+              default: 20
+            },
+            alignment: %{
+              type: "string",
+              enum: ["left", "center", "right", "top", "middle", "bottom"],
+              description: "Alignment for objects (used with stack layout or separately)"
+            },
+            columns: %{
+              type: "number",
+              description: "Number of columns for grid layout",
+              default: 3
+            },
+            radius: %{
+              type: "number",
+              description: "Radius in pixels for circular layout",
+              default: 200
+            }
+          },
+          required: ["object_ids", "layout_type"]
+        }
+      },
+      %{
+        name: "show_object_labels",
+        description: "Toggle visual labels on canvas objects. Use this when user asks to 'show object IDs', 'show labels', 'display object names', or 'hide labels'. Labels appear directly on the canvas above each object showing their human-readable names (Rectangle 1, Circle 2, etc.)",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            show: %{
+              type: "boolean",
+              description: "True to show labels, false to hide them"
+            }
+          },
+          required: ["show"]
+        }
+      },
+      %{
+        name: "arrange_objects_with_pattern",
+        description: "Arrange objects using flexible programmatic patterns. POWERFUL AND FLEXIBLE - use this for ANY custom arrangement beyond basic grids: 'triangular', 'pyramid', 'zigzag', 'wave', 'arc', 'diagonal', 'scattered', 'circular arc', etc. Supports line, diagonal, wave, and arc patterns with customizable parameters. For complex shapes like triangles or pyramids, use 'line' or 'diagonal' patterns with appropriate start positions and spacing, or make multiple calls to build up the shape row by row.",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            object_ids: %{
+              type: "array",
+              items: %{type: "integer"},
+              description: "IDs of objects to arrange"
+            },
+            pattern: %{
+              type: "string",
+              enum: ["line", "diagonal", "wave", "arc", "custom"],
+              description: "Pattern type: 'line' for straight line (vertical/horizontal), 'diagonal' for angled line, 'wave' for wavy pattern, 'arc' for curved arc, 'custom' for fully custom positioning"
+            },
+            direction: %{
+              type: "string",
+              enum: ["horizontal", "vertical", "diagonal-right", "diagonal-left", "up", "down"],
+              description: "Direction of the pattern (used with line and diagonal patterns)"
+            },
+            spacing: %{
+              type: "number",
+              description: "Spacing between objects in pixels",
+              default: 50
+            },
+            alignment: %{
+              type: "string",
+              enum: ["start", "center", "end", "baseline"],
+              description: "How objects align within the pattern"
+            },
+            start_x: %{
+              type: "number",
+              description: "Starting X coordinate for the pattern"
+            },
+            start_y: %{
+              type: "number",
+              description: "Starting Y coordinate for the pattern"
+            },
+            amplitude: %{
+              type: "number",
+              description: "Amplitude for wave/arc patterns (height of waves)",
+              default: 100
+            },
+            frequency: %{
+              type: "number",
+              description: "Frequency for wave patterns (number of waves)",
+              default: 2
+            },
+            sort_by: %{
+              type: "string",
+              enum: ["none", "x", "y", "size", "id"],
+              description: "How to sort objects before arranging",
+              default: "none"
+            }
+          },
+          required: ["object_ids", "pattern"]
+        }
+      },
+      %{
+        name: "define_object_relationships",
+        description: "Define spatial relationships using declarative constraints - HIGHLY FLEXIBLE for building complex formations. Use this to create triangles, pyramids, ladders, or any structured arrangement by defining relationships: 'A below B', 'C aligned with D', 'E centered between F and G'. Build complex shapes by chaining relationships (e.g., triangle: place objects below and left_of/right_of each other). The system solves constraints to calculate positions. Perfect for hierarchical, symmetric, or geometric patterns.",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            relationships: %{
+              type: "array",
+              description: "List of relationship constraints to apply",
+              items: %{
+                type: "object",
+                properties: %{
+                  subject_id: %{
+                    type: "integer",
+                    description: "ID of the object being positioned"
+                  },
+                  relation: %{
+                    type: "string",
+                    enum: ["above", "below", "left_of", "right_of", "aligned_horizontally_with", "aligned_vertically_with", "centered_between", "same_spacing_as"],
+                    description: "The spatial relationship to enforce"
+                  },
+                  reference_id: %{
+                    type: "integer",
+                    description: "ID of the reference object (or first reference for centered_between)"
+                  },
+                  reference_id_2: %{
+                    type: "integer",
+                    description: "Second reference object ID (used only for centered_between and same_spacing_as)"
+                  },
+                  spacing: %{
+                    type: "number",
+                    description: "Distance to maintain between objects (in pixels)",
+                    default: 20
+                  }
+                },
+                required: ["subject_id", "relation", "reference_id"]
+              }
+            },
+            apply_constraints: %{
+              type: "boolean",
+              description: "Whether to apply constraint solving (true) or simple sequential application (false)",
+              default: true
+            }
+          },
+          required: ["relationships"]
         }
       }
     ]

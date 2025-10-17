@@ -12,11 +12,14 @@ export class CanvasManager {
     // PixiJS application and containers
     this.app = null;
     this.objectContainer = null;
+    this.labelContainer = null; // Separate container for labels (renders on top)
     this.cursorContainer = null;
 
     // Object and cursor storage
     this.objects = new Map();
     this.cursors = new Map();
+    this.objectLabels = new Map(); // Map of objectId -> label Text object
+    this.labelsVisible = false; // Track if labels are currently visible
 
     // Interaction state
     this.currentUserId = null;
@@ -28,6 +31,7 @@ export class CanvasManager {
     this.isCreating = false;
     this.createStart = { x: 0, y: 0 };
     this.tempObject = null;
+    this.currentColor = '#000000'; // Current color from color picker
 
     // Pan and zoom state
     this.isPanning = false;
@@ -90,10 +94,15 @@ export class CanvasManager {
 
     // Create main container for objects
     this.objectContainer = new PIXI.Container();
-    // Enable culling for performance with many objects
-    this.objectContainer.cullable = true;
+    // Disable culling for now - it was causing objects to disappear during interactions
+    // this.objectContainer.cullable = true;
     this.objectContainer.isRenderGroup = true; // v8 render groups for batching
     this.app.stage.addChild(this.objectContainer);
+
+    // Create label container (renders above objects, below cursors)
+    this.labelContainer = new PIXI.Container();
+    this.labelContainer.isRenderGroup = true; // v8 render groups for label batching
+    this.app.stage.addChild(this.labelContainer);
 
     // Create cursor overlay container with render group for batching
     this.cursorContainer = new PIXI.Container();
@@ -122,8 +131,8 @@ export class CanvasManager {
     this.performanceMonitor = new PerformanceMonitor({ sampleSize: 60 });
     this.performanceMonitor.start();
 
-    // Initial viewport culling
-    this.updateVisibleObjects();
+    // Initial viewport culling (disabled for now)
+    // this.updateVisibleObjects();
   }
 
   /**
@@ -149,8 +158,9 @@ export class CanvasManager {
 
     // Mouse events
     canvas.addEventListener('mousedown', this.boundHandlers.handleMouseDown);
-    canvas.addEventListener('mousemove', this.boundHandlers.handleMouseMove);
-    canvas.addEventListener('mouseup', this.boundHandlers.handleMouseUp);
+    // Attach move and up to window so they work even when mouse leaves canvas
+    window.addEventListener('mousemove', this.boundHandlers.handleMouseMove);
+    window.addEventListener('mouseup', this.boundHandlers.handleMouseUp);
     canvas.addEventListener('wheel', this.boundHandlers.handleWheel);
 
     // Touch events for mobile
@@ -240,6 +250,11 @@ export class CanvasManager {
 
     this.objects.set(objectData.id, pixiObject);
     this.objectContainer.addChild(pixiObject);
+
+    // Create label for this object if labels are currently visible
+    if (this.labelsVisible) {
+      this.createLabelForObject(objectData.id, pixiObject);
+    }
   }
 
   /**
@@ -263,6 +278,16 @@ export class CanvasManager {
 
     graphics.x = position.x;
     graphics.y = position.y;
+
+    // Apply rotation if specified (Task 8: rotate_object support)
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, width, height);
+    }
+
+    // Apply opacity if specified (Task 8: change_style support)
+    if (data.opacity !== undefined) {
+      graphics.alpha = data.opacity;
+    }
 
     return graphics;
   }
@@ -288,6 +313,16 @@ export class CanvasManager {
     graphics.x = position.x;
     graphics.y = position.y;
 
+    // Apply rotation if specified (Task 8: rotate_object support)
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, radius * 2, radius * 2);
+    }
+
+    // Apply opacity if specified (Task 8: change_style support)
+    if (data.opacity !== undefined) {
+      graphics.alpha = data.opacity;
+    }
+
     return graphics;
   }
 
@@ -302,14 +337,106 @@ export class CanvasManager {
       fontFamily: data.font_family || 'Arial',
       fontSize: data.font_size || 16,
       fill: data.color || '#000000',
-      align: data.align || 'left'
+      align: data.align || 'left',
+      // Task 8: Support bold and italic from update_text command
+      fontWeight: data.bold ? 'bold' : 'normal',
+      fontStyle: data.italic ? 'italic' : 'normal'
     });
 
     const text = new PIXI.Text(data.text || 'Text', style);
     text.x = position.x;
     text.y = position.y;
 
+    // Apply rotation if specified (Task 8: rotate_object support)
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      const bounds = text.getBounds();
+      this.applyRotation(text, data.rotation, data.pivot_point, bounds.width, bounds.height);
+    }
+
+    // Apply opacity if specified (Task 8: change_style support)
+    if (data.opacity !== undefined) {
+      text.alpha = data.opacity;
+    }
+
     return text;
+  }
+
+  /**
+   * Apply rotation to a PixiJS object based on pivot point
+   * @param {PIXI.DisplayObject} object - Object to rotate
+   * @param {number} angle - Rotation angle in degrees
+   * @param {string} pivotPoint - Pivot point (center, top-left, top-right, bottom-left, bottom-right)
+   * @param {number} width - Object width
+   * @param {number} height - Object height
+   */
+  applyRotation(object, angle, pivotPoint = 'center', width, height) {
+    // Convert degrees to radians
+    object.angle = angle;
+
+    // Set pivot based on pivot_point
+    switch (pivotPoint) {
+      case 'top-left':
+        object.pivot.set(0, 0);
+        break;
+      case 'top-right':
+        object.pivot.set(width, 0);
+        break;
+      case 'bottom-left':
+        object.pivot.set(0, height);
+        break;
+      case 'bottom-right':
+        object.pivot.set(width, height);
+        break;
+      case 'center':
+      default:
+        object.pivot.set(width / 2, height / 2);
+        // Adjust position to compensate for pivot change
+        object.x += width / 2;
+        object.y += height / 2;
+        break;
+    }
+  }
+
+  /**
+   * Show visual feedback animation for AI-modified objects (Task 8)
+   * @param {number} objectId - ID of the modified object
+   */
+  showAIFeedback(objectId) {
+    const pixiObject = this.objects.get(objectId);
+    if (!pixiObject) return;
+
+    // Use local bounds (container-relative) instead of global bounds
+    const bounds = pixiObject.getLocalBounds();
+    const highlight = new PIXI.Graphics();
+
+    // Draw a glowing border around the object
+    highlight.rect(
+      -4,
+      -4,
+      bounds.width + 8,
+      bounds.height + 8
+    ).stroke({ width: 3, color: 0x10b981 }); // Green highlight
+
+    // Position highlight at object's position
+    highlight.x = pixiObject.x;
+    highlight.y = pixiObject.y;
+
+    this.objectContainer.addChild(highlight);
+
+    // Animate the highlight (fade out and remove)
+    let alpha = 1.0;
+    const fadeInterval = setInterval(() => {
+      alpha -= 0.05;
+      highlight.alpha = alpha;
+
+      if (alpha <= 0) {
+        clearInterval(fadeInterval);
+        if (highlight.parent) {
+          highlight.parent.removeChild(highlight);
+        }
+        highlight.destroy();
+      }
+    }, 50);
   }
 
   /**
@@ -333,6 +460,17 @@ export class CanvasManager {
     if (objectData.position) {
       pixiObject.x = objectData.position.x;
       pixiObject.y = objectData.position.y;
+
+      // Update label position for this object if labels are visible
+      if (this.labelsVisible) {
+        const label = this.objectLabels.get(objectData.id);
+        if (label) {
+          // Use local bounds and object position (same as selection boxes)
+          const bounds = pixiObject.getLocalBounds();
+          label.container.x = pixiObject.x + bounds.width / 2 - label.container.width / 2;
+          label.container.y = pixiObject.y - label.container.height - 5;
+        }
+      }
     }
 
     // Update lock status
@@ -345,6 +483,12 @@ export class CanvasManager {
     if (objectData.data) {
       this.deleteObject(objectData.id);
       this.createObject(objectData);
+
+      // Show AI feedback for data changes (Task 8)
+      this.showAIFeedback(objectData.id);
+
+      // Update label for recreated object if labels are visible
+      this.updateObjectLabels();
     }
   }
 
@@ -374,6 +518,14 @@ export class CanvasManager {
       this.objectContainer.removeChild(pixiObject);
       pixiObject.destroy();
       this.objects.delete(objectId);
+    }
+
+    // Also remove the label if it exists
+    const label = this.objectLabels.get(objectId);
+    if (label) {
+      this.labelContainer.removeChild(label.container);
+      label.container.destroy();
+      this.objectLabels.delete(objectId);
     }
   }
 
@@ -496,10 +648,19 @@ export class CanvasManager {
    * @param {MouseEvent} event
    */
   handleMouseDown(event) {
+    console.log('[CanvasManager] handleMouseDown, isDragging:', this.isDragging);
+
+    // If we're already dragging (object was clicked via PixiJS event), don't process this event
+    if (this.isDragging) {
+      console.log('[CanvasManager] Already dragging, skipping handleMouseDown');
+      return;
+    }
+
     const position = this.getMousePosition(event);
 
     // Start panning with spacebar+click or middle mouse (NOT shift anymore - used for multi-select)
     if (this.spacePressed || event.button === 1) {
+      console.log('[CanvasManager] Starting pan, setting isPanning=true');
       this.isPanning = true;
       this.panStart = { x: event.clientX, y: event.clientY };
       this.app.canvas.style.cursor = 'grabbing';
@@ -509,9 +670,12 @@ export class CanvasManager {
 
     // Check if clicking on canvas (not on an object)
     const clickedObject = this.findObjectAt(position);
+    console.log('[CanvasManager] Clicked object:', clickedObject?.objectId || 'none');
 
     if (this.currentTool === 'select') {
       if (clickedObject) {
+        // This shouldn't happen if PixiJS events work, but keep as fallback
+        console.log('[CanvasManager] Object clicked via DOM event (fallback)');
         // Shift+click = toggle selection, regular click = replace selection
         if (event.shiftKey) {
           this.toggleSelection(clickedObject);
@@ -520,6 +684,7 @@ export class CanvasManager {
         }
       } else {
         // Clicking on empty space = clear selection (unless shift-clicking)
+        console.log('[CanvasManager] Empty space clicked, clearing selection');
         if (!event.shiftKey) {
           this.clearSelection();
         }
@@ -543,7 +708,7 @@ export class CanvasManager {
           data: {
             text: text,
             font_size: 16,
-            color: '#000000',
+            color: this.currentColor,
             font_family: 'Arial'
           }
         });
@@ -575,13 +740,18 @@ export class CanvasManager {
       this.viewOffset.y += dy;
       this.objectContainer.x = this.viewOffset.x;
       this.objectContainer.y = this.viewOffset.y;
+      this.labelContainer.x = this.viewOffset.x;
+      this.labelContainer.y = this.viewOffset.y;
       this.cursorContainer.x = this.viewOffset.x;
       this.cursorContainer.y = this.viewOffset.y;
 
       this.panStart = { x: event.clientX, y: event.clientY };
 
-      // Debounced culling during pan (every 100ms)
-      this.debouncedCullUpdate();
+      // Emit viewport changed event for saving
+      this.emit('viewport_changed');
+
+      // Debounced culling during pan (disabled for now)
+      // this.debouncedCullUpdate();
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
@@ -601,6 +771,9 @@ export class CanvasManager {
       // Update all selection boxes
       this.updateSelectionBoxes();
 
+      // Update all object labels to follow dragged objects
+      this.updateObjectLabels();
+
       // Broadcast positions for all selected objects during drag (throttled to avoid spam)
       if (!this.lastDragUpdate || Date.now() - this.lastDragUpdate > 50) {
         this.selectedObjects.forEach(obj => {
@@ -619,6 +792,16 @@ export class CanvasManager {
    * @param {MouseEvent} event
    */
   handleMouseUp(event) {
+    // Handle panning state first (doesn't need mouse position)
+    if (this.isPanning) {
+      console.log('[CanvasManager] Panning ended, resetting isPanning flag');
+      this.isPanning = false;
+      // Restore cursor based on spacebar state
+      this.app.canvas.style.cursor = this.spacePressed ? 'grab' : 'default';
+      return; // Early return after handling pan
+    }
+
+    // Only get mouse position if we need it
     const position = this.getMousePosition(event);
 
     if (this.isCreating) {
@@ -637,12 +820,6 @@ export class CanvasManager {
       });
       this.isDragging = false;
     }
-
-    if (this.isPanning) {
-      this.isPanning = false;
-      // Restore cursor based on spacebar state
-      this.app.canvas.style.cursor = this.spacePressed ? 'grab' : 'default';
-    }
   }
 
   /**
@@ -660,21 +837,30 @@ export class CanvasManager {
 
       this.zoomLevel = newZoom;
       this.objectContainer.scale.set(newZoom, newZoom);
+      this.labelContainer.scale.set(newZoom, newZoom);
       this.cursorContainer.scale.set(newZoom, newZoom);
 
-      // Debounced culling during zoom
-      this.debouncedCullUpdate();
+      // Emit viewport changed event for saving
+      this.emit('viewport_changed');
+
+      // Debounced culling during zoom (disabled for now)
+      // this.debouncedCullUpdate();
     } else {
       // Pan with trackpad scroll or mouse wheel
       this.viewOffset.x -= event.deltaX;
       this.viewOffset.y -= event.deltaY;
       this.objectContainer.x = this.viewOffset.x;
       this.objectContainer.y = this.viewOffset.y;
+      this.labelContainer.x = this.viewOffset.x;
+      this.labelContainer.y = this.viewOffset.y;
       this.cursorContainer.x = this.viewOffset.x;
       this.cursorContainer.y = this.viewOffset.y;
 
-      // Debounced culling during pan
-      this.debouncedCullUpdate();
+      // Emit viewport changed event for saving
+      this.emit('viewport_changed');
+
+      // Debounced culling during pan (disabled for now)
+      // this.debouncedCullUpdate();
     }
   }
 
@@ -830,8 +1016,8 @@ export class CanvasManager {
           data: {
             width: width,
             height: height,
-            fill: '#3b82f6',
-            stroke: '#1e40af',
+            fill: this.currentColor,
+            stroke: this.currentColor,
             stroke_width: 2
           }
         });
@@ -842,8 +1028,8 @@ export class CanvasManager {
           position: position,
           data: {
             width: radius * 2,
-            fill: '#3b82f6',
-            stroke: '#1e40af',
+            fill: this.currentColor,
+            stroke: this.currentColor,
             stroke_width: 2
           }
         });
@@ -892,8 +1078,10 @@ export class CanvasManager {
 
     // Remove all selection boxes
     this.selectionBoxes.forEach((box, objectId) => {
-      this.objectContainer.removeChild(box);
-      box.destroy();
+      if (box.parent) {
+        box.parent.removeChild(box);
+      }
+      box.destroy({ children: true });
     });
 
     this.selectedObjects.clear();
@@ -931,8 +1119,10 @@ export class CanvasManager {
       // Remove selection box
       const box = this.selectionBoxes.get(object.objectId);
       if (box) {
-        this.objectContainer.removeChild(box);
-        box.destroy();
+        if (box.parent) {
+          box.parent.removeChild(box);
+        }
+        box.destroy({ children: true });
         this.selectionBoxes.delete(object.objectId);
       }
     } else {
@@ -948,16 +1138,30 @@ export class CanvasManager {
    * @param {PIXI.DisplayObject} object - Object to create selection box for
    */
   createSelectionBox(object) {
+    // Remove any existing selection box for this object first
+    const existingBox = this.selectionBoxes.get(object.objectId);
+    if (existingBox) {
+      this.objectContainer.removeChild(existingBox);
+      existingBox.destroy();
+      this.selectionBoxes.delete(object.objectId);
+    }
+
     const selectionBox = new PIXI.Graphics();
-    const rect = object.getBounds();
+
+    // Use local bounds (container-relative) instead of global bounds
+    const bounds = object.getLocalBounds();
 
     // v8 Graphics API: shape → stroke (no fill for selection box)
     selectionBox.rect(
-      rect.x - 2,
-      rect.y - 2,
-      rect.width + 4,
-      rect.height + 4
+      -2,
+      -2,
+      bounds.width + 4,
+      bounds.height + 4
     ).stroke({ width: 2, color: 0x3b82f6 });
+
+    // Position selection box at object's position
+    selectionBox.x = object.x;
+    selectionBox.y = object.y;
 
     this.objectContainer.addChild(selectionBox);
     this.selectionBoxes.set(object.objectId, selectionBox);
@@ -970,14 +1174,36 @@ export class CanvasManager {
     this.selectionBoxes.forEach((box, objectId) => {
       const obj = this.objects.get(objectId);
       if (obj) {
-        const rect = obj.getBounds();
+        // Use local bounds (container-relative)
+        const bounds = obj.getLocalBounds();
         box.clear();
         box.rect(
-          rect.x - 2,
-          rect.y - 2,
-          rect.width + 4,
-          rect.height + 4
+          -2,
+          -2,
+          bounds.width + 4,
+          bounds.height + 4
         ).stroke({ width: 2, color: 0x3b82f6 });
+
+        // Update position to match object
+        box.x = obj.x;
+        box.y = obj.y;
+      }
+    });
+  }
+
+  /**
+   * Update all object labels to match object positions
+   */
+  updateObjectLabels() {
+    if (!this.labelsVisible) return;
+
+    this.objectLabels.forEach((label, objectId) => {
+      const obj = this.objects.get(objectId);
+      if (obj) {
+        // Use local bounds and object position (same as selection boxes)
+        const bounds = obj.getLocalBounds();
+        label.container.x = obj.x + bounds.width / 2 - label.container.width / 2;
+        label.container.y = obj.y - label.container.height - 5; // 5px above object
       }
     });
   }
@@ -1002,8 +1228,8 @@ export class CanvasManager {
         this.canvasWidth = width;
         this.canvasHeight = height;
 
-        // Update culling after resize
-        this.updateVisibleObjects();
+        // Update culling after resize (disabled for now)
+        // this.updateVisibleObjects();
       }
     });
   }
@@ -1026,8 +1252,8 @@ export class CanvasManager {
   updateVisibleObjects() {
     if (!this.objectContainer || !this.app) return;
 
-    // Calculate visible viewport bounds with padding
-    const padding = 100; // Extra padding to cull slightly off-screen objects
+    // Calculate visible viewport bounds with generous padding to prevent disappearing objects during pan
+    const padding = 500; // Extra padding to keep objects visible during pan/zoom (increased from 100)
     const viewportBounds = new PIXI.Rectangle(
       -this.viewOffset.x / this.zoomLevel - padding,
       -this.viewOffset.y / this.zoomLevel - padding,
@@ -1050,10 +1276,13 @@ export class CanvasManager {
     const globalPos = event.data.global;
     const localPos = this.screenToCanvas(globalPos);
 
+    console.log('[CanvasManager] Object pointer down, isPanning:', this.isPanning, 'objectId:', object.objectId);
+
     // Check if object is locked by another user
     const pixiObject = this.objects.get(object.objectId);
     if (pixiObject && pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId) {
       // Object is locked by another user, prevent interaction
+      console.log('[CanvasManager] Object is locked by another user');
       return;
     }
 
@@ -1064,6 +1293,7 @@ export class CanvasManager {
       }
 
       // Prepare for dragging all selected objects
+      console.log('[CanvasManager] Setting isDragging=true');
       this.isDragging = true;
 
       // Calculate drag offset for each selected object
@@ -1130,6 +1360,147 @@ export class CanvasManager {
   }
 
   /**
+   * Get IDs of currently selected objects
+   * @returns {Array<string>} Array of selected object IDs
+   */
+  getSelectedObjectIds() {
+    return Array.from(this.selectedObjects).map(obj => obj.objectId);
+  }
+
+  /**
+   * Restore viewport to a saved position
+   * @param {number} x - Viewport X position
+   * @param {number} y - Viewport Y position
+   * @param {number} zoom - Zoom level
+   */
+  restoreViewport(x, y, zoom) {
+    // Set zoom level
+    this.zoomLevel = zoom;
+    this.objectContainer.scale.set(zoom, zoom);
+    this.labelContainer.scale.set(zoom, zoom);
+    this.cursorContainer.scale.set(zoom, zoom);
+
+    // Set viewport offset
+    this.viewOffset = { x, y };
+    this.objectContainer.x = x;
+    this.objectContainer.y = y;
+    this.labelContainer.x = x;
+    this.labelContainer.y = y;
+    this.cursorContainer.x = x;
+    this.cursorContainer.y = y;
+  }
+
+  /**
+   * Get current viewport state
+   * @returns {Object} {x, y, zoom}
+   */
+  getViewportState() {
+    return {
+      x: this.viewOffset.x,
+      y: this.viewOffset.y,
+      zoom: this.zoomLevel
+    };
+  }
+
+  /**
+   * Set the current color for object creation
+   * @param {string} color - Hex color string (e.g., "#FF0000")
+   */
+  setCurrentColor(color) {
+    this.currentColor = color || '#000000';
+  }
+
+  /**
+   * Create a label for a single object
+   * @param {number} objectId - Object ID
+   * @param {PIXI.DisplayObject} pixiObject - The PixiJS object
+   * @param {string} labelText - Optional label text (if not provided, retrieves from stored label or generates default)
+   */
+  createLabelForObject(objectId, pixiObject, labelText = null) {
+    // If no labelText provided, try to get it from existing label or use default
+    if (!labelText) {
+      const existingLabel = this.objectLabels.get(objectId);
+      labelText = existingLabel?.labelText || `Object ${objectId}`;
+    }
+
+    // Remove existing label if present
+    const existingLabel = this.objectLabels.get(objectId);
+    if (existingLabel) {
+      this.labelContainer.removeChild(existingLabel.container);
+      existingLabel.container.destroy();
+    }
+
+    // Create label container
+    const labelContainer = new PIXI.Container();
+
+    // Create text label
+    const text = new PIXI.Text({
+      text: labelText,
+      style: new PIXI.TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 14,
+        fill: 0xffffff,
+        fontWeight: 'bold'
+      })
+    });
+
+    // Create background for label
+    const padding = 4;
+    const bg = new PIXI.Graphics();
+    bg.roundRect(0, 0, text.width + padding * 2, text.height + padding * 2, 4)
+      .fill({ color: 0x3b82f6, alpha: 0.9 });
+
+    // Position text on top of background
+    text.x = padding;
+    text.y = padding;
+
+    labelContainer.addChild(bg);
+    labelContainer.addChild(text);
+
+    // Position label above the object using local bounds and object position
+    // (similar to how selection boxes are positioned)
+    const bounds = pixiObject.getLocalBounds();
+    labelContainer.x = pixiObject.x + bounds.width / 2 - labelContainer.width / 2;
+    labelContainer.y = pixiObject.y - labelContainer.height - 5; // 5px above object
+
+    // Store label reference with text for persistence
+    this.objectLabels.set(objectId, { container: labelContainer, text, bg, labelText });
+
+    // Add to label container (renders on top of objects)
+    this.labelContainer.addChild(labelContainer);
+  }
+
+  /**
+   * Toggle visual labels on canvas objects
+   * @param {boolean} show - Whether to show or hide labels
+   * @param {Object} labels - Map of object_id => display_name (e.g., "Rectangle 1")
+   */
+  toggleObjectLabels(show, labels) {
+    console.log('[CanvasManager] toggleObjectLabels called - show:', show, 'labels:', labels, 'labelsVisible:', this.labelsVisible);
+    if (show) {
+      // Show labels
+      this.labelsVisible = true;
+
+      // Create label for each object
+      this.objects.forEach((pixiObject, objectId) => {
+        const labelText = labels[objectId] || `Object ${objectId}`;
+        this.createLabelForObject(objectId, pixiObject, labelText);
+      });
+    } else {
+      // Hide labels
+      this.labelsVisible = false;
+
+      // Remove all labels
+      this.objectLabels.forEach((label, objectId) => {
+        this.labelContainer.removeChild(label.container);
+        label.container.destroy();
+      });
+
+      this.objectLabels.clear();
+    }
+  }
+
+  /**
    * Destroy the CanvasManager and clean up resources
    */
   destroy() {
@@ -1137,14 +1508,15 @@ export class CanvasManager {
     const canvas = this.app?.canvas;
     if (canvas) {
       canvas.removeEventListener('mousedown', this.boundHandlers.handleMouseDown);
-      canvas.removeEventListener('mousemove', this.boundHandlers.handleMouseMove);
-      canvas.removeEventListener('mouseup', this.boundHandlers.handleMouseUp);
       canvas.removeEventListener('wheel', this.boundHandlers.handleWheel);
       canvas.removeEventListener('touchstart', this.boundHandlers.handleTouchStart);
       canvas.removeEventListener('touchmove', this.boundHandlers.handleTouchMove);
       canvas.removeEventListener('touchend', this.boundHandlers.handleTouchEnd);
     }
 
+    // Remove window event listeners (mousemove and mouseup are on window, not canvas)
+    window.removeEventListener('mousemove', this.boundHandlers.handleMouseMove);
+    window.removeEventListener('mouseup', this.boundHandlers.handleMouseUp);
     window.removeEventListener('keydown', this.boundHandlers.handleKeyDown);
     window.removeEventListener('keyup', this.boundHandlers.handleKeyUp);
     window.removeEventListener('resize', this.boundHandlers.handleResize);

@@ -1,0 +1,52 @@
+{
+  "master": [
+    {
+      "id": "1",
+      "title": "Implement User Color Palette System with Memory",
+      "description": "Create a comprehensive color palette system where each user has their own color preferences that persist across sessions",
+      "status": "pending",
+      "priority": "high",
+      "dependencies": [],
+      "tags": ["master"],
+      "details": "The system should track:\n- Last used colors (up to 10 recent colors)\n- Favorite colors (pinned by user)\n- Default color for new objects\n- Color history per canvas\n\nTechnical requirements:\n- Database migration for user_color_preferences table with columns: user_id, recent_colors (JSON array), favorite_colors (JSON array), default_color (string)\n- Phoenix context module (CollabCanvas.ColorPalettes) for CRUD operations\n- LiveView UI component for color picker with HSL sliders + hex input\n- Real-time color sync across user's sessions via PubSub\n- Integration with existing object creation flow in CanvasLive\n- Color swatch UI showing recent + favorite colors\n\nFiles to create:\n- priv/repo/migrations/*_create_user_color_preferences.exs\n- lib/collab_canvas/color_palettes.ex (new context)\n- lib/collab_canvas/color_palettes/user_color_preference.ex (new schema)\n- lib/collab_canvas_web/components/color_picker.ex (new LiveView component)\n- assets/js/hooks/color_picker.js (HSL slider interactions)\n\nFiles to modify:\n- lib/collab_canvas_web/live/canvas_live.ex (integrate color picker)",
+      "testStrategy": "- Unit tests for ColorPalettes context CRUD operations\n- Integration tests for color persistence across sessions\n- LiveView tests for color picker component interactions\n- Test color sync via PubSub\n- Test recent colors limit (max 10)\n- Test favorite colors pinning/unpinning",
+      "subtasks": []
+    },
+    {
+      "id": "2",
+      "title": "Implement Color Scheme System (5 colors, configurable)",
+      "description": "Create a color scheme system with predefined and custom schemes containing 5 colors each",
+      "status": "pending",
+      "priority": "high",
+      "dependencies": ["1"],
+      "tags": ["master"],
+      "details": "Features:\n- Predefined color schemes (Material, Tailwind, Pastel, Vibrant, Monochrome, etc.)\n- Custom scheme creation (user picks 5 colors)\n- Scheme persistence per user\n- Quick-apply scheme to selected objects\n- AI integration: 'use warm color scheme' command\n\nTechnical requirements:\n- Database migration for color_schemes table: id, user_id, name, colors (JSON array of 5 hex codes), is_predefined (boolean)\n- Phoenix context module (CollabCanvas.ColorSchemes)\n- UI panel for browsing/selecting schemes\n- Scheme editor for custom schemes\n- AI tool definition for scheme application\n\nFiles to create:\n- priv/repo/migrations/*_create_color_schemes.exs\n- lib/collab_canvas/color_schemes.ex (new context)\n- lib/collab_canvas/color_schemes/color_scheme.ex (new schema)\n- lib/collab_canvas_web/live/color_scheme_panel_live.ex (scheme browser)\n- lib/collab_canvas/ai/color_scheme_tools.ex (AI integration)\n\nFiles to modify:\n- lib/collab_canvas_web/live/canvas_live.ex (add scheme panel)\n- lib/collab_canvas/ai/tools.ex (add apply_color_scheme tool)\n- lib/collab_canvas/ai/agent.ex (implement scheme tool execution)",
+      "testStrategy": "- Unit tests for ColorSchemes context\n- Test predefined schemes load correctly\n- Test custom scheme creation/editing\n- Test scheme application to objects\n- Test AI scheme commands\n- Test scheme persistence\n- Validate exactly 5 colors per scheme",
+      "subtasks": []
+    },
+    {
+      "id": "3",
+      "title": "Implement Line Drawing Tool",
+      "description": "Add a line/path drawing tool with full editing capabilities",
+      "status": "pending",
+      "priority": "high",
+      "dependencies": [],
+      "tags": ["master"],
+      "details": "Features:\n- Click-drag-release to draw straight lines\n- Line properties: thickness (1-50px), color, dash pattern (solid/dashed/dotted)\n- Arrow heads (none/start/end/both)\n- Line editing: drag endpoints to reposition\n- Multi-segment paths (polylines)\n- Bezier curves (future enhancement placeholder)\n\nTechnical requirements:\n- Update Object schema to support 'line' type\n- Line data format: {start: {x, y}, end: {x, y}, thickness, color, dashPattern, arrowStart, arrowEnd}\n- PixiJS Graphics rendering for lines\n- LiveView event handlers for line creation/editing\n- AI tool for creating lines: 'draw a red line from (10,10) to (100,100)'\n\nFiles to create:\n- assets/js/tools/line_tool.js (line drawing interaction)\n- assets/js/renderers/line_renderer.js (PixiJS line rendering with arrows)\n\nFiles to modify:\n- lib/collab_canvas/canvases/object.ex (validate 'line' type)\n- lib/collab_canvas_web/live/canvas_live.ex (add line tool event handlers)\n- assets/js/hooks/canvas_manager.js (integrate line tool)\n- assets/js/core/canvas_manager.js (line selection/editing)\n- lib/collab_canvas/ai/tools.ex (add create_line tool)\n- lib/collab_canvas/ai/agent.ex (implement create_line execution)\n\nUI additions:\n- Line tool button in toolbar (keyboard shortcut: L)\n- Line properties panel (thickness slider, dash pattern dropdown, arrow toggles)",
+      "testStrategy": "- Test line creation via click-drag\n- Test line endpoint editing\n- Test line thickness range (1-50px)\n- Test dash patterns render correctly\n- Test arrow heads render at correct angle\n- Test AI line creation commands\n- Test line selection and deletion\n- Test line data persistence\n- Test multi-user line editing with locks",
+      "subtasks": []
+    },
+    {
+      "id": "4",
+      "title": "Implement Multi-Object Selection",
+      "description": "Add comprehensive multi-select functionality with selection box, shift-click, and batch operations",
+      "status": "pending",
+      "priority": "high",
+      "dependencies": [],
+      "tags": ["master"],
+      "details": "Features:\n- Click-drag to draw selection box (rectangular marquee)\n- Shift+click to add/remove objects from selection\n- Ctrl/Cmd+A to select all objects\n- Visual selection state (blue outline/handles)\n- Multi-object operations:\n  - Drag all selected objects together (already implemented, needs testing)\n  - Delete all selected (keyboard: Delete/Backspace)\n  - Apply style to all selected (color, opacity, etc.)\n  - Group/ungroup (future enhancement)\n- Selection info panel: show count, combined bounds\n\nTechnical requirements:\n- Selection box drawing with PixiJS Graphics\n- Selection state management in canvas_manager.js\n- Shift key detection for additive selection\n- Bounding box intersection detection\n- LiveView events: select_multiple, deselect_all, delete_selected, style_selected\n- PubSub broadcast for selection state (show other users' selections)\n\nFiles to create:\n- assets/js/tools/selection_tool.js (selection box drawing)\n- assets/js/utils/bounds_utils.js (intersection detection helpers)\n\nFiles to modify:\n- assets/js/hooks/canvas_manager.js (selection box integration)\n- assets/js/core/canvas_manager.js (multi-select state, keyboard shortcuts)\n- lib/collab_canvas_web/live/canvas_live.ex (batch operation handlers)\n- lib/collab_canvas/canvases.ex (add delete_objects/1, update_objects/2)\n\nUI additions:\n- Selection info panel in sidebar (count, dimensions)\n- Multi-select toolbar actions (align, distribute, group)\n- Selection box visual styling (dashed blue rectangle)",
+      "testStrategy": "- Test selection box drawing and intersection\n- Test shift+click additive selection\n- Test Ctrl/Cmd+A select all\n- Test multi-object drag (update_objects_batch)\n- Test batch delete\n- Test batch style changes\n- Test selection state sync across users\n- Test keyboard shortcut handling\n- Test selection box with zoom/pan\n- Test selection persistence across tool changes\n- Verify no performance degradation with 50+ objects",
+      "subtasks": []
+    }
+  ]
+}

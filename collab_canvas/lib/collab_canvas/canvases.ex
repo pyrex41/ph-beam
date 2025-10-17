@@ -89,6 +89,7 @@ defmodule CollabCanvas.Canvases do
 
   alias CollabCanvas.Canvases.Canvas
   alias CollabCanvas.Canvases.Object
+  alias CollabCanvas.Canvases.CanvasUserViewport
 
   @doc """
   Creates a new canvas for a user.
@@ -520,6 +521,66 @@ defmodule CollabCanvas.Canvases do
       canvas ->
         # Objects will be deleted automatically due to on_delete: :delete_all
         Repo.delete(canvas)
+    end
+  end
+
+  @doc """
+  Gets a user's saved viewport position for a specific canvas.
+
+  ## Parameters
+    * `user_id` - The user ID
+    * `canvas_id` - The canvas ID
+
+  ## Returns
+    * The viewport struct if found
+    * `nil` if not found
+
+  ## Examples
+
+      iex> get_viewport(1, 2)
+      %CanvasUserViewport{viewport_x: 100.0, viewport_y: 50.0, zoom: 1.5}
+
+      iex> get_viewport(999, 2)
+      nil
+
+  """
+  def get_viewport(user_id, canvas_id) do
+    CanvasUserViewport
+    |> where([v], v.user_id == ^user_id and v.canvas_id == ^canvas_id)
+    |> Repo.one()
+  end
+
+  @doc """
+  Saves or updates a user's viewport position for a specific canvas.
+
+  ## Parameters
+    * `user_id` - The user ID
+    * `canvas_id` - The canvas ID
+    * `attrs` - Map with viewport_x, viewport_y, and zoom
+
+  ## Returns
+    * `{:ok, viewport}` on success
+    * `{:error, changeset}` on validation failure
+
+  ## Examples
+
+      iex> save_viewport(1, 2, %{viewport_x: 100.0, viewport_y: 50.0, zoom: 1.5})
+      {:ok, %CanvasUserViewport{}}
+
+  """
+  def save_viewport(user_id, canvas_id, attrs) do
+    attrs = Map.merge(attrs, %{user_id: user_id, canvas_id: canvas_id})
+
+    case get_viewport(user_id, canvas_id) do
+      nil ->
+        %CanvasUserViewport{}
+        |> CanvasUserViewport.changeset(attrs)
+        |> Repo.insert()
+
+      viewport ->
+        viewport
+        |> CanvasUserViewport.changeset(attrs)
+        |> Repo.update()
     end
   end
 end

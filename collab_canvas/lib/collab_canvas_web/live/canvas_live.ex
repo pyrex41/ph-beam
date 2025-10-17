@@ -83,6 +83,7 @@ defmodule CollabCanvasWeb.CanvasLive do
   use CollabCanvasWeb, :live_view
 
   alias CollabCanvas.Canvases
+  alias CollabCanvas.ColorPalettes
   alias CollabCanvas.AI.Agent
   alias CollabCanvasWeb.Presence
   alias CollabCanvasWeb.Plugs.Auth
@@ -138,28 +139,51 @@ defmodule CollabCanvasWeb.CanvasLive do
       user_id = "user_#{user.id}"
 
       # Track user presence (cursor will be set when user first moves mouse)
-      {:ok, _} =
-        Presence.track(self(), topic, user_id, %{
+      # Handle both success and already_tracked cases (can happen on page reload)
+      case Presence.track(self(), topic, user_id, %{
           online_at: System.system_time(:second),
           cursor: nil,
           color: generate_user_color(),
           name: user.name || user.email,
           email: user.email
-        })
+        }) do
+        {:ok, _} -> :ok
+        {:error, {:already_tracked, _, _, _}} -> :ok
+      end
+
+      # Load user's saved viewport position for this canvas
+      viewport = Canvases.get_viewport(user.id, canvas_id)
 
       # Initialize socket state
-      {:ok,
-       socket
-       |> assign(:canvas, canvas)
-       |> assign(:canvas_id, canvas_id)
-       |> assign(:objects, canvas.objects)
-       |> assign(:user_id, user_id)
-       |> assign(:topic, topic)
-       |> assign(:presences, %{})
-       |> assign(:selected_tool, "select")
-       |> assign(:ai_command, "")
-       |> assign(:ai_loading, false)
-       |> assign(:ai_task_ref, nil)}
+      socket =
+        socket
+        |> assign(:canvas, canvas)
+        |> assign(:canvas_id, canvas_id)
+        |> assign(:objects, canvas.objects)
+        |> assign(:user_id, user_id)
+        |> assign(:topic, topic)
+        |> assign(:presences, %{})
+        |> assign(:selected_tool, "select")
+        |> assign(:ai_command, "")
+        |> assign(:ai_loading, false)
+        |> assign(:ai_task_ref, nil)
+        |> assign(:show_labels, false)
+        |> assign(:current_color, ColorPalettes.get_default_color(user.id))
+        |> assign(:show_color_picker, false)
+
+      # If viewport position exists, push it to the client to restore position
+      socket =
+        if viewport do
+          push_event(socket, "restore_viewport", %{
+            x: viewport.viewport_x,
+            y: viewport.viewport_y,
+            zoom: viewport.zoom
+          })
+        else
+          socket
+        end
+
+      {:ok, socket}
     else
       # Canvas not found or user not authenticated
       {:ok,
@@ -657,11 +681,13 @@ defmodule CollabCanvasWeb.CanvasLive do
 
   ## Parameters
 
-  - `params` - Map containing "command" key with natural language instruction
+  - `params` - Map containing:
+    - "command" - Natural language instruction
+    - "selected_ids" - Optional list of selected object IDs for context
 
   ## Async Processing
 
-  1. Spawns Task.async to call Agent.execute_command/2
+  1. Spawns Task.async to call Agent.execute_command/3
   2. Sets 30-second timeout with Process.send_after/3
   3. Task completion handled by handle_info({ref, result}, socket)
   4. Task crash handled by handle_info({:DOWN, ref, ...}, socket)
@@ -676,10 +702,14 @@ defmodule CollabCanvasWeb.CanvasLive do
 
   - "Create a blue rectangle"
   - "Add a green circle"
-  - "Make a text box saying Hello World"
+  - "Arrange selected objects horizontally"
+  - "Align these objects to the top"
   """
   @impl true
-  def handle_event("execute_ai_command", %{"command" => command}, socket) do
+  def handle_event("execute_ai_command", params, socket) do
+    command = params["command"]
+    selected_ids = Map.get(params, "selected_ids", [])
+
     # Prevent duplicate AI commands while one is in progress
     if socket.assigns.ai_loading do
       {:noreply, put_flash(socket, :warning, "AI command already in progress, please wait...")}
@@ -687,9 +717,10 @@ defmodule CollabCanvasWeb.CanvasLive do
       canvas_id = socket.assigns.canvas_id
 
       # Start async task with timeout (Task.async automatically links to current process)
+      current_color = socket.assigns.current_color
       task =
         Task.async(fn ->
-          Agent.execute_command(command, canvas_id)
+          Agent.execute_command(command, canvas_id, selected_ids, current_color: current_color)
         end)
 
       # Set loading state and store task reference for timeout monitoring
@@ -764,6 +795,174 @@ defmodule CollabCanvasWeb.CanvasLive do
     end)
 
     {:noreply, socket}
+  end
+
+  @doc """
+  Handles viewport position save events from the client.
+
+  Saves the user's current viewport position and zoom level for this canvas,
+  so they can return to the same position when they reload or revisit.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "x" - Viewport X coordinate
+    - "y" - Viewport Y coordinate
+    - "zoom" - Zoom level
+
+  ## Returns
+
+  `{:noreply, socket}` - State unchanged, viewport saved to database
+  """
+  @impl true
+  def handle_event("save_viewport", %{"x" => x, "y" => y, "zoom" => zoom}, socket) do
+    user = socket.assigns.current_user
+    canvas_id = socket.assigns.canvas_id
+
+    # Save viewport position asynchronously (don't block on response)
+    Task.start(fn ->
+      Canvases.save_viewport(user.id, canvas_id, %{
+        viewport_x: x,
+        viewport_y: y,
+        zoom: zoom
+      })
+    end)
+
+    {:noreply, socket}
+  end
+
+  @doc """
+  Handles component instantiation via drag-and-drop from the components panel.
+
+  Creates instances of the component at the specified position on the current canvas.
+  Broadcasts the instantiation to all connected clients.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "component_id" - ID of component to instantiate
+    - "position" - Map with x, y coordinates for placement
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message
+  """
+  @impl true
+  def handle_event("instantiate_component", params, socket) do
+    component_id = params["component_id"]
+    component_id = if is_binary(component_id), do: String.to_integer(component_id), else: component_id
+
+    position = params["position"]
+    position = %{x: position["x"], y: position["y"]}
+
+    canvas_id = socket.assigns.canvas_id
+
+    case CollabCanvas.Components.instantiate_component(component_id, position, canvas_id: canvas_id) do
+      {:ok, instances} ->
+        # Broadcast to all connected clients
+        Enum.each(instances, fn instance ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            socket.assigns.topic,
+            {:object_created, instance}
+          )
+        end)
+
+        # Update local state
+        updated_objects = instances ++ socket.assigns.objects
+
+        {:noreply,
+         socket
+         |> assign(:objects, updated_objects)
+         |> put_flash(:info, "Component instantiated (#{length(instances)} objects created)")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Component not found")}
+
+      {:error, reason} ->
+        Logger.error("Failed to instantiate component: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to instantiate component")}
+    end
+  end
+
+  @doc """
+  Handles toggle_labels events from the UI toggle switch.
+
+  Toggles the display of object labels on the canvas and updates the state.
+
+  ## Parameters
+
+  - No parameters needed, toggles the current state
+
+  ## Returns
+
+  `{:noreply, socket}` with updated show_labels state and push_event to client.
+  """
+  @impl true
+  def handle_event("toggle_labels", _params, socket) do
+    new_state = !socket.assigns.show_labels
+    object_labels = generate_object_labels(socket.assigns.objects)
+
+    {:noreply,
+     socket
+     |> assign(:show_labels, new_state)
+     |> push_event("toggle_object_labels", %{show: new_state, labels: object_labels})}
+  end
+
+  @doc """
+  Handles toggle_color_picker events from the left sidebar button.
+
+  Toggles the visibility of the color picker popup.
+
+  ## Returns
+
+  `{:noreply, socket}` with updated show_color_picker state.
+  """
+  @impl true
+  def handle_event("toggle_color_picker", _params, socket) do
+    {:noreply, assign(socket, :show_color_picker, !socket.assigns.show_color_picker)}
+  end
+
+  @doc """
+  Handles color picker color change messages from the ColorPicker component.
+
+  Updates the current color in socket assigns, updates the component, and saves to recent colors.
+
+  ## Parameters
+
+  - `color` - Hex color string selected by the user
+  - `user_id` - ID of the user who changed the color
+
+  ## Returns
+
+  `{:noreply, socket}` with updated current_color assign and component update pushed.
+  """
+  @impl true
+  def handle_info({:color_changed, color, user_id}, socket) do
+    # Extract numeric user ID from the "user_#{id}" format
+    current_user = socket.assigns.current_user
+
+    # Only update if this color change is for the current user
+    if "user_#{current_user.id}" == user_id do
+      # Save to recent colors (async, non-blocking)
+      Task.start(fn ->
+        ColorPalettes.add_recent_color(current_user.id, color)
+      end)
+
+      # Update the LiveComponent with the new color
+      send_update(CollabCanvasWeb.Components.ColorPicker,
+        id: "color-picker",
+        current_color: color
+      )
+
+      # Push event to JavaScript to update current color in CanvasManager
+      {:noreply,
+       socket
+       |> assign(:current_color, color)
+       |> push_event("color_changed", %{color: color})}
+    else
+      {:noreply, socket}
+    end
   end
 
   @doc """
@@ -1120,6 +1319,28 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc false
+  # Private helper to generate human-readable labels for canvas objects.
+  # Groups objects by type and numbers them sequentially.
+  # Returns a map of object_id => display_name (e.g., "Rectangle 1", "Circle 2")
+  defp generate_object_labels(objects) do
+    # Group objects by type and count occurrences
+    objects
+    |> Enum.group_by(& &1.type)
+    |> Enum.flat_map(fn {type, objects_of_type} ->
+      # Sort by ID to maintain consistent ordering
+      objects_of_type
+      |> Enum.sort_by(& &1.id)
+      |> Enum.with_index(1)
+      |> Enum.map(fn {object, index} ->
+        # Capitalize type name (e.g., "rectangle" -> "Rectangle")
+        type_name = String.capitalize(type)
+        {object.id, "#{type_name} #{index}"}
+      end)
+    end)
+    |> Map.new()
+  end
+
+  @doc false
   # Private helper to process AI agent results and update socket state.
   # Handles all possible result types from Agent.execute_command/2:
   # - {:ok, results} - Successfully created objects
@@ -1131,21 +1352,73 @@ defmodule CollabCanvasWeb.CanvasLive do
   # - {:error, reason} - Other errors
   defp process_ai_result(result, socket) do
     case result do
-      {:ok, results} ->
-        # Extract successfully created objects from results
-        objects =
-          results
-          |> Enum.map(fn result -> result.result end)
-          |> Enum.filter(fn
-            {:ok, object} when is_map(object) and is_map_key(object, :id) -> true
-            # Component creation returns object_ids
-            {:ok, %{object_ids: _ids}} -> false
-            _ -> false
-          end)
-          |> Enum.map(fn {:ok, object} -> object end)
+      {:ok, {:text_response, text}} ->
+        # AI asked for clarification or provided text response
+        socket
+        |> assign(:ai_command, "")
+        |> put_flash(:info, text)
 
-        # Broadcast AI-generated objects to all clients
-        Enum.each(objects, fn object ->
+      {:ok, {:toggle_labels, show}} ->
+        # AI requested to show/hide object labels
+        # Generate display names for all objects
+        object_labels = generate_object_labels(socket.assigns.objects)
+
+        # Push event to JavaScript to render labels
+        socket
+        |> push_event("toggle_object_labels", %{show: show, labels: object_labels})
+        |> assign(:ai_command, "")
+        |> assign(:show_labels, show)
+        |> put_flash(:info, if(show, do: "Object labels shown", else: "Object labels hidden"))
+
+      {:ok, results} when is_list(results) and length(results) == 0 ->
+        # AI returned no tool calls - it either doesn't understand or can't perform the action
+        socket
+        |> assign(:ai_command, "")
+        |> put_flash(:warning, "I couldn't perform that action. Try rephrasing your command or check if I have the right tools available.")
+
+      {:ok, results} when is_list(results) ->
+        # Check if this is a special non-object result (like toggle_labels)
+        case results do
+          [%{tool: "show_object_labels", result: {:ok, {:toggle_labels, show}}}] ->
+            # Handle label toggle
+            object_labels = generate_object_labels(socket.assigns.objects)
+
+            socket
+            |> push_event("toggle_object_labels", %{show: show, labels: object_labels})
+            |> assign(:ai_command, "")
+            |> assign(:show_labels, show)
+            |> put_flash(:info, if(show, do: "Object labels shown", else: "Object labels hidden"))
+
+          _ ->
+            # Separate created objects from updated objects
+            {created_objects, updated_objects} =
+              results
+              |> Enum.reduce({[], []}, fn result, {created, updated} ->
+                case result do
+                  # Handle create operations
+                  %{tool: tool, result: {:ok, object}} when tool in ["create_shape", "create_text", "create_component"] and is_map(object) and is_map_key(object, :id) ->
+                    {[object | created], updated}
+
+                  # Handle update/move/arrange operations
+                  %{tool: tool, result: {:ok, object}} when tool in ["move_object", "move_shape", "resize_object", "resize_shape", "rotate_object", "change_style", "update_text"] and is_map(object) and is_map_key(object, :id) ->
+                    {created, [object | updated]}
+
+                  # Handle arrange_objects which returns a success map
+                  %{tool: "arrange_objects", result: {:ok, _success_map}, input: input} ->
+                    # Fetch the actual updated objects from the database
+                    object_ids = Map.get(input, "object_ids", [])
+                    arranged_objects = Enum.map(object_ids, fn id ->
+                      Canvases.get_object(id)
+                    end) |> Enum.reject(&is_nil/1)
+                    {created, arranged_objects ++ updated}
+
+                  _ ->
+                    {created, updated}
+                end
+              end)
+
+        # Broadcast created objects
+        Enum.each(created_objects, fn object ->
           Phoenix.PubSub.broadcast(
             CollabCanvas.PubSub,
             socket.assigns.topic,
@@ -1153,22 +1426,59 @@ defmodule CollabCanvasWeb.CanvasLive do
           )
         end)
 
-        # Update local state
-        updated_objects = objects ++ socket.assigns.objects
+        # Broadcast updated objects
+        Enum.each(updated_objects, fn object ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            socket.assigns.topic,
+            {:object_updated, object}
+          )
+        end)
 
-        success_count = length(objects)
+        # Update local state - merge created and updated
+        new_created = created_objects
+        existing_objects = socket.assigns.objects
+
+        # Update existing objects with new data, add new objects
+        updated_ids = MapSet.new(updated_objects, & &1.id)
+        merged_objects =
+          Enum.map(existing_objects, fn obj ->
+            if MapSet.member?(updated_ids, obj.id) do
+              Enum.find(updated_objects, obj, fn updated -> updated.id == obj.id end)
+            else
+              obj
+            end
+          end)
+
+        final_objects = new_created ++ merged_objects
+
+        total_count = length(created_objects) + length(updated_objects)
 
         message =
-          if success_count > 0 do
-            "AI created #{success_count} object(s) successfully"
+          if total_count > 0 do
+            parts = []
+            parts = if length(created_objects) > 0, do: ["created #{length(created_objects)}" | parts], else: parts
+            parts = if length(updated_objects) > 0, do: ["updated #{length(updated_objects)}" | parts], else: parts
+            "AI #{Enum.join(Enum.reverse(parts), " and ")} object(s) successfully"
           else
             "AI command processed (check canvas for results)"
           end
 
-        socket
-        |> assign(:objects, updated_objects)
+        # Push created objects to JavaScript
+        socket_with_created = Enum.reduce(created_objects, socket, fn object, acc_socket ->
+          push_event(acc_socket, "object_created", %{object: object})
+        end)
+
+        # Push updated objects to JavaScript for immediate rendering with animation
+        socket_with_all = Enum.reduce(updated_objects, socket_with_created, fn object, acc_socket ->
+          push_event(acc_socket, "object_updated", %{object: object, animate: true})
+        end)
+
+        socket_with_all
+        |> assign(:objects, final_objects)
         |> assign(:ai_command, "")
         |> put_flash(:info, message)
+        end
 
       {:error, :canvas_not_found} ->
         put_flash(socket, :error, "Canvas not found")
@@ -1220,6 +1530,11 @@ defmodule CollabCanvasWeb.CanvasLive do
   def render(assigns) do
     ~H"""
     <div class="flex h-screen bg-gray-100">
+      <!-- Flash Messages -->
+      <.flash kind={:info} flash={@flash} />
+      <.flash kind={:error} flash={@flash} />
+      <.flash kind={:warning} flash={@flash} />
+
       <!-- Toolbar -->
       <div class="w-16 bg-white border-r border-gray-200 flex flex-col items-center py-4 space-y-2">
         <button
@@ -1312,6 +1627,30 @@ defmodule CollabCanvasWeb.CanvasLive do
           <span class="absolute right-1 bottom-1 text-[10px] font-bold opacity-50">D</span>
         </button>
 
+        <!-- Divider -->
+        <div class="w-10 h-px bg-gray-300 my-2"></div>
+
+        <!-- Color Picker Button -->
+        <button
+          phx-click="toggle_color_picker"
+          class={[
+            "w-12 h-12 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-colors relative group border-2",
+            @show_color_picker && "bg-blue-100 border-blue-500",
+            !@show_color_picker && "border-gray-300"
+          ]}
+          title="Color Picker"
+          style={"background-color: #{@current_color}"}
+        >
+          <svg class="w-6 h-6 text-white drop-shadow-md" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
+            />
+          </svg>
+        </button>
+
         <div class="flex-1"></div>
 
         <!-- Keyboard shortcuts help -->
@@ -1360,6 +1699,7 @@ defmodule CollabCanvasWeb.CanvasLive do
           data-objects={Jason.encode!(@objects)}
           data-presences={Jason.encode!(@presences)}
           data-user-id={@user_id}
+          data-current-color={@current_color}
         >
           <!-- PixiJS will render here -->
         </div>
@@ -1374,13 +1714,12 @@ defmodule CollabCanvasWeb.CanvasLive do
         <div class="flex-1 p-4 overflow-y-auto">
           <div class="space-y-4">
             <!-- AI Command Input -->
-            <div>
+            <form phx-change="ai_command_change">
               <label class="block text-sm font-medium text-gray-700 mb-2">
                 Command
               </label>
               <textarea
-                phx-change="ai_command_change"
-                phx-value-value={@ai_command}
+                name="value"
                 value={@ai_command}
                 disabled={@ai_loading}
                 class={[
@@ -1390,9 +1729,10 @@ defmodule CollabCanvasWeb.CanvasLive do
                 rows="4"
                 placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle'"
               ><%= @ai_command %></textarea>
-            </div>
+            </form>
 
             <button
+              id="ai-execute-button"
               phx-click="execute_ai_command"
               phx-value-command={@ai_command}
               disabled={@ai_command == "" || @ai_loading}
@@ -1440,14 +1780,43 @@ defmodule CollabCanvasWeb.CanvasLive do
               <li>• "Create a rectangle"</li>
               <li>• "Add a circle"</li>
               <li>• "Make a blue square"</li>
+              <li class="text-blue-600 font-medium">• "Arrange selected horizontally"</li>
+              <li class="text-blue-600 font-medium">• "Align selected objects to top"</li>
+              <li class="text-blue-600 font-medium">• "Distribute vertically with 20px spacing"</li>
             </ul>
+            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p class="text-xs text-blue-700">
+                Tip: Select multiple objects (Shift+click) before using layout commands!
+              </p>
+            </div>
           </div>
         </div>
         <!-- Objects List -->
         <div class="border-t border-gray-200 p-4">
-          <h3 class="text-sm font-medium text-gray-700 mb-2">
-            Objects (<%= length(@objects) %>)
-          </h3>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-medium text-gray-700">
+              Objects (<%= length(@objects) %>)
+            </h3>
+            <!-- Show Labels Toggle -->
+            <button
+              phx-click="toggle_labels"
+              class="flex items-center gap-2 group"
+              title={if @show_labels, do: "Hide object labels", else: "Show object labels"}
+            >
+              <span class="text-xs text-gray-600 group-hover:text-gray-900">Labels</span>
+              <div class={[
+                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                @show_labels && "bg-blue-600",
+                !@show_labels && "bg-gray-300"
+              ]}>
+                <span class={[
+                  "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                  @show_labels && "translate-x-5",
+                  !@show_labels && "translate-x-1"
+                ]} />
+              </div>
+            </button>
+          </div>
           <div class="space-y-1 max-h-40 overflow-y-auto">
             <%= for object <- @objects do %>
               <div class="flex items-center justify-between text-sm py-1">
@@ -1472,6 +1841,21 @@ defmodule CollabCanvasWeb.CanvasLive do
           </div>
         </div>
       </div>
+
+      <!-- Color Picker Popup -->
+      <%= if @show_color_picker do %>
+        <div class="fixed inset-0 z-50">
+          <div class="absolute inset-0 bg-black opacity-25" phx-click="toggle_color_picker"></div>
+          <div class="absolute top-4 left-20 z-10">
+            <.live_component
+              module={CollabCanvasWeb.Components.ColorPicker}
+              id="color-picker"
+              user_id={@current_user.id}
+              current_color={@current_color}
+            />
+          </div>
+        </div>
+      <% end %>
     </div>
     """
   end
