@@ -966,6 +966,32 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles debounced color save messages from the ColorPicker component.
+
+  The ColorPicker component sends this message after a 500ms debounce delay
+  when users interact with color sliders. This prevents excessive database
+  writes during rapid slider movements.
+
+  Note: The actual save is performed by the ColorPicker component itself,
+  but messages sent via Process.send_after(self(), ...) in a LiveComponent
+  are delivered to the parent LiveView. We handle it here to prevent crashes.
+
+  ## Parameters
+
+  - `color` - Hex color string to save as default
+
+  ## Returns
+
+  `{:noreply, socket}` - No state changes needed, save handled by component.
+  """
+  @impl true
+  def handle_info({:save_default_color, _color}, socket) do
+    # Debounced save is handled by ColorPicker component
+    # This handler just prevents FunctionClauseError when message arrives
+    {:noreply, socket}
+  end
+
+  @doc """
   Handles object_created broadcasts from PubSub (from other clients or AI).
 
   Adds newly created objects to local state and pushes to JavaScript for

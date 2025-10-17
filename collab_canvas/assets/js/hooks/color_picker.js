@@ -21,6 +21,18 @@ export const ColorPickerHook = {
   },
 
   /**
+   * Safely push event to server (ignores if not connected)
+   */
+  safePushEventTo(target, eventName, payload) {
+    try {
+      this.pushEventTo(target, eventName, payload);
+    } catch (error) {
+      // Silently ignore if LiveView not connected
+      // Connection will be established shortly
+    }
+  },
+
+  /**
    * Update slider background gradients based on current HSL values
    */
   updateSliderGradients() {
@@ -159,8 +171,8 @@ export const ColorPickerHook = {
       const saturation = (x / rect.width) * 100;
       const lightness = 100 - (y / rect.height) * 100;
 
-      // Push event to server
-      this.pushEventTo(this.el, 'picker_square_changed', {
+      // Push event to server (safely - ignores if not connected)
+      this.safePushEventTo(this.el, 'picker_square_changed', {
         saturation: saturation.toString(),
         lightness: lightness.toString()
       });

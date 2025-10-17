@@ -134,18 +134,32 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
 
   @impl true
   def handle_event("select_color", %{"color" => color}, socket) do
-    {h, s, l} = hex_to_hsl(color)
-    # Save immediately for deliberate color selection (not slider dragging)
-    ColorPalettes.set_default_color(socket.assigns.user_id, color)
-    send(self(), {:color_changed, color, "user_#{socket.assigns.user_id}"})
+    require Logger
 
-    {:noreply,
-     socket
-     |> assign(:hex_color, color)
-     |> assign(:hue, h)
-     |> assign(:saturation, s)
-     |> assign(:lightness, l)
-     |> assign(:default_color, color)}
+    try do
+      Logger.info("select_color event - user_id: #{inspect(socket.assigns.user_id)}, color: #{color}")
+      {h, s, l} = hex_to_hsl(color)
+
+      # Save immediately for deliberate color selection (not slider dragging)
+      result = ColorPalettes.set_default_color(socket.assigns.user_id, color)
+      Logger.info("set_default_color result: #{inspect(result)}")
+
+      send(self(), {:color_changed, color, "user_#{socket.assigns.user_id}"})
+
+      {:noreply,
+       socket
+       |> assign(:hex_color, color)
+       |> assign(:hue, h)
+       |> assign(:saturation, s)
+       |> assign(:lightness, l)
+       |> assign(:default_color, color)}
+    rescue
+      e ->
+        Logger.error("Error in select_color: #{inspect(e)}")
+        Logger.error("Stacktrace: #{inspect(__STACKTRACE__)}")
+        Logger.error("Socket assigns: #{inspect(socket.assigns)}")
+        {:noreply, socket}
+    end
   end
 
   @impl true

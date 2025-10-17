@@ -7,9 +7,762 @@ This PRD defines requirements to elevate the AI agent from a simple object creat
 ## Performance Requirements
 
 - **AI Response Time:** AI commands must return visual results or feedback in under **2 seconds**
+  - Note: Groq typically achieves 300-800ms response times vs OpenAI's 1-2s
 - **Component Updates:** Changes to main components must propagate to all instances within **100ms**
 - **Style Application:** Applying styles to selected objects must complete within **50ms**
 - **AI Layout Calculations:** Layout arrangement commands must complete within **500ms** for up to 50 objects
+
+## AI System Architecture
+
+### Overview
+
+The AI system supports **OpenAI-compatible API providers** for natural language command interpretation and tool-based execution. The architecture follows a request-response pattern with function calling (tools) capabilities.
+
+**Default Provider:** OpenAI (GPT-4)
+**Alternative Provider:** Groq (Llama 3.1 / Mixtral) - Ultra-fast inference for development and high-throughput scenarios
+
+The system is provider-agnostic and can switch between compatible providers via environment configuration without code changes.
+
+### AI Provider Configuration
+
+**Provider Flexibility:** The system supports any OpenAI-compatible API provider. Configuration is environment-based for easy switching between providers.
+
+**Supported Providers:**
+
+1. **OpenAI (Default)**
+   - API Base: `https://api.openai.com/v1`
+   - Primary Model: `gpt-4-turbo-preview` or `gpt-4-1106-preview`
+   - Fallback Model: `gpt-3.5-turbo-1106`
+   - Best for: Reliability, broad model selection
+   - Cost: Standard OpenAI pricing
+
+2. **Groq (Recommended for Speed)**
+   - API Base: `https://api.groq.com/openai/v1`
+   - Primary Model: `llama-3.1-70b-versatile` or `mixtral-8x7b-32768`
+   - Fallback Model: `llama-3.1-8b-instant`
+   - Best for: Ultra-fast inference (10x-100x faster than OpenAI)
+   - Cost: Lower cost per token
+   - Note: Uses OpenAI-compatible API format
+
+**Model Requirements:**
+- Must support function calling (tools)
+- Minimum 32k context window (128k preferred)
+- JSON mode support preferred
+- Streaming support for real-time feedback
+
+**Configuration via Environment Variables:**
+```bash
+# Provider selection
+AI_PROVIDER=groq                    # "openai" or "groq" (default: openai)
+
+# OpenAI configuration
+OPENAI_API_KEY=sk-...
+OPENAI_API_BASE=https://api.openai.com/v1
+
+# Groq configuration
+GROQ_API_KEY=gsk_...
+GROQ_API_BASE=https://api.groq.com/openai/v1
+
+# Model selection (provider-specific)
+AI_PRIMARY_MODEL=llama-3.1-70b-versatile
+AI_FALLBACK_MODEL=llama-3.1-8b-instant
+```
+
+**Example: Switching from OpenAI to Groq**
+```bash
+# Development: Use Groq for fast iteration
+AI_PROVIDER=groq
+GROQ_API_KEY=gsk_your_key_here
+AI_PRIMARY_MODEL=llama-3.1-70b-versatile
+AI_FALLBACK_MODEL=llama-3.1-8b-instant
+
+# Production: Use OpenAI for reliability
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk_your_key_here
+AI_PRIMARY_MODEL=gpt-4-turbo-preview
+AI_FALLBACK_MODEL=gpt-3.5-turbo-1106
+```
+
+### System Architecture
+
+```
+User Input → Frontend → LiveView Handler → AI Agent → OpenAI API → Tool Execution → Response
+                                              ↓
+                                        Canvas Context
+                                        (objects, selection, history)
+```
+
+### Request Flow
+
+1. **User Input Processing**
+   - User types command in AI chat input
+   - Frontend captures command + current selection state
+   - Send to LiveView via `handle_event("ai_command", %{"prompt" => prompt, "selection" => ids}, socket)`
+
+2. **Context Building**
+   - Gather canvas state (all objects)
+   - Include selected object IDs and properties
+   - Include recent command history (last 5 commands)
+   - Build system prompt with available tools
+
+3. **OpenAI Request**
+   - **Model:** `gpt-4-turbo-preview`
+   - **Temperature:** 0.1 (low randomness for consistency)
+   - **Max tokens:** 2000
+   - **Tools:** Function definitions for all available operations
+   - **Messages:**
+     ```json
+     [
+       {
+         "role": "system",
+         "content": "You are a design assistant. You help users manipulate objects on a canvas using the provided tools..."
+       },
+       {
+         "role": "user",
+         "content": "Arrange these in a horizontal row with 20px spacing"
+       }
+     ]
+     ```
+
+4. **Tool Calling Pattern**
+   - OpenAI returns `tool_calls` array
+   - Execute each tool call sequentially
+   - Collect results
+   - Send results back to OpenAI if needed for multi-step reasoning
+   - Return final response to user
+
+5. **Response Handling**
+   - Apply tool changes to canvas
+   - Broadcast updates via PubSub
+   - Send confirmation message to user
+   - Update command history
+
+### Technical Implementation
+
+#### Backend Structure
+
+```elixir
+# lib/collab_canvas/ai/
+├── agent.ex                  # Main AI orchestration
+├── openai_client.ex          # OpenAI API wrapper
+├── context_builder.ex        # Build context from canvas state
+├── tool_executor.ex          # Execute tool calls
+├── tools/
+│   ├── object_tools.ex       # create, move, resize, rotate, delete
+│   ├── layout_tools.ex       # arrange, align, distribute
+│   ├── style_tools.ex        # change_style, apply_style
+│   ├── text_tools.ex         # update_text
+│   ├── component_tools.ex    # create_component, instantiate
+│   └── selection_tools.ex    # select, deselect, query objects
+└── response_parser.ex        # Parse and validate AI responses
+```
+
+#### Core Module: Agent
+
+```elixir
+defmodule CollabCanvas.AI.Agent do
+  alias CollabCanvas.AI.{OpenAIClient, ContextBuilder, ToolExecutor}
+
+  @doc """
+  Process a natural language command and execute it on the canvas
+  """
+  def handle_command(canvas_id, prompt, opts \\ []) do
+    with {:ok, context} <- ContextBuilder.build(canvas_id, opts),
+         {:ok, response} <- OpenAIClient.chat_completion(prompt, context),
+         {:ok, results} <- execute_tool_calls(canvas_id, response.tool_calls),
+         {:ok, _} <- broadcast_changes(canvas_id, results) do
+      {:ok, %{
+        message: response.message,
+        operations: results,
+        usage: response.usage
+      }}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp execute_tool_calls(canvas_id, tool_calls) do
+    Enum.reduce_while(tool_calls, {:ok, []}, fn tool_call, {:ok, acc} ->
+      case ToolExecutor.execute(canvas_id, tool_call) do
+        {:ok, result} -> {:cont, {:ok, [result | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, results} -> {:ok, Enum.reverse(results)}
+      error -> error
+    end
+  end
+end
+```
+
+#### OpenAI Client (Provider-Agnostic)
+
+```elixir
+defmodule CollabCanvas.AI.OpenAIClient do
+  @moduledoc """
+  OpenAI-compatible API client supporting multiple providers (OpenAI, Groq, etc.)
+  Provider and model configuration is read from environment variables.
+  """
+
+  # Load configuration from environment
+  defp config do
+    provider = System.get_env("AI_PROVIDER", "openai")
+
+    case provider do
+      "groq" ->
+        %{
+          api_base: System.get_env("GROQ_API_BASE", "https://api.groq.com/openai/v1"),
+          api_key: System.get_env("GROQ_API_KEY"),
+          primary_model: System.get_env("AI_PRIMARY_MODEL", "llama-3.1-70b-versatile"),
+          fallback_model: System.get_env("AI_FALLBACK_MODEL", "llama-3.1-8b-instant"),
+          provider: :groq
+        }
+
+      "openai" ->
+        %{
+          api_base: System.get_env("OPENAI_API_BASE", "https://api.openai.com/v1"),
+          api_key: System.get_env("OPENAI_API_KEY"),
+          primary_model: System.get_env("AI_PRIMARY_MODEL", "gpt-4-turbo-preview"),
+          fallback_model: System.get_env("AI_FALLBACK_MODEL", "gpt-3.5-turbo-1106"),
+          provider: :openai
+        }
+
+      _ ->
+        raise "Unsupported AI_PROVIDER: #{provider}. Must be 'openai' or 'groq'"
+    end
+  end
+
+  def chat_completion(prompt, context, opts \\ []) do
+    cfg = config()
+    model = Keyword.get(opts, :model, cfg.primary_model)
+
+    body = %{
+      model: model,
+      temperature: 0.1,
+      max_tokens: 2000,
+      messages: build_messages(prompt, context),
+      tools: build_tools(context.available_tools),
+      tool_choice: "auto"
+    }
+
+    case http_post(cfg.api_base, "/chat/completions", body, cfg.api_key) do
+      {:ok, %{status: 200, body: response}} ->
+        parse_response(response)
+
+      {:ok, %{status: 429}} when model == cfg.primary_model ->
+        # Rate limited, retry with fallback model
+        Logger.warning("Rate limited on #{model}, falling back to #{cfg.fallback_model}")
+        chat_completion(prompt, context, model: cfg.fallback_model)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp http_post(api_base, path, body, api_key) do
+    url = api_base <> path
+    headers = [
+      {"Content-Type", "application/json"},
+      {"Authorization", "Bearer #{api_key}"}
+    ]
+
+    HTTPoison.post(url, Jason.encode!(body), headers)
+  end
+
+  defp build_messages(prompt, context) do
+    [
+      %{
+        role: "system",
+        content: system_prompt(context)
+      },
+      %{
+        role: "user",
+        content: prompt
+      }
+    ]
+  end
+
+  defp system_prompt(context) do
+    """
+    You are an intelligent design assistant for a collaborative canvas application.
+
+    Current Canvas State:
+    - Total objects: #{length(context.objects)}
+    - Selected objects: #{length(context.selected_objects)}
+    - Available components: #{length(context.components)}
+    - Available styles: #{length(context.styles)}
+
+    Your role is to help users:
+    1. Create and manipulate objects (rectangles, circles, text, images)
+    2. Arrange objects in layouts (horizontal, vertical, grid, circular)
+    3. Apply styles and maintain design consistency
+    4. Create reusable components
+    5. Perform batch operations on multiple objects
+
+    IMPORTANT RULES:
+    - Always use the provided tools to make changes
+    - When the user says "these" or "selected", use the selected_object_ids: #{inspect(context.selected_object_ids)}
+    - Be precise with measurements (use exact pixel values)
+    - Confirm destructive operations (delete, major changes)
+    - For layout operations, calculate positions mathematically
+    - Preserve aspect ratios unless explicitly told to distort
+
+    Use the available tools to execute commands. You have access to:
+    #{Enum.map_join(context.available_tools, "\n", fn tool -> "- #{tool.name}: #{tool.description}" end)}
+    """
+  end
+
+  defp build_tools(tool_definitions) do
+    Enum.map(tool_definitions, fn tool ->
+      %{
+        type: "function",
+        function: %{
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.input_schema
+        }
+      }
+    end)
+  end
+end
+```
+
+#### Tool Definitions
+
+```elixir
+defmodule CollabCanvas.AI.Tools do
+  @tools [
+    %{
+      name: "create_object",
+      description: "Create a new object on the canvas (rectangle, circle, text, image)",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          type: %{
+            type: "string",
+            enum: ["rectangle", "circle", "text", "image"],
+            description: "Type of object to create"
+          },
+          x: %{type: "number", description: "X position in pixels"},
+          y: %{type: "number", description: "Y position in pixels"},
+          width: %{type: "number", description: "Width in pixels"},
+          height: %{type: "number", description: "Height in pixels"},
+          properties: %{
+            type: "object",
+            description: "Additional properties (fill, stroke, text content, etc.)"
+          }
+        },
+        required: ["type", "x", "y", "width", "height"]
+      }
+    },
+    %{
+      name: "move_object",
+      description: "Move an object to a new position or by a delta",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_id: %{type: "string", description: "ID of object to move"},
+          x: %{type: "number", description: "X position or delta"},
+          y: %{type: "number", description: "Y position or delta"},
+          relative: %{type: "boolean", default: false, description: "If true, x/y are deltas"}
+        },
+        required: ["object_id", "x", "y"]
+      }
+    },
+    %{
+      name: "resize_object",
+      description: "Resize an object to specific dimensions",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_id: %{type: "string"},
+          width: %{type: "number", description: "New width in pixels"},
+          height: %{type: "number", description: "New height in pixels"},
+          maintain_aspect_ratio: %{type: "boolean", default: false}
+        },
+        required: ["object_id"]
+      }
+    },
+    %{
+      name: "rotate_object",
+      description: "Rotate an object by specified degrees",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_id: %{type: "string"},
+          rotation: %{type: "number", description: "Rotation in degrees (0-360)"},
+          relative: %{type: "boolean", default: false}
+        },
+        required: ["object_id", "rotation"]
+      }
+    },
+    %{
+      name: "change_style",
+      description: "Change visual style properties of an object",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_id: %{type: "string"},
+          fill: %{type: "string", description: "Fill color (hex, rgb, or color name)"},
+          stroke: %{type: "string", description: "Stroke color"},
+          stroke_width: %{type: "number", description: "Stroke width in pixels"},
+          opacity: %{type: "number", description: "Opacity (0-1)"}
+        },
+        required: ["object_id"]
+      }
+    },
+    %{
+      name: "update_text",
+      description: "Update text content and styling",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_id: %{type: "string"},
+          text: %{type: "string", description: "New text content"},
+          font_size: %{type: "number"},
+          font_family: %{type: "string"},
+          font_weight: %{type: "string", enum: ["normal", "bold", "light"]},
+          color: %{type: "string"}
+        },
+        required: ["object_id"]
+      }
+    },
+    %{
+      name: "arrange_objects",
+      description: "Arrange multiple objects in a layout pattern",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_ids: %{
+            type: "array",
+            items: %{type: "string"},
+            description: "IDs of objects to arrange"
+          },
+          layout_type: %{
+            type: "string",
+            enum: ["horizontal", "vertical", "grid", "circular", "stack"],
+            description: "Type of layout to apply"
+          },
+          spacing: %{type: "number", description: "Spacing between objects in pixels"},
+          alignment: %{
+            type: "string",
+            enum: ["left", "center", "right", "top", "middle", "bottom"]
+          },
+          grid_columns: %{type: "number", description: "For grid layout: number of columns"}
+        },
+        required: ["object_ids", "layout_type"]
+      }
+    },
+    %{
+      name: "align_objects",
+      description: "Align multiple objects relative to each other or canvas",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_ids: %{type: "array", items: %{type: "string"}},
+          alignment: %{
+            type: "string",
+            enum: ["left", "center", "right", "top", "middle", "bottom", "canvas_center"]
+          }
+        },
+        required: ["object_ids", "alignment"]
+      }
+    },
+    %{
+      name: "delete_objects",
+      description: "Delete one or more objects from the canvas",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_ids: %{type: "array", items: %{type: "string"}}
+        },
+        required: ["object_ids"]
+      }
+    },
+    %{
+      name: "create_component",
+      description: "Create a reusable component from selected objects",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_ids: %{type: "array", items: %{type: "string"}},
+          name: %{type: "string", description: "Component name"},
+          category: %{type: "string", description: "Optional category (buttons, cards, etc.)"}
+        },
+        required: ["object_ids", "name"]
+      }
+    },
+    %{
+      name: "instantiate_component",
+      description: "Create an instance of a component",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          component_id: %{type: "string"},
+          x: %{type: "number", description: "X position for instance"},
+          y: %{type: "number", description: "Y position for instance"}
+        },
+        required: ["component_id", "x", "y"]
+      }
+    },
+    %{
+      name: "apply_style",
+      description: "Apply a saved style to an object",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          object_id: %{type: "string"},
+          style_id: %{type: "string"}
+        },
+        required: ["object_id", "style_id"]
+      }
+    },
+    %{
+      name: "query_objects",
+      description: "Query objects by properties (useful for finding objects to manipulate)",
+      input_schema: %{
+        type: "object",
+        properties: %{
+          type: %{type: "string", description: "Filter by object type"},
+          color: %{type: "string", description: "Filter by fill color"},
+          min_width: %{type: "number"},
+          max_width: %{type: "number"}
+        }
+      }
+    }
+  ]
+
+  def get_all, do: @tools
+
+  def get_by_name(name) do
+    Enum.find(@tools, fn tool -> tool.name == name end)
+  end
+end
+```
+
+#### Context Builder
+
+```elixir
+defmodule CollabCanvas.AI.ContextBuilder do
+  alias CollabCanvas.{Canvas, Components, Styles}
+
+  def build(canvas_id, opts) do
+    selected_ids = Keyword.get(opts, :selected_ids, [])
+
+    with {:ok, canvas} <- Canvas.get(canvas_id),
+         {:ok, objects} <- Canvas.list_objects(canvas_id),
+         {:ok, components} <- Components.list_components(canvas_id),
+         {:ok, styles} <- Styles.list_styles(canvas_id) do
+
+      selected_objects = Enum.filter(objects, fn obj -> obj.id in selected_ids end)
+
+      {:ok, %{
+        canvas_id: canvas_id,
+        canvas: canvas,
+        objects: objects,
+        selected_objects: selected_objects,
+        selected_object_ids: selected_ids,
+        components: components,
+        styles: styles,
+        available_tools: CollabCanvas.AI.Tools.get_all()
+      }}
+    end
+  end
+end
+```
+
+### Security & Rate Limiting
+
+**API Key Management:**
+- Store API keys in environment variables (`OPENAI_API_KEY`, `GROQ_API_KEY`)
+- Never expose API keys to frontend
+- Rotate keys quarterly
+- Use separate keys for development/staging/production
+
+**Rate Limiting:**
+- Per-user limit: 30 AI commands per minute
+- Per-canvas limit: 100 AI commands per minute
+- Graceful degradation to fallback model on 429 errors
+- Provider-specific: Groq has higher rate limits (14,400 requests/minute on paid plans)
+
+**Input Validation:**
+- Sanitize all user prompts
+- Validate tool parameters before execution
+- Prevent prompt injection attacks
+- Max prompt length: 2000 characters
+
+**Cost Management:**
+- Track token usage per request
+- Alert when daily usage exceeds threshold
+- Cache common command patterns
+- Use cheaper model for simple commands
+
+**Provider-Specific Considerations:**
+
+*OpenAI:*
+- Tier-based rate limits (increase with usage history)
+- More expensive but highest reliability
+- Best for production with high-stakes operations
+
+*Groq:*
+- Ultra-fast inference (300-800 tokens/sec vs OpenAI's 30-100)
+- Lower cost per token
+- Higher rate limits
+- Excellent for development and high-throughput scenarios
+- Note: Smaller model selection vs OpenAI
+
+**Recommended Strategy:**
+- Use Groq for development and testing (fast iteration, low cost)
+- Use OpenAI for production if reliability is critical
+- Switch providers via environment variable without code changes
+
+### Error Handling
+
+```elixir
+defmodule CollabCanvas.AI.ErrorHandler do
+  def handle_error({:error, :rate_limit}), do:
+    {:error, "AI service is busy. Please try again in a moment."}
+
+  def handle_error({:error, :invalid_tool_call}), do:
+    {:error, "I couldn't execute that command. Could you rephrase it?"}
+
+  def handle_error({:error, :object_not_found}), do:
+    {:error, "I couldn't find the object you're referring to. Please select it first."}
+
+  def handle_error({:error, :api_error, message}), do:
+    {:error, "AI service error: #{message}"}
+end
+```
+
+### Monitoring & Logging
+
+**Metrics to Track:**
+- AI request latency (p50, p95, p99) by provider
+- Token usage per request
+- Tool call success rate
+- Error rate by type
+- Cost per command by provider
+- Provider availability and failover rate
+
+**Logging:**
+```elixir
+Logger.info("AI command executed", %{
+  canvas_id: canvas_id,
+  user_id: user_id,
+  provider: provider,        # "openai" or "groq"
+  model: model,              # actual model used
+  prompt: prompt,
+  tools_called: length(tool_calls),
+  duration_ms: duration,
+  tokens_used: tokens,
+  cost_usd: cost
+})
+```
+
+**Provider Comparison Dashboard:**
+Track and compare metrics across providers to inform configuration decisions:
+- Average latency: OpenAI vs Groq
+- Success rate by provider
+- Cost comparison
+- Failover frequency
+
+### Frontend Integration
+
+**Chat Interface:**
+```javascript
+// AI command input component
+const AIChat = () => {
+  const sendCommand = (prompt) => {
+    pushEvent("ai_command", {
+      prompt: prompt,
+      selection: getSelectedObjectIds(),
+      canvas_bounds: getCanvasBounds()
+    })
+  }
+
+  // Show streaming response
+  handleEvent("ai_response_chunk", (chunk) => {
+    appendToChat(chunk)
+  })
+
+  // Handle completion
+  handleEvent("ai_command_complete", (result) => {
+    showSuccessMessage(result.message)
+    // Canvas automatically updates via PubSub
+  })
+}
+```
+
+**LiveView Handler:**
+```elixir
+def handle_event("ai_command", %{"prompt" => prompt, "selection" => selection}, socket) do
+  canvas_id = socket.assigns.canvas_id
+
+  # Show loading state
+  send(self(), {:ai_processing, prompt})
+
+  # Process in async task
+  Task.Supervisor.start_child(CollabCanvas.TaskSupervisor, fn ->
+    case AI.Agent.handle_command(canvas_id, prompt, selected_ids: selection) do
+      {:ok, result} ->
+        send_update(CollabCanvasWeb.AIChat, id: "ai-chat", result: result)
+      {:error, reason} ->
+        send_update(CollabCanvasWeb.AIChat, id: "ai-chat", error: reason)
+    end
+  end)
+
+  {:noreply, assign(socket, ai_processing: true)}
+end
+```
+
+### Testing Strategy
+
+**Unit Tests:**
+- Test each tool execution independently
+- Mock OpenAI API responses
+- Test context building with various canvas states
+- Test error handling for all failure modes
+
+**Integration Tests:**
+- Test full command flow (input → execution → response)
+- Test multi-step tool calls
+- Test concurrent AI commands
+- Test rate limiting behavior
+
+**E2E Tests:**
+- Test natural language commands
+- Verify canvas updates correctly
+- Test with real OpenAI API (staging environment only)
+- Test collaborative scenarios with AI
+
+### Future Extensibility
+
+**Architecture Decision:** The current implementation uses a provider-agnostic OpenAI-compatible API client for simplicity, performance, and alignment with the Elixir/Phoenix stack. This is optimal for the single-turn command pattern required in this PRD.
+
+**Adding New Providers:**
+Any OpenAI-compatible provider can be added by:
+1. Adding a new case in the `config/0` function
+2. Setting provider-specific environment variables
+3. No code changes needed beyond configuration
+
+Compatible providers include: Together AI, Anyscale, Perplexity, Fireworks AI, and others that implement the OpenAI API spec.
+
+**When to Consider Microservice Expansion:**
+
+If future requirements include complex AI workflows such as:
+- Multi-step reasoning chains (e.g., "Design a complete landing page" requiring planning → creation → review → refinement)
+- Advanced conversation memory with summarization
+- Multi-modal inputs (image analysis → design suggestions)
+- Complex agent orchestration (multiple AI agents collaborating)
+
+Then implement these capabilities as a **separate microservice** (Python-based with LangChain or similar frameworks) that the Phoenix application calls via HTTP API. This approach:
+- Keeps the core application simple and performant
+- Allows using specialized AI frameworks in their native language
+- Enables independent scaling of AI-intensive operations
+- Maintains clear separation of concerns
+
+**Current Decision:** Direct OpenAI integration is sufficient for PRD 3.0 requirements. Microservice expansion should be evaluated in future PRDs if advanced AI patterns are needed.
 
 ## Core Features
 
@@ -539,5 +1292,4 @@ handle_event("export_design_tokens", %{"format" => format}, socket)
 - Style application completes within 50ms
 - AI layout calculations complete within 500ms
 - User efficiency increases by 40% with components
-- Design consistency improves by 60% with styles
 - User satisfaction rating of 4.7+/5 for AI features

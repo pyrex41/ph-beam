@@ -447,7 +447,7 @@ defmodule CollabCanvas.AI.Agent do
   # Private Functions
 
   # Retrieves the AI provider setting from environment variables.
-  # Returns "claude" or "groq". Defaults to "claude" if not set.
+  # Returns "claude", "groq", or "openai". Defaults to "claude" if not set.
   defp get_ai_provider do
     System.get_env("AI_PROVIDER") || "claude"
   end
@@ -607,7 +607,6 @@ defmodule CollabCanvas.AI.Agent do
       end
     end)
   end
-
 
   # Parses the Claude API response to extract tool calls or text responses.
   #
