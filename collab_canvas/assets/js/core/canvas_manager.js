@@ -738,8 +738,8 @@ export class CanvasManager {
    * @param {MouseEvent} event
    */
   handleMouseMove(event) {
-    // Safety check for null/undefined events
-    if (!event || event.clientX === undefined || event.clientY === undefined) {
+    // Safety check for null/undefined events or events with null/undefined coordinates
+    if (!event || typeof event.clientX !== 'number' || typeof event.clientY !== 'number') {
       console.warn('[CanvasManager] handleMouseMove called with invalid event:', event);
       return;
     }
@@ -1589,8 +1589,8 @@ export class CanvasManager {
    * @returns {Object} {x, y} position
    */
   getMousePosition(event) {
-    // Safety check for null/undefined events
-    if (!event || event.clientX === undefined || event.clientY === undefined) {
+    // Safety check for null/undefined events or events with null/undefined coordinates
+    if (!event || typeof event.clientX !== 'number' || typeof event.clientY !== 'number') {
       console.warn('[CanvasManager] getMousePosition called with invalid event:', event);
       return { x: 0, y: 0 };
     }
