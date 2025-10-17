@@ -498,7 +498,7 @@ defmodule CollabCanvas.AI.Tools do
       },
       %{
         name: "arrange_objects",
-        description: "Arranges selected objects in specified layout pattern (horizontal, vertical, grid, circular)",
+        description: "Arranges selected objects in standard layout patterns. Use this for CIRCULAR, horizontal, vertical, grid, and stack layouts. For circular layouts, objects are distributed evenly around a circle at a specified radius. For custom patterns like diagonal lines, waves, or arcs, use arrange_objects_with_pattern instead.",
         input_schema: %{
           type: "object",
           properties: %{
@@ -552,7 +552,7 @@ defmodule CollabCanvas.AI.Tools do
       },
       %{
         name: "arrange_objects_with_pattern",
-        description: "Arrange objects using flexible programmatic patterns. POWERFUL AND FLEXIBLE - use this for ANY custom arrangement beyond basic grids: 'triangular', 'pyramid', 'zigzag', 'wave', 'arc', 'diagonal', 'scattered', 'circular arc', etc. Supports line, diagonal, wave, and arc patterns with customizable parameters. For complex shapes like triangles or pyramids, use 'line' or 'diagonal' patterns with appropriate start positions and spacing, or make multiple calls to build up the shape row by row.",
+        description: "Arrange objects using flexible programmatic patterns like diagonal lines, waves, and arcs. NOTE: For CIRCULAR layouts (objects distributed around a circle), use arrange_objects with layout_type='circular' instead. This tool is for: 'triangular', 'pyramid', 'zigzag', 'wave', 'arc', 'diagonal line', etc. Supports line, diagonal, wave, and arc patterns with customizable parameters. For complex shapes like triangles or pyramids, use 'line' or 'diagonal' patterns with appropriate start positions and spacing, or make multiple calls to build up the shape row by row.",
         input_schema: %{
           type: "object",
           properties: %{
