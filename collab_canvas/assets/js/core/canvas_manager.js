@@ -631,6 +631,7 @@ export class CanvasManager {
 
     // Start panning with spacebar+click or middle mouse (NOT shift anymore - used for multi-select)
     if (this.spacePressed || event.button === 1) {
+      console.log('[CanvasManager] Starting pan, setting isPanning=true');
       this.isPanning = true;
       this.panStart = { x: event.clientX, y: event.clientY };
       this.app.canvas.style.cursor = 'grabbing';
@@ -755,6 +756,16 @@ export class CanvasManager {
    * @param {MouseEvent} event
    */
   handleMouseUp(event) {
+    // Handle panning state first (doesn't need mouse position)
+    if (this.isPanning) {
+      console.log('[CanvasManager] Panning ended, resetting isPanning flag');
+      this.isPanning = false;
+      // Restore cursor based on spacebar state
+      this.app.canvas.style.cursor = this.spacePressed ? 'grab' : 'default';
+      return; // Early return after handling pan
+    }
+
+    // Only get mouse position if we need it
     const position = this.getMousePosition(event);
 
     if (this.isCreating) {
@@ -772,12 +783,6 @@ export class CanvasManager {
         });
       });
       this.isDragging = false;
-    }
-
-    if (this.isPanning) {
-      this.isPanning = false;
-      // Restore cursor based on spacebar state
-      this.app.canvas.style.cursor = this.spacePressed ? 'grab' : 'default';
     }
   }
 
@@ -1088,15 +1093,21 @@ export class CanvasManager {
    */
   createSelectionBox(object) {
     const selectionBox = new PIXI.Graphics();
-    const rect = object.getBounds();
+
+    // Use local bounds (container-relative) instead of global bounds
+    const bounds = object.getLocalBounds();
 
     // v8 Graphics API: shape → stroke (no fill for selection box)
     selectionBox.rect(
-      rect.x - 2,
-      rect.y - 2,
-      rect.width + 4,
-      rect.height + 4
+      -2,
+      -2,
+      bounds.width + 4,
+      bounds.height + 4
     ).stroke({ width: 2, color: 0x3b82f6 });
+
+    // Position selection box at object's position
+    selectionBox.x = object.x;
+    selectionBox.y = object.y;
 
     this.objectContainer.addChild(selectionBox);
     this.selectionBoxes.set(object.objectId, selectionBox);
@@ -1109,14 +1120,19 @@ export class CanvasManager {
     this.selectionBoxes.forEach((box, objectId) => {
       const obj = this.objects.get(objectId);
       if (obj) {
-        const rect = obj.getBounds();
+        // Use local bounds (container-relative)
+        const bounds = obj.getLocalBounds();
         box.clear();
         box.rect(
-          rect.x - 2,
-          rect.y - 2,
-          rect.width + 4,
-          rect.height + 4
+          -2,
+          -2,
+          bounds.width + 4,
+          bounds.height + 4
         ).stroke({ width: 2, color: 0x3b82f6 });
+
+        // Update position to match object
+        box.x = obj.x;
+        box.y = obj.y;
       }
     });
   }
@@ -1205,10 +1221,13 @@ export class CanvasManager {
     const globalPos = event.data.global;
     const localPos = this.screenToCanvas(globalPos);
 
+    console.log('[CanvasManager] Object pointer down, isPanning:', this.isPanning, 'objectId:', object.objectId);
+
     // Check if object is locked by another user
     const pixiObject = this.objects.get(object.objectId);
     if (pixiObject && pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId) {
       // Object is locked by another user, prevent interaction
+      console.log('[CanvasManager] Object is locked by another user');
       return;
     }
 
@@ -1219,6 +1238,7 @@ export class CanvasManager {
       }
 
       // Prepare for dragging all selected objects
+      console.log('[CanvasManager] Setting isDragging=true');
       this.isDragging = true;
 
       // Calculate drag offset for each selected object
