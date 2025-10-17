@@ -739,8 +739,23 @@ export class CanvasManager {
    */
   handleMouseMove(event) {
     // Safety check for null/undefined events or events with null/undefined coordinates
-    if (!event || typeof event.clientX !== 'number' || typeof event.clientY !== 'number') {
-      console.warn('[CanvasManager] handleMouseMove called with invalid event:', event);
+    // Wrap in try-catch since event.clientX/clientY might be getters that throw
+    try {
+      if (!event) {
+        console.warn('[CanvasManager] handleMouseMove called with null/undefined event');
+        return;
+      }
+
+      // Test accessing clientX/clientY - these might be getters that throw
+      const testX = event.clientX;
+      const testY = event.clientY;
+
+      if (typeof testX !== 'number' || typeof testY !== 'number') {
+        console.warn('[CanvasManager] handleMouseMove called with invalid coordinates:', { clientX: testX, clientY: testY, event });
+        return;
+      }
+    } catch (error) {
+      console.warn('[CanvasManager] handleMouseMove caught error accessing event properties:', error, event);
       return;
     }
 
