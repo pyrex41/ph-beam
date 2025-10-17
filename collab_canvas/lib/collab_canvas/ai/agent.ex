@@ -702,8 +702,10 @@ defmodule CollabCanvas.AI.Agent do
   # Extracts width, height, color from input and creates object at specified x,y position.
   # Uses current_color as default if no color is specified in the input.
   defp execute_tool_call(%{name: "create_shape", input: input}, canvas_id, current_color) do
-    ai_color = Map.get(input, "color")
-    final_color = Map.get(input, "color", current_color)
+    # Check for both "fill" (from tool definition) and "color" (for backwards compatibility)
+    ai_color = Map.get(input, "fill") || Map.get(input, "color")
+    # Convert color names to hex if needed
+    final_color = normalize_color(ai_color || current_color)
 
     Logger.info("create_shape: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
 
@@ -737,7 +739,8 @@ defmodule CollabCanvas.AI.Agent do
   # Uses current_color as default if no color is specified in the input.
   defp execute_tool_call(%{name: "create_text", input: input}, canvas_id, current_color) do
     ai_color = Map.get(input, "color")
-    final_color = Map.get(input, "color", current_color)
+    # Convert color names to hex if needed
+    final_color = normalize_color(ai_color || current_color)
 
     Logger.info("create_text: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
 
@@ -1478,5 +1481,111 @@ defmodule CollabCanvas.AI.Agent do
       input: tool_call,
       result: {:error, :unknown_tool}
     }
+  end
+
+  # Normalizes color input from AI - converts color names to hex format.
+  #
+  # Accepts both hex format (e.g., "#FF0000" or "FF0000") and common color names
+  # (e.g., "red", "green", "blue"). Returns a hex color string with "#" prefix.
+  #
+  # ## Parameters
+  #   * `color` - Color string (hex format or color name)
+  #
+  # ## Returns
+  #   * Hex color string with "#" prefix (e.g., "#FF0000")
+  #
+  # ## Examples
+  #
+  #     iex> normalize_color("#FF0000")
+  #     "#FF0000"
+  #
+  #     iex> normalize_color("red")
+  #     "#FF0000"
+  #
+  #     iex> normalize_color("green")
+  #     "#00FF00"
+  defp normalize_color(color) when is_binary(color) do
+    # If already in hex format, return as-is (with # prefix)
+    cond do
+      String.starts_with?(color, "#") ->
+        String.upcase(color)
+
+      String.match?(color, ~r/^[0-9A-Fa-f]{6}$/) ->
+        "#" <> String.upcase(color)
+
+      true ->
+        # Convert color name to hex
+        color_name = String.downcase(String.trim(color))
+        color_name_to_hex(color_name)
+    end
+  end
+
+  defp normalize_color(nil), do: "#000000"
+  defp normalize_color(_), do: "#000000"
+
+  # Converts common color names to hex format.
+  #
+  # Provides a comprehensive mapping of color names to their hex representations.
+  # Returns black (#000000) for unknown color names.
+  defp color_name_to_hex(name) do
+    case name do
+      # Primary colors
+      "red" -> "#FF0000"
+      "green" -> "#00FF00"
+      "blue" -> "#0000FF"
+
+      # Secondary colors
+      "yellow" -> "#FFFF00"
+      "cyan" -> "#00FFFF"
+      "magenta" -> "#FF00FF"
+
+      # Common colors
+      "orange" -> "#FFA500"
+      "purple" -> "#800080"
+      "pink" -> "#FFC0CB"
+      "brown" -> "#A52A2A"
+      "gray" -> "#808080"
+      "grey" -> "#808080"
+
+      # Light/Dark variants
+      "light gray" -> "#D3D3D3"
+      "light grey" -> "#D3D3D3"
+      "dark gray" -> "#A9A9A9"
+      "dark grey" -> "#A9A9A9"
+      "light blue" -> "#ADD8E6"
+      "dark blue" -> "#00008B"
+      "light green" -> "#90EE90"
+      "dark green" -> "#006400"
+      "light red" -> "#FF6B6B"
+      "dark red" -> "#8B0000"
+
+      # Extended colors
+      "lime" -> "#00FF00"
+      "navy" -> "#000080"
+      "teal" -> "#008080"
+      "maroon" -> "#800000"
+      "olive" -> "#808000"
+      "aqua" -> "#00FFFF"
+      "fuchsia" -> "#FF00FF"
+      "silver" -> "#C0C0C0"
+      "gold" -> "#FFD700"
+      "indigo" -> "#4B0082"
+      "violet" -> "#EE82EE"
+      "coral" -> "#FF7F50"
+      "salmon" -> "#FA8072"
+      "turquoise" -> "#40E0D0"
+      "khaki" -> "#F0E68C"
+      "plum" -> "#DDA0DD"
+      "crimson" -> "#DC143C"
+
+      # Grayscale
+      "black" -> "#000000"
+      "white" -> "#FFFFFF"
+
+      # Unknown color - default to black
+      _ ->
+        Logger.warning("Unknown color name: #{name}, defaulting to black")
+        "#000000"
+    end
   end
 end
