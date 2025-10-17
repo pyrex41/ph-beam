@@ -35,7 +35,7 @@ defmodule CollabCanvas.AI.Providers.Claude do
   @api_version "2023-06-01"
   
   @impl true
-  def call(command, tools, _opts \\ []) do
+  def call(command, tools, opts \\ []) do
     api_key = get_api_key()
     
     if is_nil(api_key) or api_key == "" do
@@ -59,9 +59,11 @@ defmodule CollabCanvas.AI.Providers.Claude do
         ]
       }
       
+      timeout = get_timeout(opts)
+      
       Logger.debug("Calling Claude API with command: #{String.slice(command, 0..50)}...")
       
-      case Req.post(@api_url, json: body, headers: headers) do
+      case Req.post(@api_url, json: body, headers: headers, receive_timeout: timeout) do
         {:ok, %{status: 200, body: response}} ->
           Logger.debug("Claude API response received successfully")
           parse_response(response)
@@ -122,5 +124,10 @@ defmodule CollabCanvas.AI.Providers.Claude do
   defp parse_response(response) do
     Logger.error("Unexpected Claude response format: #{inspect(response)}")
     {:error, :invalid_response_format}
+  end
+  
+  defp get_timeout(opts) do
+    Keyword.get(opts, :timeout) || 
+      Application.get_env(:collab_canvas, [:ai, :claude_timeout], 10_000)
   end
 end

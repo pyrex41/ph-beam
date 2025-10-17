@@ -85,7 +85,7 @@ defmodule CollabCanvas.AI.Agent do
 
   require Logger
   alias CollabCanvas.Canvases
-  alias CollabCanvas.AI.{Tools, ComponentBuilder, CommandClassifier}
+  alias CollabCanvas.AI.{Tools, ComponentBuilder, CommandClassifier, CircuitBreaker, RateLimiter}
   alias CollabCanvas.AI.Providers.{Groq, Claude}
 
   @doc """
@@ -136,12 +136,7 @@ defmodule CollabCanvas.AI.Agent do
         
         provider = select_provider(classification, opts)
         
-        Logger.info("""
-        [AI Agent] Executing command
-        Classification: #{classification}
-        Provider: #{provider.model_name()}
-        Command: #{String.slice(command, 0..60)}#{if String.length(command) > 60, do: "...", else: ""}
-        """)
+        Logger.debug("[AI Agent] #{String.slice(command, 0..40)}... → #{provider.model_name()} (#{classification})")
         
         # Execute with selected provider
         start_time = System.monotonic_time(:millisecond)
@@ -149,13 +144,13 @@ defmodule CollabCanvas.AI.Agent do
         case call_provider(provider, command, opts) do
           {:ok, tool_calls} ->
             api_latency = System.monotonic_time(:millisecond) - start_time
-            Logger.info("[AI Agent] API latency: #{api_latency}ms")
+            Logger.debug("[AI Agent] API latency: #{api_latency}ms")
             
             # Process tool calls and execute canvas operations
             results = process_tool_calls(tool_calls, canvas_id)
             
             total_latency = System.monotonic_time(:millisecond) - start_time
-            Logger.info("[AI Agent] Total latency: #{total_latency}ms (#{length(results)} tools)")
+            Logger.info("[AI Agent] Command completed: #{total_latency}ms (#{length(results)} tools)")
             
             # Emit telemetry
             emit_telemetry(command, provider, total_latency, classification, true)
@@ -163,8 +158,10 @@ defmodule CollabCanvas.AI.Agent do
             {:ok, results}
 
           {:error, reason} ->
-            # Fallback to Claude if Groq fails
-            if provider == Groq do
+            # Fallback to Claude if Groq fails (unless it's rate limited or circuit open)
+            should_fallback = provider == Groq and reason not in [:rate_limited, :circuit_open]
+            
+            if should_fallback do
               Logger.warning("[AI Agent] Groq failed (#{inspect(reason)}), falling back to Claude")
               execute_with_fallback(command, canvas_id, opts, start_time, classification)
             else
@@ -281,11 +278,41 @@ defmodule CollabCanvas.AI.Agent do
     end
   end
   
-  # Call the selected provider
-  defp call_provider(provider, command, _opts) do
-    tools = Tools.get_tool_definitions()
-    provider.call(command, tools, [])
+  # Call the selected provider with circuit breaker and rate limiting
+  defp call_provider(provider, command, opts) do
+    provider_name = provider_to_atom(provider)
+    
+    # Check circuit breaker
+    if CircuitBreaker.open?(provider_name) do
+      Logger.warning("[AI Agent] Circuit breaker open for #{provider_name}, skipping")
+      {:error, :circuit_open}
+    else
+      # Check rate limit
+      case RateLimiter.check_rate(provider_name) do
+        :ok ->
+          # Make API call
+          tools = Tools.get_tool_definitions()
+          result = provider.call(command, tools, opts)
+          
+          # Record result for circuit breaker
+          case result do
+            {:ok, _} -> CircuitBreaker.record_success(provider_name)
+            {:error, _} -> CircuitBreaker.record_failure(provider_name)
+          end
+          
+          result
+        
+        {:error, :rate_limited} ->
+          Logger.warning("[AI Agent] Rate limit exceeded for #{provider_name}")
+          {:error, :rate_limited}
+      end
+    end
   end
+  
+  # Convert provider module to atom for circuit breaker/rate limiter
+  defp provider_to_atom(Groq), do: :groq
+  defp provider_to_atom(Claude), do: :claude
+  defp provider_to_atom(_), do: :unknown
   
   # Execute with Claude fallback
   defp execute_with_fallback(command, canvas_id, opts, start_time, classification) do

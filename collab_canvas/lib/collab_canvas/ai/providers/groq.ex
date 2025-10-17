@@ -34,18 +34,19 @@ defmodule CollabCanvas.AI.Providers.Groq do
   @model "llama-3.3-70b-versatile"
   
   @impl true
-  def call(command, tools, _opts \\ []) do
+  def call(command, tools, opts \\ []) do
     api_key = get_api_key()
     
     if is_nil(api_key) or api_key == "" do
       {:error, :missing_api_key}
     else
-      body = build_request_body(command, tools)
+      body = build_request_body(command, tools, opts)
       headers = build_headers(api_key)
+      timeout = get_timeout(opts)
       
       Logger.debug("Calling Groq API with command: #{String.slice(command, 0..50)}...")
       
-      case Req.post(@api_url, json: body, headers: headers) do
+      case Req.post(@api_url, json: body, headers: headers, receive_timeout: timeout) do
         {:ok, %{status: 200, body: response}} ->
           Logger.debug("Groq API response received successfully")
           parse_response(response)
@@ -83,7 +84,7 @@ defmodule CollabCanvas.AI.Providers.Groq do
     ]
   end
   
-  defp build_request_body(command, tools) do
+  defp build_request_body(command, tools, opts) do
     %{
       model: @model,
       messages: [
@@ -107,9 +108,14 @@ defmodule CollabCanvas.AI.Providers.Groq do
       ],
       tools: convert_tools_to_openai_format(tools),
       tool_choice: "auto",
-      temperature: 0.1,  # Low temperature for consistency
+      temperature: Keyword.get(opts, :temperature, 0.1),
       max_tokens: max_tokens()
     }
+  end
+  
+  defp get_timeout(opts) do
+    Keyword.get(opts, :timeout) || 
+      Application.get_env(:collab_canvas, [:ai, :groq_timeout], 5_000)
   end
   
   defp convert_tools_to_openai_format(tools) do

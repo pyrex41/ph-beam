@@ -186,11 +186,7 @@ defmodule CollabCanvas.AI.CommandClassifier do
       true -> "default"
     end
     
-    Logger.info("""
-    [CommandClassifier] Classification complete
-    Command: #{String.slice(command, 0..60)}#{if String.length(command) > 60, do: "...", else: ""}
-    Classification: #{classification}
-    Reason: #{reason}
-    """)
+    # Use debug level to reduce log noise
+    Logger.debug("[CommandClassifier] #{String.slice(command, 0..40)}... → #{classification} (#{reason})")
   end
 end
