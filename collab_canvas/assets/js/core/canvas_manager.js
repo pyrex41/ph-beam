@@ -31,6 +31,7 @@ export class CanvasManager {
     this.isCreating = false;
     this.createStart = { x: 0, y: 0 };
     this.tempObject = null;
+    this.currentColor = '#000000'; // Current color from color picker
 
     // Pan and zoom state
     this.isPanning = false;
@@ -707,7 +708,7 @@ export class CanvasManager {
           data: {
             text: text,
             font_size: 16,
-            color: '#000000',
+            color: this.currentColor,
             font_family: 'Arial'
           }
         });
@@ -1015,8 +1016,8 @@ export class CanvasManager {
           data: {
             width: width,
             height: height,
-            fill: '#3b82f6',
-            stroke: '#1e40af',
+            fill: this.currentColor,
+            stroke: this.currentColor,
             stroke_width: 2
           }
         });
@@ -1027,8 +1028,8 @@ export class CanvasManager {
           position: position,
           data: {
             width: radius * 2,
-            fill: '#3b82f6',
-            stroke: '#1e40af',
+            fill: this.currentColor,
+            stroke: this.currentColor,
             stroke_width: 2
           }
         });
@@ -1399,6 +1400,14 @@ export class CanvasManager {
       y: this.viewOffset.y,
       zoom: this.zoomLevel
     };
+  }
+
+  /**
+   * Set the current color for object creation
+   * @param {string} color - Hex color string (e.g., "#FF0000")
+   */
+  setCurrentColor(color) {
+    this.currentColor = color || '#000000';
   }
 
   /**

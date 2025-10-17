@@ -18,6 +18,10 @@ export default {
     this.canvasManager = new CanvasManager();
     await this.canvasManager.initialize(this.el, this.currentUserId);
 
+    // Set initial current color from data attribute
+    const currentColor = this.el.dataset.currentColor || '#000000';
+    this.canvasManager.setCurrentColor(currentColor);
+
     // Setup event listeners to bridge CanvasManager events to LiveView
     this.setupCanvasEventListeners();
 
@@ -255,6 +259,11 @@ export default {
     // Handle viewport restoration
     this.handleEvent('restore_viewport', (data) => {
       this.canvasManager.restoreViewport(data.x, data.y, data.zoom);
+    });
+
+    // Handle color changes from color picker
+    this.handleEvent('color_changed', (data) => {
+      this.canvasManager.setCurrentColor(data.color);
     });
 
     // Setup debounced viewport saving

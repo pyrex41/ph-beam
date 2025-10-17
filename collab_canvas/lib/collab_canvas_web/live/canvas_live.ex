@@ -83,6 +83,7 @@ defmodule CollabCanvasWeb.CanvasLive do
   use CollabCanvasWeb, :live_view
 
   alias CollabCanvas.Canvases
+  alias CollabCanvas.ColorPalettes
   alias CollabCanvas.AI.Agent
   alias CollabCanvasWeb.Presence
   alias CollabCanvasWeb.Plugs.Auth
@@ -167,6 +168,8 @@ defmodule CollabCanvasWeb.CanvasLive do
         |> assign(:ai_loading, false)
         |> assign(:ai_task_ref, nil)
         |> assign(:show_labels, false)
+        |> assign(:current_color, ColorPalettes.get_default_color(user.id))
+        |> assign(:show_color_picker, false)
 
       # If viewport position exists, push it to the client to restore position
       socket =
@@ -714,9 +717,10 @@ defmodule CollabCanvasWeb.CanvasLive do
       canvas_id = socket.assigns.canvas_id
 
       # Start async task with timeout (Task.async automatically links to current process)
+      current_color = socket.assigns.current_color
       task =
         Task.async(fn ->
-          Agent.execute_command(command, canvas_id, selected_ids)
+          Agent.execute_command(command, canvas_id, selected_ids, current_color: current_color)
         end)
 
       # Set loading state and store task reference for timeout monitoring
@@ -903,6 +907,62 @@ defmodule CollabCanvasWeb.CanvasLive do
      socket
      |> assign(:show_labels, new_state)
      |> push_event("toggle_object_labels", %{show: new_state, labels: object_labels})}
+  end
+
+  @doc """
+  Handles toggle_color_picker events from the left sidebar button.
+
+  Toggles the visibility of the color picker popup.
+
+  ## Returns
+
+  `{:noreply, socket}` with updated show_color_picker state.
+  """
+  @impl true
+  def handle_event("toggle_color_picker", _params, socket) do
+    {:noreply, assign(socket, :show_color_picker, !socket.assigns.show_color_picker)}
+  end
+
+  @doc """
+  Handles color picker color change messages from the ColorPicker component.
+
+  Updates the current color in socket assigns, updates the component, and saves to recent colors.
+
+  ## Parameters
+
+  - `color` - Hex color string selected by the user
+  - `user_id` - ID of the user who changed the color
+
+  ## Returns
+
+  `{:noreply, socket}` with updated current_color assign and component update pushed.
+  """
+  @impl true
+  def handle_info({:color_changed, color, user_id}, socket) do
+    # Extract numeric user ID from the "user_#{id}" format
+    current_user = socket.assigns.current_user
+
+    # Only update if this color change is for the current user
+    if "user_#{current_user.id}" == user_id do
+      # Save to recent colors (async, non-blocking)
+      Task.start(fn ->
+        ColorPalettes.add_recent_color(current_user.id, color)
+      end)
+
+      # Update the LiveComponent with the new color
+      send_update(CollabCanvasWeb.Components.ColorPicker,
+        id: "color-picker",
+        current_color: color
+      )
+
+      # Push event to JavaScript to update current color in CanvasManager
+      {:noreply,
+       socket
+       |> assign(:current_color, color)
+       |> push_event("color_changed", %{color: color})}
+    else
+      {:noreply, socket}
+    end
   end
 
   @doc """
@@ -1567,6 +1627,30 @@ defmodule CollabCanvasWeb.CanvasLive do
           <span class="absolute right-1 bottom-1 text-[10px] font-bold opacity-50">D</span>
         </button>
 
+        <!-- Divider -->
+        <div class="w-10 h-px bg-gray-300 my-2"></div>
+
+        <!-- Color Picker Button -->
+        <button
+          phx-click="toggle_color_picker"
+          class={[
+            "w-12 h-12 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-colors relative group border-2",
+            @show_color_picker && "bg-blue-100 border-blue-500",
+            !@show_color_picker && "border-gray-300"
+          ]}
+          title="Color Picker"
+          style={"background-color: #{@current_color}"}
+        >
+          <svg class="w-6 h-6 text-white drop-shadow-md" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
+            />
+          </svg>
+        </button>
+
         <div class="flex-1"></div>
 
         <!-- Keyboard shortcuts help -->
@@ -1615,6 +1699,7 @@ defmodule CollabCanvasWeb.CanvasLive do
           data-objects={Jason.encode!(@objects)}
           data-presences={Jason.encode!(@presences)}
           data-user-id={@user_id}
+          data-current-color={@current_color}
         >
           <!-- PixiJS will render here -->
         </div>
@@ -1756,6 +1841,21 @@ defmodule CollabCanvasWeb.CanvasLive do
           </div>
         </div>
       </div>
+
+      <!-- Color Picker Popup -->
+      <%= if @show_color_picker do %>
+        <div class="fixed inset-0 z-50">
+          <div class="absolute inset-0 bg-black opacity-25" phx-click="toggle_color_picker"></div>
+          <div class="absolute top-4 left-20 z-10">
+            <.live_component
+              module={CollabCanvasWeb.Components.ColorPicker}
+              id="color-picker"
+              user_id={@current_user.id}
+              current_color={@current_color}
+            />
+          </div>
+        </div>
+      <% end %>
     </div>
     """
   end

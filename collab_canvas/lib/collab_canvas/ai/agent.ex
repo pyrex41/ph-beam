@@ -99,6 +99,8 @@ defmodule CollabCanvas.AI.Agent do
     * `command` - Natural language command string (e.g., "create a red rectangle at 100,100")
     * `canvas_id` - The ID of the canvas to operate on
     * `selected_ids` - Optional list of selected object IDs for layout/arrangement commands (default: [])
+    * `opts` - Optional keyword list with:
+      - `:current_color` - Current color from color picker to use as default for new objects
 
   ## Returns
     * `{:ok, results}` - List of operation results
@@ -112,11 +114,17 @@ defmodule CollabCanvas.AI.Agent do
       iex> execute_command("arrange horizontally", 1, [1, 2, 3])
       {:ok, [%{type: "arrange_objects", result: {:ok, %{updated: 3}}}]}
 
+      iex> execute_command("create a circle", 1, [], current_color: "#FF0000")
+      {:ok, [%{type: "create_shape", result: {:ok, %Object{data: "{\"color\":\"#FF0000\"}"}}}]}
+
       iex> execute_command("invalid command", 999)
       {:error, :canvas_not_found}
 
   """
-  def execute_command(command, canvas_id, selected_ids \\ []) do
+  def execute_command(command, canvas_id, selected_ids \\ [], opts \\ []) do
+    # Extract current color from options
+    current_color = Keyword.get(opts, :current_color, "#000000")
+
     # Verify canvas exists
     case Canvases.get_canvas(canvas_id) do
       nil ->
@@ -124,7 +132,7 @@ defmodule CollabCanvas.AI.Agent do
 
       _canvas ->
         # Build enhanced command with selection context if provided
-        enhanced_command = build_command_with_context(command, selected_ids, canvas_id)
+        enhanced_command = build_command_with_context(command, selected_ids, canvas_id, current_color)
 
         Logger.info("Calling AI API with command: #{command}")
 
@@ -147,7 +155,7 @@ defmodule CollabCanvas.AI.Agent do
             enriched_tool_calls = enrich_tool_calls(tool_calls, selected_ids)
 
             # Process tool calls and execute canvas operations
-            results = process_tool_calls(enriched_tool_calls, canvas_id)
+            results = process_tool_calls(enriched_tool_calls, canvas_id, current_color)
             {:ok, results}
 
           {:error, reason} ->
@@ -364,6 +372,7 @@ defmodule CollabCanvas.AI.Agent do
       - `:name` - Name of the tool to execute
       - `:input` - Map of parameters for the tool
     * `canvas_id` - The ID of the canvas to operate on
+    * `current_color` - Current color from color picker to use as default for new objects
 
   ## Returns
     * List of operation result maps, each containing:
@@ -377,21 +386,21 @@ defmodule CollabCanvas.AI.Agent do
       ...>   %{id: "t1", name: "create_shape", input: %{"type" => "rectangle", "x" => 10, "y" => 10}},
       ...>   %{id: "t2", name: "create_text", input: %{"text" => "Hello", "x" => 50, "y" => 50}}
       ...> ]
-      iex> process_tool_calls(tool_calls, canvas_id)
+      iex> process_tool_calls(tool_calls, canvas_id, "#FF0000")
       [
         %{tool: "create_shape", input: %{...}, result: {:ok, %Object{}}},
         %{tool: "create_text", input: %{...}, result: {:ok, %Object{}}}
       ]
 
       iex> unknown_call = [%{id: "t1", name: "unknown_tool", input: %{}}]
-      iex> process_tool_calls(unknown_call, canvas_id)
+      iex> process_tool_calls(unknown_call, canvas_id, "#000000")
       [%{tool: "unknown", input: %{...}, result: {:error, :unknown_tool}}]
   """
-  def process_tool_calls(tool_calls, canvas_id) do
+  def process_tool_calls(tool_calls, canvas_id, current_color \\ "#000000") do
     Enum.map(tool_calls, fn tool_call ->
       # Normalize tool call input (coerce string IDs to integers)
       normalized_call = normalize_tool_input(tool_call)
-      execute_tool_call(normalized_call, canvas_id)
+      execute_tool_call(normalized_call, canvas_id, current_color)
     end)
   end
 
@@ -444,7 +453,7 @@ defmodule CollabCanvas.AI.Agent do
   end
 
   # Builds an enhanced command with all canvas objects and their human-readable names
-  defp build_command_with_context(command, selected_ids, canvas_id) do
+  defp build_command_with_context(command, selected_ids, canvas_id, current_color) do
     # Fetch all canvas objects
     all_objects = Canvases.list_objects(canvas_id)
 
@@ -473,6 +482,11 @@ defmodule CollabCanvas.AI.Agent do
 
     # Build full context
     context = """
+    CURRENT COLOR PICKER: #{current_color}
+    - Use this color when creating new shapes/text UNLESS the user specifies a different color
+    - If user says "create a rectangle" (without color), use #{current_color}
+    - If user says "create a blue rectangle", use blue (#0000FF or similar)
+
     CANVAS OBJECTS (use these human-readable names in your responses):
     #{available_objects_str}#{selected_context}
 
@@ -687,11 +701,12 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Supported shape types: rectangle, circle, triangle, etc.
   # Extracts width, height, color from input and creates object at specified x,y position.
-  defp execute_tool_call(%{name: "create_shape", input: input}, canvas_id) do
+  # Uses current_color as default if no color is specified in the input.
+  defp execute_tool_call(%{name: "create_shape", input: input}, canvas_id, current_color) do
     data = %{
       width: input["width"],
       height: input["height"],
-      color: Map.get(input, "color", "#000000")
+      color: Map.get(input, "color", current_color)
     }
 
     attrs = %{
@@ -715,11 +730,12 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Extracts text content, font_size (default 16), and color from input.
   # Creates text object at specified x,y position.
-  defp execute_tool_call(%{name: "create_text", input: input}, canvas_id) do
+  # Uses current_color as default if no color is specified in the input.
+  defp execute_tool_call(%{name: "create_text", input: input}, canvas_id, current_color) do
     data = %{
       text: input["text"],
       font_size: Map.get(input, "font_size", 16),
-      color: Map.get(input, "color", "#000000")
+      color: Map.get(input, "color", current_color)
     }
 
     attrs = %{
@@ -742,7 +758,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a move_shape tool call to reposition an object on the canvas.
   #
   # Updates the object's position to the new x,y coordinates specified in input.
-  defp execute_tool_call(%{name: "move_shape", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "move_shape", input: input}, _canvas_id, _current_color) do
     # Get object_id from either shape_id or object_id (for backwards compatibility)
     object_id = input["shape_id"] || input["object_id"]
 
@@ -766,7 +782,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Fetches existing object, merges width/height into data, and updates.
   # Returns error if object not found.
-  defp execute_tool_call(%{name: "resize_shape", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "resize_shape", input: input}, _canvas_id, _current_color) do
     # Get object_id from either shape_id or object_id (for backwards compatibility)
     object_id = input["shape_id"] || input["object_id"]
 
@@ -805,7 +821,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a delete_object tool call to remove an object from the canvas.
   #
   # Deletes the object with the specified object_id.
-  defp execute_tool_call(%{name: "delete_object", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "delete_object", input: input}, _canvas_id, _current_color) do
     result = Canvases.delete_object(input["object_id"])
 
     %{
@@ -818,7 +834,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a list_objects tool call to retrieve all objects on the canvas.
   #
   # Fetches all objects and formats them for AI response with decoded data.
-  defp execute_tool_call(%{name: "list_objects", input: _input}, canvas_id) do
+  defp execute_tool_call(%{name: "list_objects", input: _input}, canvas_id, _current_color) do
     objects = Canvases.list_objects(canvas_id)
 
     # Format objects for AI response
@@ -845,7 +861,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Supports multiple component types: login_form, navbar, card, button, sidebar.
   # Delegates to ComponentBuilder module with specified dimensions, theme, and content.
-  defp execute_tool_call(%{name: "create_component", input: input}, canvas_id) do
+  defp execute_tool_call(%{name: "create_component", input: input}, canvas_id, _current_color) do
     component_type = input["type"]
     x = input["x"]
     y = input["y"]
@@ -886,7 +902,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Currently returns success with generated group_id.
   # Full grouping logic would need to be implemented in Canvases context.
-  defp execute_tool_call(%{name: "group_objects", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "group_objects", input: input}, _canvas_id, _current_color) do
     # For now, just return success - actual grouping logic would need to be implemented in Canvases
     %{
       tool: "group_objects",
@@ -899,7 +915,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Fetches existing object, calculates new dimensions (with aspect ratio if requested),
   # merges into data, and updates. Returns error if object not found.
-  defp execute_tool_call(%{name: "resize_object", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "resize_object", input: input}, _canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -944,7 +960,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a rotate_object tool call to rotate an object by a specified angle.
   #
   # Stores rotation angle and pivot point in object data. Frontend will apply the rotation.
-  defp execute_tool_call(%{name: "rotate_object", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "rotate_object", input: input}, _canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -979,7 +995,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a change_style tool call to modify styling properties of an object.
   #
   # Supports fill, stroke, stroke_width, opacity, font properties, and color changes.
-  defp execute_tool_call(%{name: "change_style", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "change_style", input: input}, _canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1026,7 +1042,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes an update_text tool call to modify text content and formatting.
   #
   # Updates text content and any formatting options provided (font_size, font_family, color, etc.).
-  defp execute_tool_call(%{name: "update_text", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "update_text", input: input}, _canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1071,7 +1087,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a move_object tool call to reposition an object using delta or absolute coordinates.
   #
   # Supports both relative movement (delta_x, delta_y) and absolute positioning (x, y).
-  defp execute_tool_call(%{name: "move_object", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "move_object", input: input}, _canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1121,7 +1137,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Supports horizontal, vertical, grid, circular, and stack layouts.
   # Applies layout algorithms from CollabCanvas.AI.Layout module and batch updates all objects.
-  defp execute_tool_call(%{name: "arrange_objects", input: input}, canvas_id) do
+  defp execute_tool_call(%{name: "arrange_objects", input: input}, canvas_id, _current_color) do
     object_ids = input["object_ids"]
     layout_type = input["layout_type"]
 
@@ -1260,7 +1276,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a show_object_labels tool call to toggle display of visual labels on canvas objects.
   #
   # Returns a special result type that the frontend can handle to show/hide labels.
-  defp execute_tool_call(%{name: "show_object_labels", input: input}, _canvas_id) do
+  defp execute_tool_call(%{name: "show_object_labels", input: input}, _canvas_id, _current_color) do
     show = Map.get(input, "show", true)
 
     %{
@@ -1273,7 +1289,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes an arrange_objects_with_pattern tool call for flexible programmatic layouts.
   #
   # Supports custom patterns like line, diagonal, wave, arc for arrangements not covered by standard layouts.
-  defp execute_tool_call(%{name: "arrange_objects_with_pattern", input: input}, canvas_id) do
+  defp execute_tool_call(%{name: "arrange_objects_with_pattern", input: input}, canvas_id, _current_color) do
     object_ids = input["object_ids"]
     pattern = input["pattern"]
 
@@ -1355,7 +1371,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a define_object_relationships tool call for constraint-based positioning.
   #
   # Uses declarative constraints (above, below, left_of, etc.) to calculate object positions.
-  defp execute_tool_call(%{name: "define_object_relationships", input: input}, canvas_id) do
+  defp execute_tool_call(%{name: "define_object_relationships", input: input}, canvas_id, _current_color) do
     relationships = input["relationships"]
     apply_constraints = Map.get(input, "apply_constraints", true)
 
@@ -1445,7 +1461,7 @@ defmodule CollabCanvas.AI.Agent do
   # Fallback handler for unknown tool calls.
   #
   # Logs a warning and returns an error result for any unrecognized tool.
-  defp execute_tool_call(tool_call, _canvas_id) do
+  defp execute_tool_call(tool_call, _canvas_id, _current_color) do
     Logger.warning("Unknown tool call: #{inspect(tool_call)}")
 
     %{

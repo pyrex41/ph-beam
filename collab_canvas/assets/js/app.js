@@ -27,6 +27,8 @@ import * as PIXI from "../vendor/pixi.min.mjs"
 import CanvasManager from "./hooks/canvas_manager"
 // Import Component Draggable hook
 import ComponentDraggable from "./hooks/component_draggable"
+// Import Color Picker hook
+import { ColorPickerHook } from "./hooks/color_picker"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
@@ -34,7 +36,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
   hooks: {
     CanvasRenderer: CanvasManager,
-    ComponentDraggable: ComponentDraggable
+    ComponentDraggable: ComponentDraggable,
+    ColorPicker: ColorPickerHook
   },
 })
 
