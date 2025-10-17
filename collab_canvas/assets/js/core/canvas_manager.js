@@ -267,8 +267,11 @@ export class CanvasManager {
     const graphics = new PIXI.Graphics();
     const width = data.width || 100;
     const height = data.height || 100;
-    const fill = parseInt(data.fill?.replace('#', '0x') || '0x3b82f6');
-    const stroke = parseInt(data.stroke?.replace('#', '0x') || '0x1e40af');
+    // Check for both 'fill' and 'color' fields for backwards compatibility
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || data.color || '#1e40af';
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
     // v8 Graphics API: shape → fill → stroke
@@ -301,8 +304,11 @@ export class CanvasManager {
   createCircle(position, data) {
     const graphics = new PIXI.Graphics();
     const radius = (data.width || 100) / 2;
-    const fill = parseInt(data.fill?.replace('#', '0x') || '0x3b82f6');
-    const stroke = parseInt(data.stroke?.replace('#', '0x') || '0x1e40af');
+    // Check for both 'fill' and 'color' fields for backwards compatibility
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || data.color || '#1e40af';
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
     // v8 Graphics API: shape → fill → stroke
