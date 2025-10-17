@@ -7,6 +7,21 @@
 # General application configuration
 import Config
 
+# AI Provider Configuration
+config :collab_canvas, :ai,
+  # Default provider for simple commands (fast path)
+  default_provider: CollabCanvas.AI.Providers.Groq,
+  
+  # Fallback provider if default fails
+  fallback_provider: CollabCanvas.AI.Providers.Claude,
+  
+  # Enable/disable fast path classification
+  fast_path_enabled: true,
+  
+  # API timeouts (milliseconds)
+  groq_timeout: 5_000,
+  claude_timeout: 10_000
+
 config :collab_canvas,
   ecto_repos: [CollabCanvas.Repo],
   generators: [timestamp_type: :utc_datetime]
