@@ -457,7 +457,7 @@ defmodule CollabCanvas.AI.Agent do
     # Fetch all canvas objects
     all_objects = Canvases.list_objects(canvas_id)
 
-    # Generate human-readable display names (e.g., "Rectangle 1", "Circle 2")
+    # Generate human-readable display names (e.g., "Object 1", "Object 2")
     objects_with_names = generate_display_names(all_objects)
 
     # Build context with all objects and their display names
@@ -493,7 +493,7 @@ defmodule CollabCanvas.AI.Agent do
     DISAMBIGUATION RULES:
     - When the user refers to "that square", "the circle", "that rectangle", etc. without specifying which one:
       * If objects are currently selected, operate on the selected objects
-      * If no selection, ask the user to specify which one using the display names above (e.g., "Rectangle 1", "Circle 2")
+      * If no selection, ask the user to specify which one using the display names above (e.g., "Object 1", "Object 2")
       * If ambiguous and you must assume, use the most recently created object of that type
 
     - When referencing objects in tool calls, ALWAYS use the database ID (the number in parentheses), not the display name
@@ -557,30 +557,23 @@ defmodule CollabCanvas.AI.Agent do
     context
   end
 
-  # Generates human-readable display names for objects based on type and creation order
+  # Generates human-readable display names for objects based on creation order
   # Returns list of {object, "Display Name"} tuples
   defp generate_display_names(objects) do
-    # Sort by insertion time (oldest first)
-    sorted_objects = Enum.sort_by(objects, & &1.inserted_at, DateTime)
-
-    # Group by type and number them
-    sorted_objects
-    |> Enum.group_by(& &1.type)
-    |> Enum.flat_map(fn {type, type_objects} ->
-      type_objects
-      |> Enum.with_index(1)
-      |> Enum.map(fn {obj, index} ->
-        display_name = format_display_name(type, index)
-        {obj, display_name}
-      end)
+    # Sort by insertion time (oldest first) and number sequentially
+    objects
+    |> Enum.sort_by(& &1.inserted_at, DateTime)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {obj, index} ->
+      display_name = format_display_name(index)
+      {obj, display_name}
     end)
     |> Enum.sort_by(fn {obj, _name} -> obj.id end)
   end
 
-  # Formats a display name for an object (e.g., "Rectangle 1", "Circle 2")
-  defp format_display_name(type, index) do
-    type_str = type |> String.capitalize()
-    "#{type_str} #{index}"
+  # Formats a display name for an object (e.g., "Object 1", "Object 2")
+  defp format_display_name(index) do
+    "Object #{index}"
   end
 
   # Enriches tool calls by injecting selected object IDs into arrange_objects calls
