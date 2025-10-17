@@ -1373,14 +1373,15 @@ export class CanvasManager {
     const canvas = this.app?.canvas;
     if (canvas) {
       canvas.removeEventListener('mousedown', this.boundHandlers.handleMouseDown);
-      canvas.removeEventListener('mousemove', this.boundHandlers.handleMouseMove);
-      canvas.removeEventListener('mouseup', this.boundHandlers.handleMouseUp);
       canvas.removeEventListener('wheel', this.boundHandlers.handleWheel);
       canvas.removeEventListener('touchstart', this.boundHandlers.handleTouchStart);
       canvas.removeEventListener('touchmove', this.boundHandlers.handleTouchMove);
       canvas.removeEventListener('touchend', this.boundHandlers.handleTouchEnd);
     }
 
+    // Remove window event listeners (mousemove and mouseup are on window, not canvas)
+    window.removeEventListener('mousemove', this.boundHandlers.handleMouseMove);
+    window.removeEventListener('mouseup', this.boundHandlers.handleMouseUp);
     window.removeEventListener('keydown', this.boundHandlers.handleKeyDown);
     window.removeEventListener('keyup', this.boundHandlers.handleKeyUp);
     window.removeEventListener('resize', this.boundHandlers.handleResize);
