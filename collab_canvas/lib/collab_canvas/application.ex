@@ -78,6 +78,9 @@ defmodule CollabCanvas.Application do
 
   """
   def start(_type, _args) do
+    # Validate AI provider API keys on startup
+    CollabCanvas.AI.ApiKeyValidator.validate_all()
+    
     children = [
       CollabCanvasWeb.Telemetry,
       CollabCanvas.Repo,
@@ -87,6 +90,10 @@ defmodule CollabCanvas.Application do
       {Phoenix.PubSub, name: CollabCanvas.PubSub},
       # Start the Presence system for tracking online users and cursors
       CollabCanvasWeb.Presence,
+      # AI infrastructure services
+      CollabCanvas.AI.CircuitBreaker,
+      CollabCanvas.AI.RateLimiter,
+      CollabCanvas.AI.ProviderHealth,
       # Start a worker by calling: CollabCanvas.Worker.start_link(arg)
       # {CollabCanvas.Worker, arg},
       # Start to serve requests, typically the last entry

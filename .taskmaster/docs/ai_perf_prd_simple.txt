@@ -1,0 +1,132 @@
+# AI Performance Optimization with Groq
+
+## Overview
+Optimize AI agent to achieve sub-2-second responses using Groq as primary LLM provider.
+
+## Tasks
+
+### Phase 1: Fast Path Implementation (Critical - 1-2 days)
+
+**Task: Implement Command Classifier Module**
+Create classification system to route commands to optimal LLM provider.
+- Pattern-based classification using regex
+- Classify as :fast_path or :complex_path
+- Detect multiple operations, context references, components
+- Default to :fast_path for simple commands
+- Add debug logging
+Priority: High | Time: 4 hours
+
+**Task: Create Provider Behaviour and Groq Implementation**
+Implement LLM provider abstraction with Groq as primary.
+- Define Provider behaviour with call/3, model_name/0, avg_latency/0
+- Implement Groq provider using llama-3.3-70b-versatile
+- Convert tool definitions to OpenAI format
+- Parse responses and handle errors
+- Add latency tracking
+Priority: High | Time: 6 hours
+
+**Task: Integrate Command Routing in Agent**
+Update Agent to route commands through classifier.
+- Use CommandClassifier.classify/1
+- Route :fast_path to Groq
+- Implement fallback to Claude if Groq fails
+- Add performance logging
+- Maintain backward compatibility
+Priority: High | Time: 4 hours
+
+### Phase 2: Parallel Execution (High Value - 2-3 days)
+
+**Task: Add Parallel Tool Execution**
+Replace sequential tool execution with Task.async_stream.
+- Use Task.async_stream with max_concurrency: 10
+- Set 5-second timeout per tool
+- Handle task failures gracefully
+- Maintain execution order in results
+- Add performance metrics
+Priority: High | Time: 5 hours
+
+**Task: Create Tool Behaviour System**
+Implement modular tool system with behaviours.
+- Define ToolBehaviour with schema/0, validate/1, execute/3
+- Create ToolRegistry with compile-time map for O(1) lookup
+- Add Ecto.Changeset validation
+- Generate tool definitions automatically
+Priority: Medium | Time: 8 hours
+
+**Task: Refactor Core Tools to Behaviour Pattern**
+Refactor existing tools to implement ToolBehaviour.
+- Refactor CreateShape, CreateText, MoveObject
+- Refactor ResizeObject, DeleteObject, CreateComponent
+- Each tool has Ecto schema for validation
+- Each tool in separate file
+Priority: Medium | Time: 6 hours
+
+### Phase 3: Configuration and Testing (Essential)
+
+**Task: Add Configuration and Feature Flags**
+Add configuration for providers and rollout flags.
+- Environment variables for API keys
+- Config for default and fallback providers
+- Feature flag for fast_path
+- Timeout configurations
+Priority: High | Time: 2 hours
+
+**Task: Write Comprehensive Tests**
+Create comprehensive test suite.
+- Unit tests for all new modules
+- Integration tests for end-to-end flow
+- Performance tests validating < 1s for simple commands
+- Error handling and fallback tests
+- 90%+ code coverage
+Priority: High | Time: 6 hours
+
+**Task: Add Performance Monitoring**
+Add telemetry for AI performance tracking.
+- Emit telemetry events for command execution
+- Track latency by command type
+- Track provider usage and error rates
+- Add dashboard for metrics
+Priority: Medium | Time: 4 hours
+
+### Phase 4: Advanced Features (Optional)
+
+**Task: Add Layout Tools**
+Implement AI-powered layout and arrangement.
+- Create Layout module with algorithms
+- Implement ArrangeObjects tool (grid, horizontal, vertical)
+- Implement AlignObjects tool (left, center, right, etc)
+- Add layout patterns to classifier
+Priority: Low | Time: 8 hours
+
+**Task: Add Streaming Support**
+Implement streaming responses for better UX.
+- Add streaming to Groq provider
+- Create StreamingAgent module
+- Update LiveView for incremental updates
+- Add progress indicators
+Priority: Low | Time: 10 hours
+
+**Task: Documentation and Migration Guide**
+Create documentation for new AI system.
+- Update AGENTS.md with new architecture
+- Document provider and tool behaviour systems
+- Create migration guide
+- Update API documentation
+Priority: Medium | Time: 3 hours
+
+## Performance Targets
+
+- Simple commands: < 1 second (70% of use cases)
+- Multi-tool commands: < 1.5 seconds
+- Layout commands: < 2 seconds
+- Complex components: < 2.5 seconds
+- Cost reduction: 50%+ vs Claude-only
+
+## Success Criteria
+
+Phase 1-2 Implementation:
+- 70% of commands complete in < 1 second
+- 90% of commands complete in < 2 seconds
+- No increase in error rate
+- All existing functionality preserved
+- 50%+ cost reduction

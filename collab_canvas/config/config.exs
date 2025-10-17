@@ -7,6 +7,37 @@
 # General application configuration
 import Config
 
+# AI Provider Configuration
+config :collab_canvas, :ai,
+  # Default provider for simple commands (fast path)
+  default_provider: CollabCanvas.AI.Providers.Groq,
+  
+  # Fallback provider if default fails
+  fallback_provider: CollabCanvas.AI.Providers.Claude,
+  
+  # Enable/disable fast path classification
+  fast_path_enabled: true,
+  
+  # API timeouts (milliseconds)
+  groq_timeout: 5_000,
+  claude_timeout: 10_000,
+  
+  # Rate limiting
+  max_requests_per_minute: 60,
+  rate_limit_window_ms: 60_000,
+  
+  # Circuit breaker configuration
+  circuit_breaker_enabled: true,
+  circuit_breaker_threshold: 5,  # failures before opening
+  circuit_breaker_timeout: 60_000,  # time before retry (ms)
+  
+  # Health check configuration
+  health_check_enabled: true,
+  health_check_interval: 300_000,  # 5 minutes
+  
+  # Validate API keys on startup
+  validate_keys_on_startup: true
+
 config :collab_canvas,
   ecto_repos: [CollabCanvas.Repo],
   generators: [timestamp_type: :utc_datetime]
