@@ -376,10 +376,12 @@ export class CanvasManager {
    * @param {number} height - Object height
    */
   applyRotation(object, angle, pivotPoint = 'center', width, height) {
-    // Convert degrees to radians
+    // Set rotation angle
     object.angle = angle;
 
     // Set pivot based on pivot_point
+    // Note: We don't adjust position here - PixiJS handles rotation around pivot correctly
+    // The object's x,y position represents where the pivot point is in world coordinates
     switch (pivotPoint) {
       case 'top-left':
         object.pivot.set(0, 0);
@@ -396,9 +398,6 @@ export class CanvasManager {
       case 'center':
       default:
         object.pivot.set(width / 2, height / 2);
-        // Adjust position to compensate for pivot change
-        object.x += width / 2;
-        object.y += height / 2;
         break;
     }
   }
@@ -426,6 +425,10 @@ export class CanvasManager {
     // Position highlight at object's position
     highlight.x = pixiObject.x;
     highlight.y = pixiObject.y;
+
+    // Match rotation and pivot of the object so highlight rotates with it
+    highlight.angle = pixiObject.angle;
+    highlight.pivot.set(pixiObject.pivot.x, pixiObject.pivot.y);
 
     this.objectContainer.addChild(highlight);
 
@@ -1169,6 +1172,10 @@ export class CanvasManager {
     selectionBox.x = object.x;
     selectionBox.y = object.y;
 
+    // Match rotation and pivot of the object so selection box rotates with it
+    selectionBox.angle = object.angle;
+    selectionBox.pivot.set(object.pivot.x, object.pivot.y);
+
     this.objectContainer.addChild(selectionBox);
     this.selectionBoxes.set(object.objectId, selectionBox);
   }
@@ -1193,6 +1200,10 @@ export class CanvasManager {
         // Update position to match object
         box.x = obj.x;
         box.y = obj.y;
+
+        // Update rotation and pivot to match object (for rotated objects)
+        box.angle = obj.angle;
+        box.pivot.set(obj.pivot.x, obj.pivot.y);
       }
     });
   }
