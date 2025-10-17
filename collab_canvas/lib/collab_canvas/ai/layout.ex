@@ -500,7 +500,7 @@ defmodule CollabCanvas.AI.Layout do
   end
 
   defp get_object_width(obj) do
-    cond do
+    width = cond do
       is_map(obj.data) and Map.has_key?(obj.data, :width) ->
         obj.data.width
 
@@ -510,10 +510,16 @@ defmodule CollabCanvas.AI.Layout do
       true ->
         50  # Default width
     end
+
+    # Ensure we always return a number
+    case width do
+      w when is_number(w) -> w
+      _ -> 50
+    end
   end
 
   defp get_object_height(obj) do
-    cond do
+    height = cond do
       is_map(obj.data) and Map.has_key?(obj.data, :height) ->
         obj.data.height
 
@@ -522,6 +528,12 @@ defmodule CollabCanvas.AI.Layout do
 
       true ->
         50  # Default height
+    end
+
+    # Ensure we always return a number
+    case height do
+      h when is_number(h) -> h
+      _ -> 50
     end
   end
 end
