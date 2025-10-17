@@ -702,10 +702,15 @@ defmodule CollabCanvas.AI.Agent do
   # Extracts width, height, color from input and creates object at specified x,y position.
   # Uses current_color as default if no color is specified in the input.
   defp execute_tool_call(%{name: "create_shape", input: input}, canvas_id, current_color) do
+    ai_color = Map.get(input, "color")
+    final_color = Map.get(input, "color", current_color)
+
+    Logger.info("create_shape: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
+
     data = %{
       width: input["width"],
       height: input["height"],
-      color: Map.get(input, "color", current_color)
+      color: final_color
     }
 
     attrs = %{
@@ -731,10 +736,15 @@ defmodule CollabCanvas.AI.Agent do
   # Creates text object at specified x,y position.
   # Uses current_color as default if no color is specified in the input.
   defp execute_tool_call(%{name: "create_text", input: input}, canvas_id, current_color) do
+    ai_color = Map.get(input, "color")
+    final_color = Map.get(input, "color", current_color)
+
+    Logger.info("create_text: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
+
     data = %{
       text: input["text"],
       font_size: Map.get(input, "font_size", 16),
-      color: Map.get(input, "color", current_color)
+      color: final_color
     }
 
     attrs = %{

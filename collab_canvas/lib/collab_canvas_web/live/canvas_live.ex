@@ -718,6 +718,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
       # Start async task with timeout (Task.async automatically links to current process)
       current_color = socket.assigns.current_color
+      Logger.info("CanvasLive: Passing current_color to AI: #{current_color}")
       task =
         Task.async(fn ->
           Agent.execute_command(command, canvas_id, selected_ids, current_color: current_color)
