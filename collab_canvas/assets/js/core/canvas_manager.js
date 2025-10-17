@@ -12,6 +12,7 @@ export class CanvasManager {
     // PixiJS application and containers
     this.app = null;
     this.objectContainer = null;
+    this.labelContainer = null; // Separate container for labels (renders on top)
     this.cursorContainer = null;
 
     // Object and cursor storage
@@ -96,6 +97,11 @@ export class CanvasManager {
     this.objectContainer.cullable = true;
     this.objectContainer.isRenderGroup = true; // v8 render groups for batching
     this.app.stage.addChild(this.objectContainer);
+
+    // Create label container (renders above objects, below cursors)
+    this.labelContainer = new PIXI.Container();
+    this.labelContainer.isRenderGroup = true; // v8 render groups for label batching
+    this.app.stage.addChild(this.labelContainer);
 
     // Create cursor overlay container with render group for batching
     this.cursorContainer = new PIXI.Container();
@@ -699,6 +705,8 @@ export class CanvasManager {
       this.viewOffset.y += dy;
       this.objectContainer.x = this.viewOffset.x;
       this.objectContainer.y = this.viewOffset.y;
+      this.labelContainer.x = this.viewOffset.x;
+      this.labelContainer.y = this.viewOffset.y;
       this.cursorContainer.x = this.viewOffset.x;
       this.cursorContainer.y = this.viewOffset.y;
 
@@ -787,6 +795,7 @@ export class CanvasManager {
 
       this.zoomLevel = newZoom;
       this.objectContainer.scale.set(newZoom, newZoom);
+      this.labelContainer.scale.set(newZoom, newZoom);
       this.cursorContainer.scale.set(newZoom, newZoom);
 
       // Debounced culling during zoom
@@ -797,6 +806,8 @@ export class CanvasManager {
       this.viewOffset.y -= event.deltaY;
       this.objectContainer.x = this.viewOffset.x;
       this.objectContainer.y = this.viewOffset.y;
+      this.labelContainer.x = this.viewOffset.x;
+      this.labelContainer.y = this.viewOffset.y;
       this.cursorContainer.x = this.viewOffset.x;
       this.cursorContainer.y = this.viewOffset.y;
 
@@ -1297,7 +1308,7 @@ export class CanvasManager {
         // Remove existing label if present
         const existingLabel = this.objectLabels.get(objectId);
         if (existingLabel) {
-          this.objectContainer.removeChild(existingLabel.container);
+          this.labelContainer.removeChild(existingLabel.container);
           existingLabel.container.destroy();
         }
 
@@ -1336,8 +1347,8 @@ export class CanvasManager {
         // Store label reference
         this.objectLabels.set(objectId, { container: labelContainer, text, bg });
 
-        // Add to object container
-        this.objectContainer.addChild(labelContainer);
+        // Add to label container (renders on top of objects)
+        this.labelContainer.addChild(labelContainer);
       });
     } else {
       // Hide labels
@@ -1345,7 +1356,7 @@ export class CanvasManager {
 
       // Remove all labels
       this.objectLabels.forEach((label, objectId) => {
-        this.objectContainer.removeChild(label.container);
+        this.labelContainer.removeChild(label.container);
         label.container.destroy();
       });
 
