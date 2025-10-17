@@ -1605,16 +1605,31 @@ export class CanvasManager {
    */
   getMousePosition(event) {
     // Safety check for null/undefined events or events with null/undefined coordinates
-    if (!event || typeof event.clientX !== 'number' || typeof event.clientY !== 'number') {
-      console.warn('[CanvasManager] getMousePosition called with invalid event:', event);
+    // Wrap in try-catch since event.clientX/clientY might be getters that throw
+    try {
+      if (!event) {
+        console.warn('[CanvasManager] getMousePosition called with null/undefined event');
+        return { x: 0, y: 0 };
+      }
+
+      // Test accessing clientX/clientY - these might be getters that throw
+      const clientX = event.clientX;
+      const clientY = event.clientY;
+
+      if (typeof clientX !== 'number' || typeof clientY !== 'number') {
+        console.warn('[CanvasManager] getMousePosition called with invalid coordinates:', { clientX, clientY, event });
+        return { x: 0, y: 0 };
+      }
+
+      const rect = this.app.canvas.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - this.viewOffset.x) / this.zoomLevel,
+        y: (clientY - rect.top - this.viewOffset.y) / this.zoomLevel
+      };
+    } catch (error) {
+      console.warn('[CanvasManager] getMousePosition caught error accessing event properties:', error, event);
       return { x: 0, y: 0 };
     }
-
-    const rect = this.app.canvas.getBoundingClientRect();
-    return {
-      x: (event.clientX - rect.left - this.viewOffset.x) / this.zoomLevel,
-      y: (event.clientY - rect.top - this.viewOffset.y) / this.zoomLevel
-    };
   }
 
   /**
