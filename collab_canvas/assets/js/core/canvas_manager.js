@@ -157,8 +157,9 @@ export class CanvasManager {
 
     // Mouse events
     canvas.addEventListener('mousedown', this.boundHandlers.handleMouseDown);
-    canvas.addEventListener('mousemove', this.boundHandlers.handleMouseMove);
-    canvas.addEventListener('mouseup', this.boundHandlers.handleMouseUp);
+    // Attach move and up to window so they work even when mouse leaves canvas
+    window.addEventListener('mousemove', this.boundHandlers.handleMouseMove);
+    window.addEventListener('mouseup', this.boundHandlers.handleMouseUp);
     canvas.addEventListener('wheel', this.boundHandlers.handleWheel);
 
     // Touch events for mobile
