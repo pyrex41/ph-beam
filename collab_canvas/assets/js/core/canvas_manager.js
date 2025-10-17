@@ -399,17 +399,21 @@ export class CanvasManager {
     const pixiObject = this.objects.get(objectId);
     if (!pixiObject) return;
 
-    // Create a temporary highlight effect
-    const bounds = pixiObject.getBounds();
+    // Use local bounds (container-relative) instead of global bounds
+    const bounds = pixiObject.getLocalBounds();
     const highlight = new PIXI.Graphics();
 
     // Draw a glowing border around the object
     highlight.rect(
-      bounds.x - 4,
-      bounds.y - 4,
+      -4,
+      -4,
       bounds.width + 8,
       bounds.height + 8
     ).stroke({ width: 3, color: 0x10b981 }); // Green highlight
+
+    // Position highlight at object's position
+    highlight.x = pixiObject.x;
+    highlight.y = pixiObject.y;
 
     this.objectContainer.addChild(highlight);
 
@@ -421,7 +425,9 @@ export class CanvasManager {
 
       if (alpha <= 0) {
         clearInterval(fadeInterval);
-        this.objectContainer.removeChild(highlight);
+        if (highlight.parent) {
+          highlight.parent.removeChild(highlight);
+        }
         highlight.destroy();
       }
     }, 50);
