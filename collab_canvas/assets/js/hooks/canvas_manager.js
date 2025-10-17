@@ -206,14 +206,14 @@ export default {
 
     // Handle object updated events
     this.handleEvent('object_updated', (data) => {
-      this.canvasManager.updateObject(data.object);
+      this.canvasManager.updateObject(data.object, { animate: data.animate });
     });
 
     // Handle batch object updates (for layout operations)
     this.handleEvent('objects_updated_batch', (data) => {
       console.log('Batch update received:', data.objects.length, 'objects');
-      // Update all objects in the batch
-      data.objects.forEach(obj => this.canvasManager.updateObject(obj));
+      // Update all objects in the batch with animation
+      data.objects.forEach(obj => this.canvasManager.updateObject(obj, { animate: true }));
     });
 
     // Handle object deleted events
@@ -244,6 +244,11 @@ export default {
     // Handle object unlock updates from server
     this.handleEvent('object_unlocked', (data) => {
       this.canvasManager.updateObject(data.object);
+    });
+
+    // Handle object label toggle
+    this.handleEvent('toggle_object_labels', (data) => {
+      this.canvasManager.toggleObjectLabels(data.show, data.labels);
     });
   },
 

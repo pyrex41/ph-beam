@@ -17,6 +17,8 @@ export class CanvasManager {
     // Object and cursor storage
     this.objects = new Map();
     this.cursors = new Map();
+    this.objectLabels = new Map(); // Map of objectId -> label Text object
+    this.labelsVisible = false; // Track if labels are currently visible
 
     // Interaction state
     this.currentUserId = null;
@@ -439,6 +441,16 @@ export class CanvasManager {
     if (objectData.position) {
       pixiObject.x = objectData.position.x;
       pixiObject.y = objectData.position.y;
+
+      // Update label position for this object if labels are visible
+      if (this.labelsVisible) {
+        const label = this.objectLabels.get(objectData.id);
+        if (label) {
+          const bounds = pixiObject.getBounds();
+          label.container.x = bounds.x + bounds.width / 2 - label.container.width / 2;
+          label.container.y = bounds.y - label.container.height - 5;
+        }
+      }
     }
 
     // Update lock status
@@ -454,6 +466,9 @@ export class CanvasManager {
 
       // Show AI feedback for data changes (Task 8)
       this.showAIFeedback(objectData.id);
+
+      // Update label for recreated object if labels are visible
+      this.updateObjectLabels();
     }
   }
 
@@ -709,6 +724,9 @@ export class CanvasManager {
 
       // Update all selection boxes
       this.updateSelectionBoxes();
+
+      // Update all object labels to follow dragged objects
+      this.updateObjectLabels();
 
       // Broadcast positions for all selected objects during drag (throttled to avoid spam)
       if (!this.lastDragUpdate || Date.now() - this.lastDragUpdate > 50) {
@@ -1092,6 +1110,22 @@ export class CanvasManager {
   }
 
   /**
+   * Update all object labels to match object positions
+   */
+  updateObjectLabels() {
+    if (!this.labelsVisible) return;
+
+    this.objectLabels.forEach((label, objectId) => {
+      const obj = this.objects.get(objectId);
+      if (obj) {
+        const bounds = obj.getBounds();
+        label.container.x = bounds.x + bounds.width / 2 - label.container.width / 2;
+        label.container.y = bounds.y - label.container.height - 5; // 5px above object
+      }
+    });
+  }
+
+  /**
    * Handle window resize
    */
   handleResize() {
@@ -1244,6 +1278,79 @@ export class CanvasManager {
    */
   getSelectedObjectIds() {
     return Array.from(this.selectedObjects).map(obj => obj.objectId);
+  }
+
+  /**
+   * Toggle visual labels on canvas objects
+   * @param {boolean} show - Whether to show or hide labels
+   * @param {Object} labels - Map of object_id => display_name (e.g., "Rectangle 1")
+   */
+  toggleObjectLabels(show, labels) {
+    if (show) {
+      // Show labels
+      this.labelsVisible = true;
+
+      // Create label for each object
+      this.objects.forEach((pixiObject, objectId) => {
+        const labelText = labels[objectId] || `Object ${objectId}`;
+
+        // Remove existing label if present
+        const existingLabel = this.objectLabels.get(objectId);
+        if (existingLabel) {
+          this.objectContainer.removeChild(existingLabel.container);
+          existingLabel.container.destroy();
+        }
+
+        // Create label container
+        const labelContainer = new PIXI.Container();
+
+        // Create text label
+        const text = new PIXI.Text({
+          text: labelText,
+          style: new PIXI.TextStyle({
+            fontFamily: 'Arial',
+            fontSize: 14,
+            fill: 0xffffff,
+            fontWeight: 'bold'
+          })
+        });
+
+        // Create background for label
+        const padding = 4;
+        const bg = new PIXI.Graphics();
+        bg.roundRect(0, 0, text.width + padding * 2, text.height + padding * 2, 4)
+          .fill({ color: 0x3b82f6, alpha: 0.9 });
+
+        // Position text on top of background
+        text.x = padding;
+        text.y = padding;
+
+        labelContainer.addChild(bg);
+        labelContainer.addChild(text);
+
+        // Position label above the object
+        const bounds = pixiObject.getBounds();
+        labelContainer.x = bounds.x + bounds.width / 2 - labelContainer.width / 2;
+        labelContainer.y = bounds.y - labelContainer.height - 5; // 5px above object
+
+        // Store label reference
+        this.objectLabels.set(objectId, { container: labelContainer, text, bg });
+
+        // Add to object container
+        this.objectContainer.addChild(labelContainer);
+      });
+    } else {
+      // Hide labels
+      this.labelsVisible = false;
+
+      // Remove all labels
+      this.objectLabels.forEach((label, objectId) => {
+        this.objectContainer.removeChild(label.container);
+        label.container.destroy();
+      });
+
+      this.objectLabels.clear();
+    }
   }
 
   /**

@@ -227,7 +227,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             shape_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the shape to move"
             },
             x: %{
@@ -249,7 +249,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             shape_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the shape to resize"
             },
             width: %{
@@ -323,7 +323,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             object_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the object to delete"
             }
           },
@@ -339,7 +339,7 @@ defmodule CollabCanvas.AI.Tools do
             object_ids: %{
               type: "array",
               description: "List of object IDs to group",
-              items: %{type: "string"}
+              items: %{type: "integer"}
             },
             group_name: %{
               type: "string",
@@ -356,7 +356,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             object_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the object to resize"
             },
             width: %{
@@ -383,7 +383,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             object_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the object to rotate"
             },
             angle: %{
@@ -407,7 +407,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             object_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the object to style"
             },
             property: %{
@@ -430,7 +430,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             object_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the text object to update"
             },
             new_text: %{
@@ -473,7 +473,7 @@ defmodule CollabCanvas.AI.Tools do
           type: "object",
           properties: %{
             object_id: %{
-              type: "string",
+              type: "integer",
               description: "ID of the object to move"
             },
             delta_x: %{
@@ -504,7 +504,7 @@ defmodule CollabCanvas.AI.Tools do
           properties: %{
             object_ids: %{
               type: "array",
-              items: %{type: "string"},
+              items: %{type: "integer"},
               description: "IDs of objects to arrange"
             },
             layout_type: %{
@@ -534,6 +534,20 @@ defmodule CollabCanvas.AI.Tools do
             }
           },
           required: ["object_ids", "layout_type"]
+        }
+      },
+      %{
+        name: "show_object_labels",
+        description: "Toggle visual labels on canvas objects. Use this when user asks to 'show object IDs', 'show labels', 'display object names', or 'hide labels'. Labels appear directly on the canvas above each object showing their human-readable names (Rectangle 1, Circle 2, etc.)",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            show: %{
+              type: "boolean",
+              description: "True to show labels, false to hide them"
+            }
+          },
+          required: ["show"]
         }
       }
     ]

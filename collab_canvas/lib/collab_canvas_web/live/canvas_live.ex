@@ -138,14 +138,17 @@ defmodule CollabCanvasWeb.CanvasLive do
       user_id = "user_#{user.id}"
 
       # Track user presence (cursor will be set when user first moves mouse)
-      {:ok, _} =
-        Presence.track(self(), topic, user_id, %{
+      # Handle both success and already_tracked cases (can happen on page reload)
+      case Presence.track(self(), topic, user_id, %{
           online_at: System.system_time(:second),
           cursor: nil,
           color: generate_user_color(),
           name: user.name || user.email,
           email: user.email
-        })
+        }) do
+        {:ok, _} -> :ok
+        {:error, {:already_tracked, _, _, _}} -> :ok
+      end
 
       # Initialize socket state
       {:ok,
@@ -159,7 +162,8 @@ defmodule CollabCanvasWeb.CanvasLive do
        |> assign(:selected_tool, "select")
        |> assign(:ai_command, "")
        |> assign(:ai_loading, false)
-       |> assign(:ai_task_ref, nil)}
+       |> assign(:ai_task_ref, nil)
+       |> assign(:show_labels, false)}
     else
       # Canvas not found or user not authenticated
       {:ok,
@@ -827,6 +831,30 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles toggle_labels events from the UI toggle switch.
+
+  Toggles the display of object labels on the canvas and updates the state.
+
+  ## Parameters
+
+  - No parameters needed, toggles the current state
+
+  ## Returns
+
+  `{:noreply, socket}` with updated show_labels state and push_event to client.
+  """
+  @impl true
+  def handle_event("toggle_labels", _params, socket) do
+    new_state = !socket.assigns.show_labels
+    object_labels = generate_object_labels(socket.assigns.objects)
+
+    {:noreply,
+     socket
+     |> assign(:show_labels, new_state)
+     |> push_event("toggle_object_labels", %{show: new_state, labels: object_labels})}
+  end
+
+  @doc """
   Handles object_created broadcasts from PubSub (from other clients or AI).
 
   Adds newly created objects to local state and pushes to JavaScript for
@@ -1180,6 +1208,28 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc false
+  # Private helper to generate human-readable labels for canvas objects.
+  # Groups objects by type and numbers them sequentially.
+  # Returns a map of object_id => display_name (e.g., "Rectangle 1", "Circle 2")
+  defp generate_object_labels(objects) do
+    # Group objects by type and count occurrences
+    objects
+    |> Enum.group_by(& &1.type)
+    |> Enum.flat_map(fn {type, objects_of_type} ->
+      # Sort by ID to maintain consistent ordering
+      objects_of_type
+      |> Enum.sort_by(& &1.id)
+      |> Enum.with_index(1)
+      |> Enum.map(fn {object, index} ->
+        # Capitalize type name (e.g., "rectangle" -> "Rectangle")
+        type_name = String.capitalize(type)
+        {object.id, "#{type_name} #{index}"}
+      end)
+    end)
+    |> Map.new()
+  end
+
+  @doc false
   # Private helper to process AI agent results and update socket state.
   # Handles all possible result types from Agent.execute_command/2:
   # - {:ok, results} - Successfully created objects
@@ -1191,21 +1241,73 @@ defmodule CollabCanvasWeb.CanvasLive do
   # - {:error, reason} - Other errors
   defp process_ai_result(result, socket) do
     case result do
-      {:ok, results} ->
-        # Extract successfully created objects from results
-        objects =
-          results
-          |> Enum.map(fn result -> result.result end)
-          |> Enum.filter(fn
-            {:ok, object} when is_map(object) and is_map_key(object, :id) -> true
-            # Component creation returns object_ids
-            {:ok, %{object_ids: _ids}} -> false
-            _ -> false
-          end)
-          |> Enum.map(fn {:ok, object} -> object end)
+      {:ok, {:text_response, text}} ->
+        # AI asked for clarification or provided text response
+        socket
+        |> assign(:ai_command, "")
+        |> put_flash(:info, text)
 
-        # Broadcast AI-generated objects to all clients
-        Enum.each(objects, fn object ->
+      {:ok, {:toggle_labels, show}} ->
+        # AI requested to show/hide object labels
+        # Generate display names for all objects
+        object_labels = generate_object_labels(socket.assigns.objects)
+
+        # Push event to JavaScript to render labels
+        socket
+        |> push_event("toggle_object_labels", %{show: show, labels: object_labels})
+        |> assign(:ai_command, "")
+        |> assign(:show_labels, show)
+        |> put_flash(:info, if(show, do: "Object labels shown", else: "Object labels hidden"))
+
+      {:ok, results} when is_list(results) and length(results) == 0 ->
+        # AI returned no tool calls - it either doesn't understand or can't perform the action
+        socket
+        |> assign(:ai_command, "")
+        |> put_flash(:warning, "I couldn't perform that action. Try rephrasing your command or check if I have the right tools available.")
+
+      {:ok, results} when is_list(results) ->
+        # Check if this is a special non-object result (like toggle_labels)
+        case results do
+          [%{tool: "show_object_labels", result: {:ok, {:toggle_labels, show}}}] ->
+            # Handle label toggle
+            object_labels = generate_object_labels(socket.assigns.objects)
+
+            socket
+            |> push_event("toggle_object_labels", %{show: show, labels: object_labels})
+            |> assign(:ai_command, "")
+            |> assign(:show_labels, show)
+            |> put_flash(:info, if(show, do: "Object labels shown", else: "Object labels hidden"))
+
+          _ ->
+            # Separate created objects from updated objects
+            {created_objects, updated_objects} =
+              results
+              |> Enum.reduce({[], []}, fn result, {created, updated} ->
+                case result do
+                  # Handle create operations
+                  %{tool: tool, result: {:ok, object}} when tool in ["create_shape", "create_text", "create_component"] and is_map(object) and is_map_key(object, :id) ->
+                    {[object | created], updated}
+
+                  # Handle update/move/arrange operations
+                  %{tool: tool, result: {:ok, object}} when tool in ["move_object", "move_shape", "resize_object", "resize_shape", "rotate_object", "change_style", "update_text"] and is_map(object) and is_map_key(object, :id) ->
+                    {created, [object | updated]}
+
+                  # Handle arrange_objects which returns a success map
+                  %{tool: "arrange_objects", result: {:ok, _success_map}, input: input} ->
+                    # Fetch the actual updated objects from the database
+                    object_ids = Map.get(input, "object_ids", [])
+                    arranged_objects = Enum.map(object_ids, fn id ->
+                      Canvases.get_object(id)
+                    end) |> Enum.reject(&is_nil/1)
+                    {created, arranged_objects ++ updated}
+
+                  _ ->
+                    {created, updated}
+                end
+              end)
+
+        # Broadcast created objects
+        Enum.each(created_objects, fn object ->
           Phoenix.PubSub.broadcast(
             CollabCanvas.PubSub,
             socket.assigns.topic,
@@ -1213,22 +1315,59 @@ defmodule CollabCanvasWeb.CanvasLive do
           )
         end)
 
-        # Update local state
-        updated_objects = objects ++ socket.assigns.objects
+        # Broadcast updated objects
+        Enum.each(updated_objects, fn object ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            socket.assigns.topic,
+            {:object_updated, object}
+          )
+        end)
 
-        success_count = length(objects)
+        # Update local state - merge created and updated
+        new_created = created_objects
+        existing_objects = socket.assigns.objects
+
+        # Update existing objects with new data, add new objects
+        updated_ids = MapSet.new(updated_objects, & &1.id)
+        merged_objects =
+          Enum.map(existing_objects, fn obj ->
+            if MapSet.member?(updated_ids, obj.id) do
+              Enum.find(updated_objects, obj, fn updated -> updated.id == obj.id end)
+            else
+              obj
+            end
+          end)
+
+        final_objects = new_created ++ merged_objects
+
+        total_count = length(created_objects) + length(updated_objects)
 
         message =
-          if success_count > 0 do
-            "AI created #{success_count} object(s) successfully"
+          if total_count > 0 do
+            parts = []
+            parts = if length(created_objects) > 0, do: ["created #{length(created_objects)}" | parts], else: parts
+            parts = if length(updated_objects) > 0, do: ["updated #{length(updated_objects)}" | parts], else: parts
+            "AI #{Enum.join(Enum.reverse(parts), " and ")} object(s) successfully"
           else
             "AI command processed (check canvas for results)"
           end
 
-        socket
-        |> assign(:objects, updated_objects)
+        # Push created objects to JavaScript
+        socket_with_created = Enum.reduce(created_objects, socket, fn object, acc_socket ->
+          push_event(acc_socket, "object_created", %{object: object})
+        end)
+
+        # Push updated objects to JavaScript for immediate rendering with animation
+        socket_with_all = Enum.reduce(updated_objects, socket_with_created, fn object, acc_socket ->
+          push_event(acc_socket, "object_updated", %{object: object, animate: true})
+        end)
+
+        socket_with_all
+        |> assign(:objects, final_objects)
         |> assign(:ai_command, "")
         |> put_flash(:info, message)
+        end
 
       {:error, :canvas_not_found} ->
         put_flash(socket, :error, "Canvas not found")
@@ -1280,6 +1419,11 @@ defmodule CollabCanvasWeb.CanvasLive do
   def render(assigns) do
     ~H"""
     <div class="flex h-screen bg-gray-100">
+      <!-- Flash Messages -->
+      <.flash kind={:info} flash={@flash} />
+      <.flash kind={:error} flash={@flash} />
+      <.flash kind={:warning} flash={@flash} />
+
       <!-- Toolbar -->
       <div class="w-16 bg-white border-r border-gray-200 flex flex-col items-center py-4 space-y-2">
         <button
@@ -1434,13 +1578,12 @@ defmodule CollabCanvasWeb.CanvasLive do
         <div class="flex-1 p-4 overflow-y-auto">
           <div class="space-y-4">
             <!-- AI Command Input -->
-            <div>
+            <form phx-change="ai_command_change">
               <label class="block text-sm font-medium text-gray-700 mb-2">
                 Command
               </label>
               <textarea
-                phx-change="ai_command_change"
-                phx-value-value={@ai_command}
+                name="value"
                 value={@ai_command}
                 disabled={@ai_loading}
                 class={[
@@ -1450,7 +1593,7 @@ defmodule CollabCanvasWeb.CanvasLive do
                 rows="4"
                 placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle'"
               ><%= @ai_command %></textarea>
-            </div>
+            </form>
 
             <button
               id="ai-execute-button"
@@ -1514,9 +1657,30 @@ defmodule CollabCanvasWeb.CanvasLive do
         </div>
         <!-- Objects List -->
         <div class="border-t border-gray-200 p-4">
-          <h3 class="text-sm font-medium text-gray-700 mb-2">
-            Objects (<%= length(@objects) %>)
-          </h3>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-medium text-gray-700">
+              Objects (<%= length(@objects) %>)
+            </h3>
+            <!-- Show Labels Toggle -->
+            <button
+              phx-click="toggle_labels"
+              class="flex items-center gap-2 group"
+              title={if @show_labels, do: "Hide object labels", else: "Show object labels"}
+            >
+              <span class="text-xs text-gray-600 group-hover:text-gray-900">Labels</span>
+              <div class={[
+                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                @show_labels && "bg-blue-600",
+                !@show_labels && "bg-gray-300"
+              ]}>
+                <span class={[
+                  "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                  @show_labels && "translate-x-5",
+                  !@show_labels && "translate-x-1"
+                ]} />
+              </div>
+            </button>
+          </div>
           <div class="space-y-1 max-h-40 overflow-y-auto">
             <%= for object <- @objects do %>
               <div class="flex items-center justify-between text-sm py-1">

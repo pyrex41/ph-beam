@@ -70,7 +70,7 @@ defmodule CollabCanvas.AI.Layout do
 
   def distribute_horizontally(objects, spacing) when is_list(objects) do
     # Sort objects by X position
-    sorted_objects = Enum.sort_by(objects, fn obj -> obj.position.x end)
+    sorted_objects = Enum.sort_by(objects, &get_position_x/1)
 
     case spacing do
       :even ->
@@ -115,7 +115,7 @@ defmodule CollabCanvas.AI.Layout do
 
   def distribute_vertically(objects, spacing) when is_list(objects) do
     # Sort objects by Y position
-    sorted_objects = Enum.sort_by(objects, fn obj -> obj.position.y end)
+    sorted_objects = Enum.sort_by(objects, &get_position_y/1)
 
     case spacing do
       :even ->
@@ -160,8 +160,9 @@ defmodule CollabCanvas.AI.Layout do
 
   def arrange_grid(objects, columns, spacing) when is_list(objects) and is_integer(columns) and columns > 0 do
     # Start from the top-left position of the first object
-    start_x = (Enum.at(objects, 0).position.x || 0) |> round()
-    start_y = (Enum.at(objects, 0).position.y || 0) |> round()
+    first_obj = Enum.at(objects, 0)
+    start_x = get_position_x(first_obj) |> round()
+    start_y = get_position_y(first_obj) |> round()
 
     # Calculate max width and height for uniform grid cells
     max_width = objects
@@ -262,13 +263,13 @@ defmodule CollabCanvas.AI.Layout do
   def circular_layout(objects, radius) when is_list(objects) and is_number(radius) do
     # Calculate center point based on average position
     center_x = objects
-               |> Enum.map(fn obj -> obj.position.x end)
+               |> Enum.map(&get_position_x/1)
                |> Enum.sum()
                |> Kernel./(length(objects))
                |> round()
 
     center_y = objects
-               |> Enum.map(fn obj -> obj.position.y end)
+               |> Enum.map(&get_position_y/1)
                |> Enum.sum()
                |> Kernel./(length(objects))
                |> round()
@@ -304,8 +305,8 @@ defmodule CollabCanvas.AI.Layout do
     last = List.last(sorted_objects)
 
     # Calculate total available space
-    first_x = first.position.x
-    last_x = last.position.x
+    first_x = get_position_x(first)
+    last_x = get_position_x(last)
     last_width = get_object_width(last)
 
     total_width = (last_x + last_width) - first_x
@@ -322,7 +323,7 @@ defmodule CollabCanvas.AI.Layout do
 
     # Position objects with calculated spacing
     {result, _} = Enum.reduce(sorted_objects, {[], first_x}, fn obj, {acc, current_x} ->
-      new_position = %{x: round(current_x), y: obj.position.y}
+      new_position = %{x: round(current_x), y: get_position_y(obj)}
       update = %{id: obj.id, position: new_position}
       next_x = current_x + get_object_width(obj) + spacing
 
@@ -335,10 +336,10 @@ defmodule CollabCanvas.AI.Layout do
   # Distributes objects horizontally with fixed spacing
   defp distribute_horizontally_fixed(sorted_objects, spacing) do
     first = List.first(sorted_objects)
-    start_x = first.position.x
+    start_x = get_position_x(first)
 
     {result, _} = Enum.reduce(sorted_objects, {[], start_x}, fn obj, {acc, current_x} ->
-      new_position = %{x: round(current_x), y: obj.position.y}
+      new_position = %{x: round(current_x), y: get_position_y(obj)}
       update = %{id: obj.id, position: new_position}
       next_x = current_x + get_object_width(obj) + spacing
 
@@ -354,8 +355,8 @@ defmodule CollabCanvas.AI.Layout do
     last = List.last(sorted_objects)
 
     # Calculate total available space
-    first_y = first.position.y
-    last_y = last.position.y
+    first_y = get_position_y(first)
+    last_y = get_position_y(last)
     last_height = get_object_height(last)
 
     total_height = (last_y + last_height) - first_y
@@ -372,7 +373,7 @@ defmodule CollabCanvas.AI.Layout do
 
     # Position objects with calculated spacing
     {result, _} = Enum.reduce(sorted_objects, {[], first_y}, fn obj, {acc, current_y} ->
-      new_position = %{x: obj.position.x, y: round(current_y)}
+      new_position = %{x: get_position_x(obj), y: round(current_y)}
       update = %{id: obj.id, position: new_position}
       next_y = current_y + get_object_height(obj) + spacing
 
@@ -385,10 +386,10 @@ defmodule CollabCanvas.AI.Layout do
   # Distributes objects vertically with fixed spacing
   defp distribute_vertically_fixed(sorted_objects, spacing) do
     first = List.first(sorted_objects)
-    start_y = first.position.y
+    start_y = get_position_y(first)
 
     {result, _} = Enum.reduce(sorted_objects, {[], start_y}, fn obj, {acc, current_y} ->
-      new_position = %{x: obj.position.x, y: round(current_y)}
+      new_position = %{x: get_position_x(obj), y: round(current_y)}
       update = %{id: obj.id, position: new_position}
       next_y = current_y + get_object_height(obj) + spacing
 
@@ -401,29 +402,29 @@ defmodule CollabCanvas.AI.Layout do
   # Alignment helper functions
 
   defp align_left(objects) do
-    min_x = objects |> Enum.map(fn obj -> obj.position.x end) |> Enum.min() |> round()
+    min_x = objects |> Enum.map(&get_position_x/1) |> Enum.min() |> round()
 
     Enum.map(objects, fn obj ->
-      %{id: obj.id, position: %{x: min_x, y: obj.position.y}}
+      %{id: obj.id, position: %{x: min_x, y: get_position_y(obj)}}
     end)
   end
 
   defp align_right(objects) do
     max_right = objects
-                |> Enum.map(fn obj -> obj.position.x + get_object_width(obj) end)
+                |> Enum.map(fn obj -> get_position_x(obj) + get_object_width(obj) end)
                 |> Enum.max()
                 |> round()
 
     Enum.map(objects, fn obj ->
       width = get_object_width(obj)
       new_x = max_right - width
-      %{id: obj.id, position: %{x: round(new_x), y: obj.position.y}}
+      %{id: obj.id, position: %{x: round(new_x), y: get_position_y(obj)}}
     end)
   end
 
   defp align_center_horizontal(objects) do
     centers = Enum.map(objects, fn obj ->
-      obj.position.x + get_object_width(obj) / 2
+      get_position_x(obj) + get_object_width(obj) / 2
     end)
 
     avg_center = Enum.sum(centers) / length(centers)
@@ -431,34 +432,34 @@ defmodule CollabCanvas.AI.Layout do
     Enum.map(objects, fn obj ->
       width = get_object_width(obj)
       new_x = avg_center - width / 2
-      %{id: obj.id, position: %{x: round(new_x), y: obj.position.y}}
+      %{id: obj.id, position: %{x: round(new_x), y: get_position_y(obj)}}
     end)
   end
 
   defp align_top(objects) do
-    min_y = objects |> Enum.map(fn obj -> obj.position.y end) |> Enum.min() |> round()
+    min_y = objects |> Enum.map(&get_position_y/1) |> Enum.min() |> round()
 
     Enum.map(objects, fn obj ->
-      %{id: obj.id, position: %{x: obj.position.x, y: min_y}}
+      %{id: obj.id, position: %{x: get_position_x(obj), y: min_y}}
     end)
   end
 
   defp align_bottom(objects) do
     max_bottom = objects
-                 |> Enum.map(fn obj -> obj.position.y + get_object_height(obj) end)
+                 |> Enum.map(fn obj -> get_position_y(obj) + get_object_height(obj) end)
                  |> Enum.max()
                  |> round()
 
     Enum.map(objects, fn obj ->
       height = get_object_height(obj)
       new_y = max_bottom - height
-      %{id: obj.id, position: %{x: obj.position.x, y: round(new_y)}}
+      %{id: obj.id, position: %{x: get_position_x(obj), y: round(new_y)}}
     end)
   end
 
   defp align_middle_vertical(objects) do
     centers = Enum.map(objects, fn obj ->
-      obj.position.y + get_object_height(obj) / 2
+      get_position_y(obj) + get_object_height(obj) / 2
     end)
 
     avg_center = Enum.sum(centers) / length(centers)
@@ -466,11 +467,37 @@ defmodule CollabCanvas.AI.Layout do
     Enum.map(objects, fn obj ->
       height = get_object_height(obj)
       new_y = avg_center - height / 2
-      %{id: obj.id, position: %{x: obj.position.x, y: round(new_y)}}
+      %{id: obj.id, position: %{x: get_position_x(obj), y: round(new_y)}}
     end)
   end
 
-  # Utility functions to safely extract dimensions
+  # Utility functions to safely extract dimensions and positions
+
+  defp get_position_x(obj) do
+    cond do
+      is_map(obj.position) and Map.has_key?(obj.position, :x) ->
+        obj.position.x
+
+      is_map(obj.position) and Map.has_key?(obj.position, "x") ->
+        obj.position["x"]
+
+      true ->
+        0  # Default x position
+    end
+  end
+
+  defp get_position_y(obj) do
+    cond do
+      is_map(obj.position) and Map.has_key?(obj.position, :y) ->
+        obj.position.y
+
+      is_map(obj.position) and Map.has_key?(obj.position, "y") ->
+        obj.position["y"]
+
+      true ->
+        0  # Default y position
+    end
+  end
 
   defp get_object_width(obj) do
     cond do

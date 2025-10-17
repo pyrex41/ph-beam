@@ -86,6 +86,12 @@ defmodule CollabCanvas.AI.Agent do
   @claude_model "claude-3-5-sonnet-20241022"
   @claude_api_version "2023-06-01"
 
+  @groq_api_url "https://api.groq.com/openai/v1/chat/completions"
+  @default_groq_model "llama-3.3-70b-versatile"
+
+  @openai_api_url "https://api.openai.com/v1/chat/completions"
+  @default_openai_model "gpt-4o"
+
   @doc """
   Executes a natural language command on a canvas.
 
@@ -120,9 +126,23 @@ defmodule CollabCanvas.AI.Agent do
         # Build enhanced command with selection context if provided
         enhanced_command = build_command_with_context(command, selected_ids, canvas_id)
 
+        Logger.info("Calling AI API with command: #{command}")
+
         # Call Claude API with function calling
         case call_claude_api(enhanced_command) do
-          {:ok, tool_calls} ->
+          {:ok, {:text_response, text}} ->
+            # AI returned text (e.g., asking for clarification)
+            Logger.info("AI returned text response: #{text}")
+            {:ok, {:text_response, text}}
+
+          {:ok, tool_calls} when is_list(tool_calls) ->
+            # Log when AI returns no tools (might indicate confusion)
+            Logger.info("AI returned #{length(tool_calls)} tool call(s)")
+
+            if length(tool_calls) == 0 do
+              Logger.warning("AI returned no tool calls for command: #{command}")
+            end
+
             # Inject selected_ids into arrange_objects tool calls if not provided
             enriched_tool_calls = enrich_tool_calls(tool_calls, selected_ids)
 
@@ -131,6 +151,7 @@ defmodule CollabCanvas.AI.Agent do
             {:ok, results}
 
           {:error, reason} ->
+            Logger.error("AI API call failed: #{inspect(reason)}")
             {:error, reason}
         end
     end
@@ -172,9 +193,20 @@ defmodule CollabCanvas.AI.Agent do
       {:error, :missing_api_key}
   """
   def call_claude_api(command) do
-    api_key = get_api_key()
+    provider = get_ai_provider()
 
-    if is_nil(api_key) or api_key == "" do
+    case provider do
+      "openai" -> call_openai_api(command)
+      "groq" -> call_groq_api(command)
+      "claude" -> call_anthropic_api(command)
+      _ -> call_anthropic_api(command)  # Default to Claude
+    end
+  end
+
+  defp call_anthropic_api(command) do
+    api_key = System.get_env("CLAUDE_API_KEY")
+
+    if is_nil(api_key) or api_key == "" or api_key == "your_key_here" do
       {:error, :missing_api_key}
     else
       headers = [
@@ -205,6 +237,115 @@ defmodule CollabCanvas.AI.Agent do
 
         {:error, reason} ->
           Logger.error("Claude API request failed: #{inspect(reason)}")
+          {:error, {:request_failed, reason}}
+      end
+    end
+  end
+
+  defp call_groq_api(command) do
+    api_key = System.get_env("GROQ_API_KEY")
+    model = System.get_env("GROQ_MODEL") || @default_groq_model
+
+    Logger.info("Using Groq API with model: #{model}")
+
+    if is_nil(api_key) or api_key == "" do
+      {:error, :missing_api_key}
+    else
+      headers = [
+        {"Authorization", "Bearer #{api_key}"},
+        {"content-type", "application/json"}
+      ]
+
+      # Convert Claude tool format to OpenAI function format (Groq uses OpenAI-compatible format)
+      tools = Enum.map(Tools.get_tool_definitions(), fn tool ->
+        %{
+          type: "function",
+          function: %{
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.input_schema
+          }
+        }
+      end)
+
+      body = %{
+        model: model,
+        messages: [
+          %{
+            role: "user",
+            content: command
+          }
+        ],
+        tools: tools,
+        tool_choice: "auto",
+        max_completion_tokens: 4096,
+        temperature: 0.5
+      }
+
+      Logger.debug("Sending request to Groq API...")
+
+      case Req.post(@groq_api_url, json: body, headers: headers) do
+        {:ok, %{status: 200, body: response_body}} ->
+          Logger.debug("Groq API responded successfully")
+          parse_openai_response(response_body)
+
+        {:ok, %{status: status, body: body}} ->
+          Logger.error("Groq API error: #{status} - #{inspect(body)}")
+          {:error, {:api_error, status, body}}
+
+        {:error, reason} ->
+          Logger.error("Groq API request failed: #{inspect(reason)}")
+          {:error, {:request_failed, reason}}
+      end
+    end
+  end
+
+  defp call_openai_api(command) do
+    api_key = System.get_env("OPENAI_API_KEY")
+    model = System.get_env("OPENAI_MODEL") || @default_openai_model
+
+    if is_nil(api_key) or api_key == "" or String.starts_with?(api_key, "sk-proj-") == false do
+      {:error, :missing_api_key}
+    else
+      headers = [
+        {"Authorization", "Bearer #{api_key}"},
+        {"content-type", "application/json"}
+      ]
+
+      # Convert Claude tool format to OpenAI function format
+      tools = Enum.map(Tools.get_tool_definitions(), fn tool ->
+        %{
+          type: "function",
+          function: %{
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.input_schema
+          }
+        }
+      end)
+
+      body = %{
+        model: model,
+        messages: [
+          %{
+            role: "user",
+            content: command
+          }
+        ],
+        tools: tools,
+        tool_choice: "auto"
+      }
+
+      case Req.post(@openai_api_url, json: body, headers: headers) do
+        {:ok, %{status: 200, body: response_body}} ->
+          parse_openai_response(response_body)
+
+        {:ok, %{status: status, body: body}} ->
+          Logger.error("OpenAI API error: #{status} - #{inspect(body)}")
+          {:error, {:api_error, status, body}}
+
+        {:error, reason} ->
+          Logger.error("OpenAI API request failed: #{inspect(reason)}")
           {:error, {:request_failed, reason}}
       end
     end
@@ -248,49 +389,136 @@ defmodule CollabCanvas.AI.Agent do
   """
   def process_tool_calls(tool_calls, canvas_id) do
     Enum.map(tool_calls, fn tool_call ->
-      execute_tool_call(tool_call, canvas_id)
+      # Normalize tool call input (coerce string IDs to integers)
+      normalized_call = normalize_tool_input(tool_call)
+      execute_tool_call(normalized_call, canvas_id)
     end)
+  end
+
+  # Normalizes tool call inputs by coercing string IDs to integers
+  # Some AI providers (like Groq) return object_id as strings despite schema specifying integer
+  defp normalize_tool_input(%{name: name, input: input} = tool_call) do
+    normalized_input = input
+    |> normalize_id_field("object_id")
+    |> normalize_id_field("shape_id")
+    |> normalize_id_array_field("object_ids")
+
+    %{tool_call | input: normalized_input}
+  end
+
+  # Coerces a single ID field from string to integer if present
+  defp normalize_id_field(input, field_name) do
+    case Map.get(input, field_name) do
+      id when is_binary(id) ->
+        case Integer.parse(id) do
+          {int_id, _} -> Map.put(input, field_name, int_id)
+          :error -> input
+        end
+      _ -> input
+    end
+  end
+
+  # Coerces an array of IDs from strings to integers if present
+  defp normalize_id_array_field(input, field_name) do
+    case Map.get(input, field_name) do
+      ids when is_list(ids) ->
+        normalized_ids = Enum.map(ids, fn
+          id when is_binary(id) ->
+            case Integer.parse(id) do
+              {int_id, _} -> int_id
+              :error -> id
+            end
+          id -> id
+        end)
+        Map.put(input, field_name, normalized_ids)
+      _ -> input
+    end
   end
 
   # Private Functions
 
-  # Retrieves the Claude API key from environment variables.
-  # Returns nil if not set.
-  defp get_api_key do
-    System.get_env("CLAUDE_API_KEY")
+  # Retrieves the AI provider setting from environment variables.
+  # Returns "claude" or "groq". Defaults to "claude" if not set.
+  defp get_ai_provider do
+    System.get_env("AI_PROVIDER") || "claude"
   end
 
-  # Builds an enhanced command with selection context for better AI understanding
-  defp build_command_with_context(command, [], _canvas_id), do: command
+  # Builds an enhanced command with all canvas objects and their human-readable names
+  defp build_command_with_context(command, selected_ids, canvas_id) do
+    # Fetch all canvas objects
+    all_objects = Canvases.list_objects(canvas_id)
 
-  defp build_command_with_context(command, selected_ids, _canvas_id) when is_list(selected_ids) and length(selected_ids) > 0 do
-    # Fetch selected objects to provide context
-    objects = Enum.map(selected_ids, fn id ->
-      case Canvases.get_object(id) do
-        nil -> nil
-        obj ->
-          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
-          %{
-            id: obj.id,
-            type: obj.type,
-            position: obj.position,
-            data: data
-          }
-      end
+    # Generate human-readable display names (e.g., "Rectangle 1", "Circle 2")
+    objects_with_names = generate_display_names(all_objects)
+
+    # Build context with all objects and their display names
+    available_objects_str = objects_with_names
+    |> Enum.map(fn {obj, display_name} ->
+      data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
+      "  - #{display_name} (ID: #{obj.id}): #{obj.type} at (#{get_in(obj.position, ["x"])||0}, #{get_in(obj.position, ["y"])||0})"
     end)
-    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
 
-    if length(objects) > 0 do
-      context = """
-      Selected objects context:
-      #{inspect(objects, pretty: true)}
+    # Build selected objects context if any
+    selected_context = if is_list(selected_ids) and length(selected_ids) > 0 do
+      selected_names = objects_with_names
+      |> Enum.filter(fn {obj, _name} -> obj.id in selected_ids end)
+      |> Enum.map(fn {_obj, name} -> name end)
+      |> Enum.join(", ")
 
-      User command: #{command}
-      """
-      context
+      "\nCurrently selected: #{selected_names}"
     else
-      command
+      ""
     end
+
+    # Build full context
+    context = """
+    CANVAS OBJECTS (use these human-readable names in your responses):
+    #{available_objects_str}#{selected_context}
+
+    DISAMBIGUATION RULES:
+    - When the user refers to "that square", "the circle", "that rectangle", etc. without specifying which one:
+      * If objects are currently selected, operate on the selected objects
+      * If no selection, ask the user to specify which one using the display names above (e.g., "Rectangle 1", "Circle 2")
+      * If ambiguous and you must assume, use the most recently created object of that type
+
+    - When referencing objects in tool calls, ALWAYS use the database ID (the number in parentheses), not the display name
+
+    IMPORTANT - RESPONDING TO USER:
+    - If you CAN'T perform an action because you don't have the right tool, respond with text explaining what you can't do and suggest alternatives
+    - ALWAYS respond with text when you can't fulfill a request - never return nothing
+    - You CAN show visual labels on canvas objects using the show_object_labels tool when users ask to see object IDs or names
+
+    USER COMMAND: #{command}
+    """
+
+    context
+  end
+
+  # Generates human-readable display names for objects based on type and creation order
+  # Returns list of {object, "Display Name"} tuples
+  defp generate_display_names(objects) do
+    # Sort by insertion time (oldest first)
+    sorted_objects = Enum.sort_by(objects, & &1.inserted_at, DateTime)
+
+    # Group by type and number them
+    sorted_objects
+    |> Enum.group_by(& &1.type)
+    |> Enum.flat_map(fn {type, type_objects} ->
+      type_objects
+      |> Enum.with_index(1)
+      |> Enum.map(fn {obj, index} ->
+        display_name = format_display_name(type, index)
+        {obj, display_name}
+      end)
+    end)
+    |> Enum.sort_by(fn {obj, _name} -> obj.id end)
+  end
+
+  # Formats a display name for an object (e.g., "Rectangle 1", "Circle 2")
+  defp format_display_name(type, index) do
+    type_str = type |> String.capitalize()
+    "#{type_str} #{index}"
   end
 
   # Enriches tool calls by injecting selected object IDs into arrange_objects calls
@@ -300,12 +528,12 @@ defmodule CollabCanvas.AI.Agent do
     Enum.map(tool_calls, fn tool_call ->
       case tool_call.name do
         "arrange_objects" ->
-          # If object_ids not provided or empty, use selected_ids
+          # If object_ids not provided or empty, use selected_ids (as integers, matching schema)
           input = tool_call.input
           object_ids = Map.get(input, "object_ids", [])
 
           updated_input = if length(object_ids) == 0 do
-            Map.put(input, "object_ids", Enum.map(selected_ids, &to_string/1))
+            Map.put(input, "object_ids", selected_ids)
           else
             input
           end
@@ -319,14 +547,14 @@ defmodule CollabCanvas.AI.Agent do
   end
 
 
-  # Parses the Claude API response to extract tool calls.
+  # Parses the Claude API response to extract tool calls or text responses.
   #
   # Handles different stop_reason values:
   # - "tool_use" - Response contains tool calls to execute
-  # - "end_turn" - Response is text-only with no tool calls
+  # - "end_turn" - Response is text-only (e.g., AI asking for clarification)
   # - other - Logs warning and returns empty list
   #
-  # Returns {:ok, tool_calls} list or {:error, :invalid_response_format}
+  # Returns {:ok, tool_calls} list, {:ok, {:text_response, text}}, or {:error, :invalid_response_format}
   defp parse_claude_response(%{"content" => content, "stop_reason" => stop_reason}) do
     case stop_reason do
       "tool_use" ->
@@ -344,8 +572,17 @@ defmodule CollabCanvas.AI.Agent do
         {:ok, tool_calls}
 
       "end_turn" ->
-        # No tool calls, just text response
-        {:ok, []}
+        # Extract text response (AI might be asking for clarification)
+        text_items = content
+        |> Enum.filter(fn item -> item["type"] == "text" end)
+        |> Enum.map(fn item -> item["text"] end)
+        |> Enum.join("\n")
+
+        if text_items != "" do
+          {:ok, {:text_response, text_items}}
+        else
+          {:ok, []}
+        end
 
       other ->
         Logger.warning("Unexpected stop_reason: #{other}")
@@ -355,6 +592,46 @@ defmodule CollabCanvas.AI.Agent do
 
   defp parse_claude_response(response) do
     Logger.error("Unexpected Claude API response format: #{inspect(response)}")
+    {:error, :invalid_response_format}
+  end
+
+  # Parses OpenAI/Groq API response (OpenAI format) to extract tool calls or text responses.
+  #
+  # The response format is different from Claude's:
+  # - Uses "choices" array with "message" object
+  # - Tool calls are in message.tool_calls array
+  # - finish_reason can be "tool_calls" or "stop"
+  #
+  # Returns {:ok, tool_calls} list, {:ok, {:text_response, text}}, or {:error, :invalid_response_format}
+  defp parse_openai_response(%{"choices" => [%{"message" => message} | _]}) do
+    Logger.debug("Parsing OpenAI/Groq response message: #{inspect(Map.keys(message))}")
+
+    case message do
+      %{"tool_calls" => tool_calls} when is_list(tool_calls) ->
+        Logger.debug("Found #{length(tool_calls)} tool calls")
+        parsed_calls = Enum.map(tool_calls, fn tool_call ->
+          %{
+            id: tool_call["id"],
+            name: tool_call["function"]["name"],
+            input: Jason.decode!(tool_call["function"]["arguments"])
+          }
+        end)
+        {:ok, parsed_calls}
+
+      %{"content" => content} when is_binary(content) and content != "" ->
+        # AI returned text response (asking for clarification)
+        Logger.debug("Found text response: #{String.slice(content, 0, 100)}...")
+        {:ok, {:text_response, content}}
+
+      _ ->
+        # No tool calls and no text
+        Logger.warning("No tool calls or text content in response")
+        {:ok, []}
+    end
+  end
+
+  defp parse_openai_response(response) do
+    Logger.error("Unexpected OpenAI API response format: #{inspect(response)}")
     {:error, :invalid_response_format}
   end
 
@@ -913,6 +1190,19 @@ defmodule CollabCanvas.AI.Agent do
         }
       end
     end
+  end
+
+  # Executes a show_object_labels tool call to toggle display of visual labels on canvas objects.
+  #
+  # Returns a special result type that the frontend can handle to show/hide labels.
+  defp execute_tool_call(%{name: "show_object_labels", input: input}, _canvas_id) do
+    show = Map.get(input, "show", true)
+
+    %{
+      tool: "show_object_labels",
+      input: input,
+      result: {:ok, {:toggle_labels, show}}
+    }
   end
 
   # Fallback handler for unknown tool calls.
