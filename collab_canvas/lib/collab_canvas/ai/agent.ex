@@ -484,6 +484,25 @@ defmodule CollabCanvas.AI.Agent do
 
     - When referencing objects in tool calls, ALWAYS use the database ID (the number in parentheses), not the display name
 
+    LAYOUT INTERPRETATION RULES:
+    - "next to each other" / "side by side" = horizontal layout
+    - "one after another horizontally" / "in a row" = horizontal layout
+    - "one after another vertically" / "in a column" = vertical layout
+    - "on top of each other" / "stacked" = vertical layout (stack type)
+    - "line up" without direction specified = horizontal layout (most common interpretation)
+
+    - When using horizontal or vertical layouts:
+      * ALWAYS check object sizes before choosing spacing
+      * If objects have vastly different sizes (>2x difference in width/height), use FIXED spacing (e.g., 20-30px) instead of :even
+      * Fixed spacing prevents overlaps when size differences are large
+      * Example: arrange_objects with layout_type="horizontal" and spacing=30 for different-sized objects
+
+    - Default spacing recommendations:
+      * Small objects (< 100px): spacing = 20
+      * Medium objects (100-200px): spacing = 30
+      * Large objects (> 200px): spacing = 40
+      * Mixed sizes: use spacing >= largest dimension difference
+
     IMPORTANT - RESPONDING TO USER:
     - If you CAN'T perform an action because you don't have the right tool, respond with text explaining what you can't do and suggest alternatives
     - ALWAYS respond with text when you can't fulfill a request - never return nothing
