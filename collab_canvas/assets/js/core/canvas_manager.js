@@ -627,6 +627,14 @@ export class CanvasManager {
    * @param {MouseEvent} event
    */
   handleMouseDown(event) {
+    console.log('[CanvasManager] handleMouseDown, isDragging:', this.isDragging);
+
+    // If we're already dragging (object was clicked via PixiJS event), don't process this event
+    if (this.isDragging) {
+      console.log('[CanvasManager] Already dragging, skipping handleMouseDown');
+      return;
+    }
+
     const position = this.getMousePosition(event);
 
     // Start panning with spacebar+click or middle mouse (NOT shift anymore - used for multi-select)
@@ -641,9 +649,12 @@ export class CanvasManager {
 
     // Check if clicking on canvas (not on an object)
     const clickedObject = this.findObjectAt(position);
+    console.log('[CanvasManager] Clicked object:', clickedObject?.objectId || 'none');
 
     if (this.currentTool === 'select') {
       if (clickedObject) {
+        // This shouldn't happen if PixiJS events work, but keep as fallback
+        console.log('[CanvasManager] Object clicked via DOM event (fallback)');
         // Shift+click = toggle selection, regular click = replace selection
         if (event.shiftKey) {
           this.toggleSelection(clickedObject);
@@ -652,6 +663,7 @@ export class CanvasManager {
         }
       } else {
         // Clicking on empty space = clear selection (unless shift-clicking)
+        console.log('[CanvasManager] Empty space clicked, clearing selection');
         if (!event.shiftKey) {
           this.clearSelection();
         }
