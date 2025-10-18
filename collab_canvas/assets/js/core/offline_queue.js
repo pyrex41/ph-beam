@@ -75,14 +75,14 @@ export class OfflineQueue {
       retries: 0
     };
 
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const transaction = this.db.transaction([this.storeName], 'readwrite');
       const store = transaction.objectStore(this.storeName);
       const request = store.add(operation);
 
-      request.onsuccess = () => {
+      request.onsuccess = async () => {
         console.log('[OfflineQueue] Operation queued:', type, request.result);
-        this.updateStatus('offline', this.getQueueSize());
+        this.updateStatus('offline', await this.getQueueSize());
         resolve(request.result);
       };
 
