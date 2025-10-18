@@ -17,6 +17,7 @@ kill_signal = 'SIGTERM'
   DATABASE_PATH = '/data/collab_canvas.db'
   ECTO_IPV6 = 'true'
   ERL_AFLAGS = '-proto_dist inet6_tcp'
+  AI_PROVIDER = 'groq'
 
 [http_service]
   internal_port = 8080
