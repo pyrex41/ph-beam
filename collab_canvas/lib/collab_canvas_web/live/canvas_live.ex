@@ -466,6 +466,12 @@ defmodule CollabCanvasWeb.CanvasLive do
         # Get the existing object to merge partial data updates
         existing_object = Canvases.get_object(object_id)
 
+        # Log warning if object not found during partial update (aids debugging)
+        if is_nil(existing_object) do
+          require Logger
+          Logger.warning("Object #{object_id} not found during partial update for user #{socket.assigns.current_user.id}")
+        end
+
         # Extract update attributes and handle partial data updates
         data =
           case params["data"] do

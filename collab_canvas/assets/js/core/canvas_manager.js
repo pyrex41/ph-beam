@@ -720,52 +720,6 @@ export class CanvasManager {
   }
 
   /**
-   * Show visual feedback animation for AI-modified objects (Task 8)
-   * @param {number} objectId - ID of the modified object
-   */
-  showAIFeedback(objectId) {
-    const pixiObject = this.objects.get(objectId);
-    if (!pixiObject) return;
-
-    // Use local bounds (container-relative) instead of global bounds
-    const bounds = pixiObject.getLocalBounds();
-    const highlight = new PIXI.Graphics();
-
-    // Draw a glowing border around the object
-    highlight.rect(
-      -4,
-      -4,
-      bounds.width + 8,
-      bounds.height + 8
-    ).stroke({ width: 3, color: 0x10b981 }); // Green highlight
-
-    // Position highlight at object's position
-    highlight.x = pixiObject.x;
-    highlight.y = pixiObject.y;
-
-    // Match rotation and pivot of the object so highlight rotates with it
-    highlight.angle = pixiObject.angle;
-    highlight.pivot.set(pixiObject.pivot.x, pixiObject.pivot.y);
-
-    this.objectContainer.addChild(highlight);
-
-    // Animate the highlight (fade out and remove)
-    let alpha = 1.0;
-    const fadeInterval = setInterval(() => {
-      alpha -= 0.05;
-      highlight.alpha = alpha;
-
-      if (alpha <= 0) {
-        clearInterval(fadeInterval);
-        if (highlight.parent) {
-          highlight.parent.removeChild(highlight);
-        }
-        highlight.destroy();
-      }
-    }, 50);
-  }
-
-  /**
    * Update an existing object
    * @param {Object} objectData - Object data from server
    */
@@ -933,6 +887,8 @@ export class CanvasManager {
         }
 
         // For complex updates or full data replacement, recreate the object
+        // Note: This path is now less frequent due to partial update optimizations
+        // for rotation-only (line 738) and size-only updates (line 761)
         this.deleteObject(objectData.id);
         this.createObject(objectData);
 
