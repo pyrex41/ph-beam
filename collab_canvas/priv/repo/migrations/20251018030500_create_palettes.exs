@@ -5,7 +5,7 @@ defmodule CollabCanvas.Repo.Migrations.CreatePalettes do
     create table(:palettes, primary_key: false) do
       add :id, :binary_id, primary_key: true
       add :name, :string, null: false
-      add :user_id, references(:users, on_delete: :delete_all, type: :binary_id), null: false
+      add :user_id, references(:users, on_delete: :delete_all), null: false
 
       timestamps(type: :utc_datetime)
     end

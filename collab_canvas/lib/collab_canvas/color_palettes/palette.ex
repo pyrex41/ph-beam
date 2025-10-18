@@ -10,13 +10,12 @@ defmodule CollabCanvas.ColorPalettes.Palette do
   alias CollabCanvas.ColorPalettes.PaletteColor
 
   @primary_key {:id, :binary_id, autogenerate: true}
-  @foreign_key_type :binary_id
 
   @derive {Jason.Encoder, only: [:id, :name, :user_id, :colors, :inserted_at, :updated_at]}
   schema "palettes" do
     field :name, :string
 
-    belongs_to :user, User
+    belongs_to :user, User, type: :integer
     has_many :colors, PaletteColor, foreign_key: :palette_id, on_delete: :delete_all
 
     timestamps(type: :utc_datetime)
