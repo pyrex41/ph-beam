@@ -1982,7 +1982,16 @@ defmodule CollabCanvasWeb.CanvasLive do
               results
               |> Enum.reduce({[], []}, fn result, {created, updated} ->
                 case result do
-                  # Handle create operations
+                  # Handle batch create operations (count > 1)
+                  %{tool: tool, created_objects: batch_results} when tool in ["create_shape", "create_text"] and is_list(batch_results) ->
+                    # Extract successful objects from batch creation
+                    batch_objects = Enum.flat_map(batch_results, fn
+                      {:ok, object} -> [object]
+                      _ -> []
+                    end)
+                    {batch_objects ++ created, updated}
+
+                  # Handle single create operations
                   %{tool: tool, result: {:ok, object}} when tool in ["create_shape", "create_text", "create_component"] and is_map(object) and is_map_key(object, :id) ->
                     {[object | created], updated}
 
