@@ -54,6 +54,14 @@ export class CanvasManager {
     this.zoomLevel = 1;
     this.spacePressed = false;
 
+    // Lasso selection state
+    this.isLassoSelecting = false;
+    this.lassoStart = { x: 0, y: 0 };
+    this.lassoRect = null; // Graphics object for lasso visualization
+
+    // Clipboard state for copy/paste
+    this.clipboard = [];
+
     // Throttle tracking
     this.lastCursorUpdate = 0;
     this.lastDragUpdate = 0;
@@ -732,11 +740,15 @@ export class CanvasManager {
           this.setSelection(clickedObject);
         }
       } else {
-        // Clicking on empty space = clear selection (unless shift-clicking)
-        console.log('[CanvasManager] Empty space clicked, clearing selection');
+        // Clicking on empty space = start lasso selection or clear selection
+        console.log('[CanvasManager] Empty space clicked');
         if (!event.shiftKey) {
           this.clearSelection();
         }
+        // Start lasso selection
+        this.isLassoSelecting = true;
+        this.lassoStart = position;
+        this.createLassoRect(position);
       }
     } else if (this.currentTool === 'delete') {
       if (clickedObject) {
@@ -881,6 +893,9 @@ export class CanvasManager {
 
       // Update selection box to match new size
       this.updateSelectionBoxes();
+    } else if (this.isLassoSelecting) {
+      // Update lasso selection rectangle
+      this.updateLassoRect(position);
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
@@ -992,7 +1007,10 @@ export class CanvasManager {
     // Only get mouse position if we need it
     const position = this.getMousePosition(event);
 
-    if (this.isCreating) {
+    if (this.isLassoSelecting) {
+      // Finalize lasso selection
+      this.finalizeLassoSelection(event);
+    } else if (this.isCreating) {
       // Finalize object creation
       this.finalizeTempObject(position);
     } else if (this.isDragging && this.selectedObjects.size > 0) {
@@ -1094,6 +1112,50 @@ export class CanvasManager {
       return;
     }
 
+    // Check for modifier keys
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey;
+
+    // Handle keyboard shortcuts with Cmd/Ctrl
+    if (cmdOrCtrl) {
+      switch (event.key.toLowerCase()) {
+        case 'g':
+          event.preventDefault();
+          if (event.shiftKey) {
+            this.ungroupSelected();
+          } else {
+            this.groupSelected();
+          }
+          return;
+        case 'd':
+          event.preventDefault();
+          this.duplicateSelected();
+          return;
+        case 'c':
+          event.preventDefault();
+          this.copySelected();
+          return;
+        case 'v':
+          event.preventDefault();
+          this.pasteFromClipboard();
+          return;
+        case 'a':
+          event.preventDefault();
+          this.selectAll();
+          return;
+      }
+    }
+
+    // Handle arrow keys for nudging
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      if (this.selectedObjects.size > 0) {
+        event.preventDefault();
+        const nudgeAmount = event.shiftKey ? 10 : 1;
+        this.nudgeSelected(event.key, nudgeAmount);
+        return;
+      }
+    }
+
     switch (event.key.toLowerCase()) {
       case 'delete':
       case 'backspace':
@@ -1114,13 +1176,17 @@ export class CanvasManager {
         this.setTool('rectangle');
         break;
       case 'c':
-        this.setTool('circle');
+        if (!cmdOrCtrl) {
+          this.setTool('circle');
+        }
         break;
       case 't':
         this.setTool('text');
         break;
       case 'd':
-        this.setTool('delete');
+        if (!cmdOrCtrl) {
+          this.setTool('delete');
+        }
         break;
       case 's':
         this.setTool('select');
@@ -1251,6 +1317,110 @@ export class CanvasManager {
 
     // Reset creating flag
     this.isCreating = false;
+  }
+
+  /**
+   * Create lasso selection rectangle for visual feedback
+   * @param {Object} position - {x, y} starting position
+   */
+  createLassoRect(position) {
+    if (this.lassoRect) {
+      this.objectContainer.removeChild(this.lassoRect);
+      this.lassoRect.destroy();
+    }
+
+    this.lassoRect = new PIXI.Graphics();
+    this.lassoRect.x = position.x;
+    this.lassoRect.y = position.y;
+    this.lassoRect.alpha = 0.3;
+    this.objectContainer.addChild(this.lassoRect);
+  }
+
+  /**
+   * Update lasso selection rectangle during drag
+   * @param {Object} currentPosition - {x, y} current position
+   */
+  updateLassoRect(currentPosition) {
+    if (!this.lassoRect || !this.isLassoSelecting) return;
+
+    const width = currentPosition.x - this.lassoStart.x;
+    const height = currentPosition.y - this.lassoStart.y;
+
+    this.lassoRect.clear();
+    
+    // Draw selection rectangle with dashed border effect
+    this.lassoRect.rect(0, 0, width, height)
+      .fill({ color: 0x3b82f6, alpha: 0.1 })
+      .stroke({ width: 1, color: 0x1e40af });
+  }
+
+  /**
+   * Finalize lasso selection and select objects within rectangle
+   * @param {MouseEvent} event - Mouse event for shift key detection
+   */
+  finalizeLassoSelection(event) {
+    if (!this.lassoRect || !this.isLassoSelecting) return;
+
+    const endPos = this.getMousePosition(event);
+    
+    // Calculate selection rectangle bounds
+    const minX = Math.min(this.lassoStart.x, endPos.x);
+    const maxX = Math.max(this.lassoStart.x, endPos.x);
+    const minY = Math.min(this.lassoStart.y, endPos.y);
+    const maxY = Math.max(this.lassoStart.y, endPos.y);
+
+    // Find objects within the lasso rectangle
+    const width = maxX - minX;
+    const height = maxY - minY;
+    
+    // Only process if lasso has reasonable size (at least 5px)
+    if (width > 5 && height > 5) {
+      // Clear previous selection unless shift is held
+      if (!event.shiftKey) {
+        this.clearSelection();
+      }
+
+      // Select all objects that intersect with the lasso rectangle
+      this.objects.forEach((obj, objectId) => {
+        const bounds = obj.getBounds();
+        
+        // Check if object intersects with lasso rectangle
+        if (this.rectanglesIntersect(
+          minX, minY, maxX, maxY,
+          bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height
+        )) {
+          if (!this.selectedObjects.has(obj)) {
+            this.selectedObjects.add(obj);
+            this.emit('lock_object', { object_id: obj.objectId });
+            this.createSelectionBox(obj);
+          }
+        }
+      });
+    }
+
+    // Remove lasso rect
+    this.objectContainer.removeChild(this.lassoRect);
+    this.lassoRect.destroy();
+    this.lassoRect = null;
+    this.isLassoSelecting = false;
+
+    console.log('[CanvasManager] Lasso selection complete, selected', this.selectedObjects.size, 'objects');
+  }
+
+  /**
+   * Check if two rectangles intersect
+   * @param {number} x1min - First rectangle min x
+   * @param {number} y1min - First rectangle min y
+   * @param {number} x1max - First rectangle max x
+   * @param {number} y1max - First rectangle max y
+   * @param {number} x2min - Second rectangle min x
+   * @param {number} y2min - Second rectangle min y
+   * @param {number} x2max - Second rectangle max x
+   * @param {number} y2max - Second rectangle max y
+   * @returns {boolean} True if rectangles intersect
+   */
+  rectanglesIntersect(x1min, y1min, x1max, y1max, x2min, y2min, x2max, y2max) {
+    return !(x1max < x2min || x2max < x1min || y1max < y2min || y2max < y1min);
   }
 
   /**
@@ -1932,6 +2102,164 @@ export class CanvasManager {
    */
   getSelectedObjectIds() {
     return Array.from(this.selectedObjects).map(obj => obj.objectId);
+  }
+
+  /**
+   * Group selected objects together
+   */
+  groupSelected() {
+    if (this.selectedObjects.size < 2) {
+      console.log('[CanvasManager] Need at least 2 objects to create a group');
+      return;
+    }
+
+    const objectIds = this.getSelectedObjectIds();
+    this.emit('create_group', { object_ids: objectIds });
+    console.log('[CanvasManager] Creating group with objects:', objectIds);
+  }
+
+  /**
+   * Ungroup selected objects
+   */
+  ungroupSelected() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected to ungroup');
+      return;
+    }
+
+    const objectIds = this.getSelectedObjectIds();
+    this.emit('ungroup', { object_ids: objectIds });
+    console.log('[CanvasManager] Ungrouping objects:', objectIds);
+  }
+
+  /**
+   * Duplicate selected objects
+   */
+  duplicateSelected() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected to duplicate');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      // Get the object's data
+      const objectEntry = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+      if (objectEntry) {
+        const [objectId, pixiObj] = objectEntry;
+        
+        // Create duplicate with offset position
+        this.emit('duplicate_object', {
+          object_id: objectId,
+          offset: { x: 20, y: 20 }
+        });
+      }
+    });
+
+    console.log('[CanvasManager] Duplicating selected objects');
+  }
+
+  /**
+   * Copy selected objects to clipboard
+   */
+  copySelected() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected to copy');
+      return;
+    }
+
+    this.clipboard = [];
+    this.selectedObjects.forEach(obj => {
+      const objectEntry = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+      if (objectEntry) {
+        const [objectId, pixiObj] = objectEntry;
+        
+        // Store object data for pasting
+        this.clipboard.push({
+          id: objectId,
+          x: pixiObj.x,
+          y: pixiObj.y,
+          angle: pixiObj.angle || 0
+        });
+      }
+    });
+
+    console.log('[CanvasManager] Copied', this.clipboard.length, 'objects to clipboard');
+  }
+
+  /**
+   * Paste objects from clipboard
+   */
+  pasteFromClipboard() {
+    if (this.clipboard.length === 0) {
+      console.log('[CanvasManager] Clipboard is empty');
+      return;
+    }
+
+    this.clipboard.forEach(clipboardItem => {
+      this.emit('duplicate_object', {
+        object_id: clipboardItem.id,
+        offset: { x: 20, y: 20 }
+      });
+    });
+
+    console.log('[CanvasManager] Pasting', this.clipboard.length, 'objects from clipboard');
+  }
+
+  /**
+   * Nudge selected objects in a direction
+   * @param {string} direction - Arrow key direction
+   * @param {number} amount - Amount to nudge in pixels
+   */
+  nudgeSelected(direction, amount) {
+    if (this.selectedObjects.size === 0) {
+      return;
+    }
+
+    const delta = { x: 0, y: 0 };
+    switch (direction) {
+      case 'ArrowUp':
+        delta.y = -amount;
+        break;
+      case 'ArrowDown':
+        delta.y = amount;
+        break;
+      case 'ArrowLeft':
+        delta.x = -amount;
+        break;
+      case 'ArrowRight':
+        delta.x = amount;
+        break;
+    }
+
+    // Update all selected objects
+    this.selectedObjects.forEach(obj => {
+      obj.x += delta.x;
+      obj.y += delta.y;
+
+      // Emit update to server
+      this.emit('update_object', {
+        object_id: obj.objectId,
+        position: { x: obj.x, y: obj.y }
+      });
+    });
+
+    // Update selection boxes
+    this.updateSelectionBoxes();
+  }
+
+  /**
+   * Select all objects on the canvas
+   */
+  selectAll() {
+    this.clearSelection();
+    
+    this.objects.forEach((pixiObj, objectId) => {
+      this.selectedObjects.add(pixiObj);
+      this.emit('lock_object', { object_id: pixiObj.objectId });
+      this.createSelectionBox(pixiObj);
+    });
+
+    console.log('[CanvasManager] Selected all', this.selectedObjects.size, 'objects');
   }
 
   /**

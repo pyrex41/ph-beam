@@ -525,6 +525,246 @@ defmodule CollabCanvas.Canvases do
   end
 
   @doc """
+  Creates a group for multiple objects by assigning them a shared group_id.
+
+  ## Parameters
+    * `object_ids` - List of object IDs to group together
+
+  ## Returns
+    * `{:ok, group_id, objects}` on success with the generated group_id and updated objects
+    * `{:error, :not_found}` if any object doesn't exist
+    * `{:error, :no_objects}` if object_ids list is empty
+
+  ## Examples
+
+      iex> create_group([1, 2, 3])
+      {:ok, "550e8400-e29b-41d4-a716-446655440000", [%Object{}, %Object{}, %Object{}]}
+
+      iex> create_group([])
+      {:error, :no_objects}
+
+  """
+  def create_group(object_ids) when is_list(object_ids) and length(object_ids) > 0 do
+    group_id = Ecto.UUID.generate()
+
+    # Fetch all objects first to verify they exist
+    objects = Object
+    |> where([o], o.id in ^object_ids)
+    |> Repo.all()
+
+    if length(objects) == length(object_ids) do
+      # Update all objects with the group_id
+      Object
+      |> where([o], o.id in ^object_ids)
+      |> Repo.update_all(set: [group_id: group_id, updated_at: DateTime.utc_now()])
+
+      # Fetch updated objects
+      updated_objects = Object
+      |> where([o], o.id in ^object_ids)
+      |> Repo.all()
+
+      {:ok, group_id, updated_objects}
+    else
+      {:error, :not_found}
+    end
+  end
+
+  def create_group(_), do: {:error, :no_objects}
+
+  @doc """
+  Ungroups objects by removing their group_id.
+
+  ## Parameters
+    * `group_id` - The group UUID to ungroup
+    * `object_ids` - Optional list of specific object IDs to ungroup (ungroups all if nil)
+
+  ## Returns
+    * `{:ok, objects}` on success with the updated objects
+    * `{:error, :not_found}` if no objects found
+
+  ## Examples
+
+      iex> ungroup("550e8400-e29b-41d4-a716-446655440000")
+      {:ok, [%Object{}, %Object{}]}
+
+      iex> ungroup("550e8400-e29b-41d4-a716-446655440000", [1, 2])
+      {:ok, [%Object{}, %Object{}]}
+
+  """
+  def ungroup(group_id, object_ids \\ nil) do
+    query = Object
+    |> where([o], o.group_id == ^group_id)
+
+    query = if object_ids do
+      where(query, [o], o.id in ^object_ids)
+    else
+      query
+    end
+
+    {count, _} = query
+    |> Repo.update_all(set: [group_id: nil, updated_at: DateTime.utc_now()])
+
+    if count > 0 do
+      updated_objects = Object
+      |> where([o], o.id in ^(if object_ids, do: object_ids, else: subquery(query |> select([o], o.id))))
+      |> Repo.all()
+
+      {:ok, updated_objects}
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Gets all objects in a group.
+
+  ## Parameters
+    * `group_id` - The group UUID
+
+  ## Returns
+    * List of object structs in the group
+
+  ## Examples
+
+      iex> get_group_objects("550e8400-e29b-41d4-a716-446655440000")
+      [%Object{}, %Object{}, %Object{}]
+
+  """
+  def get_group_objects(group_id) do
+    Object
+    |> where([o], o.group_id == ^group_id)
+    |> order_by([o], asc: o.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Updates z_index for an object to control layering.
+
+  ## Parameters
+    * `id` - The object ID
+    * `z_index` - Float value for the new z_index
+
+  ## Returns
+    * `{:ok, object}` on success
+    * `{:error, :not_found}` if object doesn't exist
+
+  ## Examples
+
+      iex> update_z_index(1, 10.5)
+      {:ok, %Object{z_index: 10.5}}
+
+  """
+  def update_z_index(id, z_index) when is_number(z_index) do
+    update_object(id, %{z_index: z_index})
+  end
+
+  @doc """
+  Brings an object (or group) to the front by setting its z_index higher than all others.
+
+  ## Parameters
+    * `id` - The object ID
+
+  ## Returns
+    * `{:ok, objects}` on success (list because it might affect grouped objects)
+    * `{:error, :not_found}` if object doesn't exist
+
+  ## Examples
+
+      iex> bring_to_front(1)
+      {:ok, [%Object{z_index: 101.0}]}
+
+  """
+  def bring_to_front(id) do
+    with {:ok, object} <- {:ok, Repo.get(Object, id)},
+         false <- is_nil(object) do
+      # Get max z_index for the canvas
+      max_z = Object
+      |> where([o], o.canvas_id == ^object.canvas_id)
+      |> select([o], max(o.z_index))
+      |> Repo.one()
+      |> Kernel.||(0.0)
+
+      new_z = max_z + 1.0
+
+      # Update object and any objects in its group
+      ids_to_update = if object.group_id do
+        Object
+        |> where([o], o.group_id == ^object.group_id)
+        |> select([o], o.id)
+        |> Repo.all()
+      else
+        [id]
+      end
+
+      Object
+      |> where([o], o.id in ^ids_to_update)
+      |> Repo.update_all(set: [z_index: new_z, updated_at: DateTime.utc_now()])
+
+      updated_objects = Object
+      |> where([o], o.id in ^ids_to_update)
+      |> Repo.all()
+
+      {:ok, updated_objects}
+    else
+      true -> {:error, :not_found}
+      error -> error
+    end
+  end
+
+  @doc """
+  Sends an object (or group) to the back by setting its z_index lower than all others.
+
+  ## Parameters
+    * `id` - The object ID
+
+  ## Returns
+    * `{:ok, objects}` on success (list because it might affect grouped objects)
+    * `{:error, :not_found}` if object doesn't exist
+
+  ## Examples
+
+      iex> send_to_back(1)
+      {:ok, [%Object{z_index: -1.0}]}
+
+  """
+  def send_to_back(id) do
+    with {:ok, object} <- {:ok, Repo.get(Object, id)},
+         false <- is_nil(object) do
+      # Get min z_index for the canvas
+      min_z = Object
+      |> where([o], o.canvas_id == ^object.canvas_id)
+      |> select([o], min(o.z_index))
+      |> Repo.one()
+      |> Kernel.||(0.0)
+
+      new_z = min_z - 1.0
+
+      # Update object and any objects in its group
+      ids_to_update = if object.group_id do
+        Object
+        |> where([o], o.group_id == ^object.group_id)
+        |> select([o], o.id)
+        |> Repo.all()
+      else
+        [id]
+      end
+
+      Object
+      |> where([o], o.id in ^ids_to_update)
+      |> Repo.update_all(set: [z_index: new_z, updated_at: DateTime.utc_now()])
+
+      updated_objects = Object
+      |> where([o], o.id in ^ids_to_update)
+      |> Repo.all()
+
+      {:ok, updated_objects}
+    else
+      true -> {:error, :not_found}
+      error -> error
+    end
+  end
+
+  @doc """
   Gets a user's saved viewport position for a specific canvas.
 
   ## Parameters
