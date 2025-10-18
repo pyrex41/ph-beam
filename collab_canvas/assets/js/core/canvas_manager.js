@@ -230,6 +230,13 @@ export class CanvasManager {
       return;
     }
 
+    // Clear temp object if present (optimistic UI - replace temp with real object)
+    if (this.tempObject) {
+      this.objectContainer.removeChild(this.tempObject);
+      this.tempObject.destroy();
+      this.tempObject = null;
+    }
+
     let pixiObject;
     const data = objectData.data ? JSON.parse(objectData.data) : {};
     const position = objectData.position || { x: 0, y: 0 };
@@ -1213,9 +1220,10 @@ export class CanvasManager {
         const radius = Math.max(width, height) / 2;
 
         // Objects have center pivot, so position represents center point
+        // Use width/2 and height/2 to match temp object positioning during drag
         const position = {
-          x: topLeft.x + radius,
-          y: topLeft.y + radius
+          x: topLeft.x + width / 2,
+          y: topLeft.y + height / 2
         };
 
         this.emit('create_object', {
@@ -1229,12 +1237,19 @@ export class CanvasManager {
           }
         });
       }
+
+      // Keep temp object visible (optimistic UI)
+      // It will be removed when the real object is created by the backend
+      // Make it slightly more opaque to show it's "pending"
+      this.tempObject.alpha = 0.7;
+    } else {
+      // Size too small, remove temp object immediately
+      this.objectContainer.removeChild(this.tempObject);
+      this.tempObject.destroy();
+      this.tempObject = null;
     }
 
-    // Clean up temp object
-    this.objectContainer.removeChild(this.tempObject);
-    this.tempObject.destroy();
-    this.tempObject = null;
+    // Reset creating flag
     this.isCreating = false;
   }
 
