@@ -301,11 +301,20 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     case Canvases.lock_object(object_id, user_id) do
       {:ok, locked_object} ->
-        # Broadcast to all connected clients
+        # Get user presence info for the locked object display
+        presences = Presence.list(socket.assigns.topic)
+        user_presence = Map.get(presences, user_id, %{})
+        user_meta = user_presence[:metas] |> List.first() || %{}
+        
+        # Broadcast to all connected clients with user info
         Phoenix.PubSub.broadcast(
           CollabCanvas.PubSub,
           socket.assigns.topic,
-          {:object_locked, locked_object}
+          {:object_locked, locked_object, %{
+            name: user_meta[:name] || "Unknown",
+            color: user_meta[:color] || "#000000",
+            avatar: user_meta[:avatar] || nil
+          }}
         )
 
         # Update local state
@@ -317,7 +326,14 @@ defmodule CollabCanvasWeb.CanvasLive do
         {:noreply,
          socket
          |> assign(:objects, objects)
-         |> push_event("object_locked", %{object: locked_object})}
+         |> push_event("object_locked", %{
+           object: locked_object,
+           user_info: %{
+             name: user_meta[:name] || "Unknown",
+             color: user_meta[:color] || "#000000",
+             avatar: user_meta[:avatar] || nil
+           }
+         })}
 
       {:error, :already_locked} ->
         {:noreply, put_flash(socket, :error, "Object is currently being edited by another user")}
@@ -1109,18 +1125,20 @@ defmodule CollabCanvasWeb.CanvasLive do
   Handles object_locked broadcasts from PubSub (from other clients).
 
   Updates the object in local state to show it's locked and pushes to
-  JavaScript for visual feedback (grayed out, different cursor).
+  JavaScript for visual feedback (grayed out, different cursor) along with
+  user information (name, color, avatar) for display.
 
   ## Parameters
 
   - `locked_object` - The object that was locked with locked_by field set
+  - `user_info` - Map with user's name, color, and avatar for display
 
   ## Returns
 
   `{:noreply, socket}` with updated objects list and push_event to client.
   """
   @impl true
-  def handle_info({:object_locked, locked_object}, socket) do
+  def handle_info({:object_locked, locked_object, user_info}, socket) do
     objects =
       Enum.map(socket.assigns.objects, fn obj ->
         if obj.id == locked_object.id, do: locked_object, else: obj
@@ -1129,7 +1147,7 @@ defmodule CollabCanvasWeb.CanvasLive do
     {:noreply,
      socket
      |> assign(:objects, objects)
-     |> push_event("object_locked", %{object: locked_object})}
+     |> push_event("object_locked", %{object: locked_object, user_info: user_info})}
   end
 
   @doc """
@@ -1719,6 +1737,7 @@ defmodule CollabCanvasWeb.CanvasLive do
           data-objects={Jason.encode!(@objects)}
           data-presences={Jason.encode!(@presences)}
           data-user-id={@user_id}
+          data-canvas-id={@canvas_id}
           data-current-color={@current_color}
         >
           <!-- PixiJS will render here -->

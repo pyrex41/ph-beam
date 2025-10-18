@@ -1,5 +1,7 @@
 import * as PIXI from '../../vendor/pixi.min.mjs';
 import { PerformanceMonitor } from './performance_monitor.js';
+import { OfflineQueue } from './offline_queue.js';
+import { HistoryManager } from './history_manager.js';
 
 /**
  * CanvasManager - Standalone PixiJS Canvas Management
@@ -20,6 +22,14 @@ export class CanvasManager {
     this.cursors = new Map();
     this.objectLabels = new Map(); // Map of objectId -> label Text object
     this.labelsVisible = false; // Track if labels are currently visible
+    this.lockIndicators = new Map(); // Map of objectId -> lock indicator container
+
+    // Offline support
+    this.offlineQueue = null;
+    this.connectionStatusIndicator = null;
+
+    // History management (undo/redo)
+    this.historyManager = new HistoryManager(50);
 
     // Interaction state
     this.currentUserId = null;
@@ -81,8 +91,9 @@ export class CanvasManager {
    * Initialize the PixiJS application
    * @param {HTMLElement} container - DOM element to attach canvas to
    * @param {string} userId - Current user ID
+   * @param {string} canvasId - Canvas ID for offline queue
    */
-  async initialize(container, userId) {
+  async initialize(container, userId, canvasId) {
     this.currentUserId = userId;
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -144,6 +155,67 @@ export class CanvasManager {
     // Initialize and start performance monitoring
     this.performanceMonitor = new PerformanceMonitor({ sampleSize: 60 });
     this.performanceMonitor.start();
+
+    // Initialize offline queue
+    if (canvasId) {
+      this.offlineQueue = new OfflineQueue(canvasId);
+      
+      // Register sync callback
+      this.offlineQueue.onSync(async (type, data) => {
+        this.emit(type + '_object', data);
+      });
+
+      // Register status change callback
+      this.offlineQueue.onStatusChange((status, queueSize) => {
+        this.updateConnectionStatus(status, queueSize);
+      });
+
+      // Create connection status indicator
+      this.createConnectionStatusIndicator();
+    }
+
+    // Setup history manager callbacks
+    this.historyManager.onUndo(async (operation) => {
+      console.log('[CanvasManager] Undoing operation:', operation);
+      
+      switch (operation.type) {
+        case 'create':
+          // Delete the created object
+          this.emit('delete_object', { object_id: operation.data.id });
+          break;
+        case 'update':
+          // Restore previous state
+          if (operation.previousState) {
+            this.emit('update_object', operation.previousState);
+          }
+          break;
+        case 'delete':
+          // Recreate the deleted object
+          if (operation.previousState) {
+            this.emit('create_object', operation.previousState);
+          }
+          break;
+      }
+    });
+
+    this.historyManager.onRedo(async (operation) => {
+      console.log('[CanvasManager] Redoing operation:', operation);
+      
+      switch (operation.type) {
+        case 'create':
+          // Recreate the object
+          this.emit('create_object', operation.data);
+          break;
+        case 'update':
+          // Reapply the update
+          this.emit('update_object', operation.data);
+          break;
+        case 'delete':
+          // Delete again
+          this.emit('delete_object', { object_id: operation.data.id });
+          break;
+      }
+    });
 
     // Initial viewport culling (disabled for now)
     // this.updateVisibleObjects();
@@ -210,10 +282,21 @@ export class CanvasManager {
 
   /**
    * Emit an event to all registered listeners
+   * Queues events when offline for later sync
    * @param {string} event - Event name
    * @param {*} data - Event data
    */
   emit(event, data) {
+    // Check if this is a canvas operation that should be queued when offline
+    const queueableEvents = ['create_object', 'update_object', 'delete_object'];
+    
+    if (queueableEvents.includes(event) && this.offlineQueue && !this.offlineQueue.online) {
+      // Queue the operation for later sync
+      this.offlineQueue.queueOperation(event.replace('_object', ''), data);
+      return;
+    }
+    
+    // Normal event emission
     const listeners = this.eventListeners.get(event);
     if (listeners) {
       listeners.forEach(callback => callback(data));
@@ -558,6 +641,234 @@ export class CanvasManager {
   }
 
   /**
+   * Show a lock indicator (avatar/name tag) next to a locked object
+   * @param {number} objectId - ID of the locked object
+   * @param {Object} userInfo - User info with name, color, avatar
+   */
+  showLockIndicator(objectId, userInfo) {
+    // Remove existing indicator if any
+    this.hideLockIndicator(objectId);
+
+    const pixiObject = this.objects.get(objectId);
+    if (!pixiObject) return;
+
+    // Only show indicator if locked by another user
+    if (pixiObject.lockedBy === this.currentUserId) return;
+
+    // Create container for the lock indicator
+    const container = new PIXI.Container();
+
+    // Create background pill
+    const bg = new PIXI.Graphics();
+    const bgColor = parseInt(userInfo.color.replace('#', '0x'));
+    const textColor = this.getContrastColor(userInfo.color);
+    
+    // Create text
+    const text = new PIXI.Text({
+      text: `🔒 ${userInfo.name}`,
+      style: new PIXI.TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 12,
+        fill: textColor,
+        fontWeight: 'bold'
+      })
+    });
+
+    // Draw rounded rectangle background
+    const padding = 6;
+    const radius = 6;
+    bg.roundRect(
+      0,
+      0,
+      text.width + padding * 2,
+      text.height + padding * 2,
+      radius
+    )
+    .fill(bgColor)
+    .stroke({ width: 2, color: 0xffffff });
+
+    // Position text inside background
+    text.x = padding;
+    text.y = padding;
+
+    container.addChild(bg);
+    container.addChild(text);
+
+    // Position indicator above the object
+    const bounds = pixiObject.getBounds();
+    container.x = bounds.x;
+    container.y = bounds.y - container.height - 10;
+
+    // Add to label container (renders above objects)
+    this.labelContainer.addChild(container);
+    this.lockIndicators.set(objectId, container);
+  }
+
+  /**
+   * Hide the lock indicator for an object
+   * @param {number} objectId - ID of the object
+   */
+  hideLockIndicator(objectId) {
+    const indicator = this.lockIndicators.get(objectId);
+    if (indicator) {
+      this.labelContainer.removeChild(indicator);
+      indicator.destroy();
+      this.lockIndicators.delete(objectId);
+    }
+  }
+
+  /**
+   * Get contrast color (black or white) for a given background color
+   * @param {string} hexColor - Hex color string like "#3b82f6"
+   * @returns {string} - Hex color string for text
+   */
+  getContrastColor(hexColor) {
+    // Remove # if present
+    const hex = hexColor.replace('#', '');
+    
+    // Convert to RGB
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    
+    // Calculate perceived brightness
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    
+    // Return black for light backgrounds, white for dark
+    return brightness > 128 ? 0x000000 : 0xffffff;
+  }
+
+  /**
+   * Update positions of all lock indicators to follow their objects
+   */
+  updateLockIndicators() {
+    this.lockIndicators.forEach((indicator, objectId) => {
+      const pixiObject = this.objects.get(objectId);
+      if (pixiObject) {
+        const bounds = pixiObject.getBounds();
+        indicator.x = bounds.x;
+        indicator.y = bounds.y - indicator.height - 10;
+      }
+    });
+  }
+
+  /**
+   * Create connection status indicator
+   */
+  createConnectionStatusIndicator() {
+    const container = new PIXI.Container();
+    
+    // Create background
+    const bg = new PIXI.Graphics();
+    bg.roundRect(0, 0, 200, 40, 6)
+      .fill(0x10b981)
+      .stroke({ width: 2, color: 0xffffff });
+    
+    // Create status text
+    const text = new PIXI.Text({
+      text: 'Online',
+      style: new PIXI.TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 14,
+        fill: 0xffffff,
+        fontWeight: 'bold'
+      })
+    });
+    text.x = 10;
+    text.y = 10;
+    
+    container.addChild(bg);
+    container.addChild(text);
+    
+    // Position in top-right corner
+    container.x = this.canvasWidth - 220;
+    container.y = 20;
+    container.visible = false; // Hidden by default (only show when offline)
+    
+    this.app.stage.addChild(container);
+    this.connectionStatusIndicator = { container, bg, text };
+  }
+
+  /**
+   * Update connection status indicator
+   * @param {string} status - 'online', 'offline', or 'reconnecting'
+   * @param {number} queueSize - Number of queued operations
+   */
+  updateConnectionStatus(status, queueSize) {
+    if (!this.connectionStatusIndicator) return;
+    
+    const { container, bg, text } = this.connectionStatusIndicator;
+    
+    switch (status) {
+      case 'online':
+        container.visible = false;
+        break;
+        
+      case 'offline':
+        container.visible = true;
+        bg.clear();
+        bg.roundRect(0, 0, 200, 40, 6)
+          .fill(0xef4444)
+          .stroke({ width: 2, color: 0xffffff });
+        text.text = `Offline (${queueSize} queued)`;
+        break;
+        
+      case 'reconnecting':
+        container.visible = true;
+        bg.clear();
+        bg.roundRect(0, 0, 200, 40, 6)
+          .fill(0xf59e0b)
+          .stroke({ width: 2, color: 0xffffff });
+        text.text = `Syncing... (${queueSize} left)`;
+        break;
+    }
+  }
+
+  /**
+   * Perform undo operation
+   */
+  async performUndo() {
+    const success = await this.historyManager.undo();
+    if (success) {
+      console.log('[CanvasManager] Undo performed');
+    }
+  }
+
+  /**
+   * Perform redo operation
+   */
+  async performRedo() {
+    const success = await this.historyManager.redo();
+    if (success) {
+      console.log('[CanvasManager] Redo performed');
+    }
+  }
+
+  /**
+   * Add operation to history for undo/redo
+   * @param {string} type - Operation type: 'create', 'update', 'delete'
+   * @param {Object} data - Operation data
+   * @param {Object} previousState - Previous state for undo
+   */
+  addToHistory(type, data, previousState = null) {
+    this.historyManager.addOperation(type, data, previousState);
+  }
+
+  /**
+   * Start batching operations (for multi-object or AI operations)
+   */
+  startHistoryBatch() {
+    this.historyManager.startBatch();
+  }
+
+  /**
+   * End batching operations
+   */
+  endHistoryBatch() {
+    this.historyManager.endBatch();
+  }
+
+  /**
    * Delete an object from the canvas
    * @param {string} objectId - Object ID
    */
@@ -576,6 +887,9 @@ export class CanvasManager {
       label.container.destroy();
       this.objectLabels.delete(objectId);
     }
+
+    // Also remove the lock indicator if it exists
+    this.hideLockIndicator(objectId);
   }
 
   /**
@@ -903,6 +1217,9 @@ export class CanvasManager {
       // Update all object labels to follow dragged objects
       this.updateObjectLabels();
 
+      // Update all lock indicators to follow dragged objects
+      this.updateLockIndicators();
+
       // Broadcast positions for all selected objects during drag (throttled to avoid spam)
       if (!this.lastDragUpdate || Date.now() - this.lastDragUpdate > 50) {
         this.selectedObjects.forEach(obj => {
@@ -1075,12 +1392,30 @@ export class CanvasManager {
    * Handle keyboard events
    */
   handleKeyDown(event) {
+    // Don't handle keyboard shortcuts if user is typing
+    const isTyping = event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA';
+
+    // Handle Cmd/Ctrl+Z for Undo
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      if (!isTyping) {
+        event.preventDefault();
+        this.performUndo();
+      }
+      return;
+    }
+
+    // Handle Cmd/Ctrl+Shift+Z for Redo
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && event.shiftKey) {
+      if (!isTyping) {
+        event.preventDefault();
+        this.performRedo();
+      }
+      return;
+    }
+
     // Handle spacebar for panning
     if (event.code === 'Space' && !this.spacePressed) {
-      // Don't handle spacebar if user is typing in an input
-      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-        return;
-      }
+      if (isTyping) return;
       event.preventDefault();
       this.spacePressed = true;
       if (!this.isPanning) {
@@ -1090,9 +1425,7 @@ export class CanvasManager {
     }
 
     // Don't handle keyboard shortcuts if user is typing in an input
-    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-      return;
-    }
+    if (isTyping) return;
 
     switch (event.key.toLowerCase()) {
       case 'delete':
