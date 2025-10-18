@@ -35,9 +35,21 @@ import VoiceInput from "./hooks/voice_input"
 import AICommandInput from "./hooks/ai_command_input"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
+
+// Custom logger to filter out noisy cursor_move events
+const customLogger = (kind, msg, data) => {
+  // Filter out cursor_move events to reduce console noise
+  if (msg && msg.includes && msg.includes('cursor_move')) {
+    return;
+  }
+  // Log everything else
+  console.log(`[LiveView ${kind}]`, msg, data);
+}
+
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
+  logger: customLogger,
   hooks: {
     CanvasRenderer: CanvasManager,
     ComponentDraggable: ComponentDraggable,
