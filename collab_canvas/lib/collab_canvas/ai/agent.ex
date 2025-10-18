@@ -447,9 +447,40 @@ defmodule CollabCanvas.AI.Agent do
   # Private Functions
 
   # Retrieves the AI provider setting from environment variables.
-  # Returns "claude", "groq", or "openai". Defaults to "claude" if not set.
+  # Returns "claude", "groq", or "openai". Auto-detects based on available API keys if not set.
   defp get_ai_provider do
-    System.get_env("AI_PROVIDER") || "claude"
+    case System.get_env("AI_PROVIDER") do
+      nil ->
+        # Auto-detect based on available API keys
+        cond do
+          has_valid_api_key?("GROQ_API_KEY") ->
+            Logger.info("Auto-detected Groq API key, using Groq provider")
+            "groq"
+          has_valid_api_key?("OPENAI_API_KEY") ->
+            Logger.info("Auto-detected OpenAI API key, using OpenAI provider")
+            "openai"
+          has_valid_api_key?("CLAUDE_API_KEY") ->
+            Logger.info("Auto-detected Claude API key, using Claude provider")
+            "claude"
+          true ->
+            Logger.warning("No valid AI API key found. Please set GROQ_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY")
+            "claude"  # Default fallback (will error with missing_api_key)
+        end
+      provider ->
+        # Use explicitly configured provider
+        provider
+    end
+  end
+
+  # Checks if an API key environment variable is set and valid
+  defp has_valid_api_key?(env_var_name) do
+    case System.get_env(env_var_name) do
+      nil -> false
+      "" -> false
+      "your_key_here" -> false
+      "your_" <> _rest -> false  # Matches placeholder patterns
+      _key -> true
+    end
   end
 
   # Builds an enhanced command with all canvas objects and their human-readable names
