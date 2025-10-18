@@ -259,6 +259,15 @@ export class CanvasManager {
       case 'text':
         pixiObject = this.createText(position, data);
         break;
+      case 'star':
+        pixiObject = this.createStar(position, data);
+        break;
+      case 'triangle':
+        pixiObject = this.createTriangle(position, data);
+        break;
+      case 'polygon':
+        pixiObject = this.createPolygon(position, data);
+        break;
       default:
         console.warn('Unknown object type:', objectData.type);
         return;
@@ -403,6 +412,136 @@ export class CanvasManager {
     }
 
     return text;
+  }
+
+  /**
+   * Create a star shape
+   * @param {Object} position - {x, y} position
+   * @param {Object} data - Shape data
+   * @returns {PIXI.Graphics}
+   */
+  createStar(position, data) {
+    const graphics = new PIXI.Graphics();
+    const points = data.points || 5; // Number of star points
+    const outerRadius = (data.width || 100) / 2;
+    const innerRadius = outerRadius * (data.innerRatio || 0.5);
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || fillColor;
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Calculate star points
+    const starPoints = [];
+    for (let i = 0; i < points * 2; i++) {
+      const angle = (i * Math.PI) / points - Math.PI / 2;
+      const radius = i % 2 === 0 ? outerRadius : innerRadius;
+      starPoints.push(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius
+      );
+    }
+
+    // Draw star using poly
+    graphics.poly(starPoints)
+      .fill({ color: fill, alpha: data.opacity || 1 })
+      .stroke({ width: strokeWidth, color: stroke });
+
+    graphics.x = position.x;
+    graphics.y = position.y;
+
+    // Apply rotation if specified
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, outerRadius * 2, outerRadius * 2);
+    } else {
+      graphics.pivot.set(0, 0);
+    }
+
+    return graphics;
+  }
+
+  /**
+   * Create a triangle shape
+   * @param {Object} position - {x, y} position
+   * @param {Object} data - Shape data
+   * @returns {PIXI.Graphics}
+   */
+  createTriangle(position, data) {
+    const graphics = new PIXI.Graphics();
+    const width = data.width || 100;
+    const height = data.height || 100;
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || fillColor;
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Draw equilateral triangle pointing up
+    const trianglePoints = [
+      0, -height / 2,           // Top
+      -width / 2, height / 2,   // Bottom left
+      width / 2, height / 2     // Bottom right
+    ];
+
+    graphics.poly(trianglePoints)
+      .fill({ color: fill, alpha: data.opacity || 1 })
+      .stroke({ width: strokeWidth, color: stroke });
+
+    graphics.x = position.x;
+    graphics.y = position.y;
+
+    // Apply rotation if specified
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, width, height);
+    } else {
+      graphics.pivot.set(0, 0);
+    }
+
+    return graphics;
+  }
+
+  /**
+   * Create a polygon shape
+   * @param {Object} position - {x, y} position
+   * @param {Object} data - Shape data
+   * @returns {PIXI.Graphics}
+   */
+  createPolygon(position, data) {
+    const graphics = new PIXI.Graphics();
+    const sides = data.sides || 6; // Default to hexagon
+    const radius = (data.width || 100) / 2;
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || fillColor;
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Calculate polygon points
+    const polygonPoints = [];
+    for (let i = 0; i < sides; i++) {
+      const angle = (i * 2 * Math.PI) / sides - Math.PI / 2;
+      polygonPoints.push(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius
+      );
+    }
+
+    // Draw polygon
+    graphics.poly(polygonPoints)
+      .fill({ color: fill, alpha: data.opacity || 1 })
+      .stroke({ width: strokeWidth, color: stroke });
+
+    graphics.x = position.x;
+    graphics.y = position.y;
+
+    // Apply rotation if specified
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, radius * 2, radius * 2);
+    } else {
+      graphics.pivot.set(0, 0);
+    }
+
+    return graphics;
   }
 
   /**
@@ -1142,6 +1281,18 @@ export class CanvasManager {
         case 'a':
           event.preventDefault();
           this.selectAll();
+          return;
+        case ']':
+          event.preventDefault();
+          if (event.shiftKey) {
+            this.bringToFront();
+          }
+          return;
+        case '[':
+          event.preventDefault();
+          if (event.shiftKey) {
+            this.sendToBack();
+          }
           return;
       }
     }
@@ -2260,6 +2411,310 @@ export class CanvasManager {
     });
 
     console.log('[CanvasManager] Selected all', this.selectedObjects.size, 'objects');
+  }
+
+  /**
+   * Bring selected objects to front
+   */
+  bringToFront() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('bring_to_front', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Bringing', this.selectedObjects.size, 'objects to front');
+  }
+
+  /**
+   * Send selected objects to back
+   */
+  sendToBack() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('send_to_back', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Sending', this.selectedObjects.size, 'objects to back');
+  }
+
+  /**
+   * Align selected objects
+   * @param {string} alignment - 'left', 'right', 'center', 'top', 'bottom', 'middle'
+   */
+  alignObjects(alignment) {
+    if (this.selectedObjects.size < 2) {
+      console.log('[CanvasManager] Need at least 2 objects to align');
+      return;
+    }
+
+    const selectedIds = this.getSelectedObjectIds();
+    this.emit('align_objects', {
+      object_ids: selectedIds,
+      alignment: alignment
+    });
+
+    console.log('[CanvasManager] Aligning', selectedIds.length, 'objects:', alignment);
+  }
+
+  /**
+   * Distribute selected objects horizontally
+   */
+  distributeHorizontally() {
+    if (this.selectedObjects.size < 3) {
+      console.log('[CanvasManager] Need at least 3 objects to distribute');
+      return;
+    }
+
+    const selectedIds = this.getSelectedObjectIds();
+    this.emit('distribute_objects', {
+      object_ids: selectedIds,
+      direction: 'horizontal'
+    });
+
+    console.log('[CanvasManager] Distributing', selectedIds.length, 'objects horizontally');
+  }
+
+  /**
+   * Distribute selected objects vertically
+   */
+  distributeVertically() {
+    if (this.selectedObjects.size < 3) {
+      console.log('[CanvasManager] Need at least 3 objects to distribute');
+      return;
+    }
+
+    const selectedIds = this.getSelectedObjectIds();
+    this.emit('distribute_objects', {
+      object_ids: selectedIds,
+      direction: 'vertical'
+    });
+
+    console.log('[CanvasManager] Distributing', selectedIds.length, 'objects vertically');
+  }
+
+  /**
+   * Show context menu for selected objects
+   * @param {Object} position - {x, y} position for menu
+   */
+  showContextMenu(position) {
+    if (this.selectedObjects.size === 0) {
+      return;
+    }
+
+    this.emit('show_context_menu', {
+      position: position,
+      selected_count: this.selectedObjects.size
+    });
+  }
+
+  /**
+   * Export canvas to PNG
+   * @param {boolean} selectionOnly - Export only selected objects
+   */
+  async exportToPNG(selectionOnly = false) {
+    try {
+      let renderTarget;
+      
+      if (selectionOnly && this.selectedObjects.size > 0) {
+        // Calculate bounds of selected objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        this.selectedObjects.forEach(obj => {
+          const bounds = obj.getBounds();
+          minX = Math.min(minX, bounds.x);
+          minY = Math.min(minY, bounds.y);
+          maxX = Math.max(maxX, bounds.x + bounds.width);
+          maxY = Math.max(maxY, bounds.y + bounds.height);
+        });
+        
+        const width = maxX - minX;
+        const height = maxY - minY;
+        
+        // Create temporary container for selected objects
+        const tempContainer = new PIXI.Container();
+        tempContainer.x = -minX;
+        tempContainer.y = -minY;
+        
+        this.selectedObjects.forEach(obj => {
+          tempContainer.addChild(obj);
+        });
+        
+        // Create render texture
+        const renderTexture = PIXI.RenderTexture.create({
+          width: Math.ceil(width),
+          height: Math.ceil(height),
+          resolution: window.devicePixelRatio || 1
+        });
+        
+        this.app.renderer.render(tempContainer, { renderTexture });
+        
+        // Extract canvas and trigger download
+        const canvas = this.app.renderer.extract.canvas(renderTexture);
+        this.triggerDownload(canvas.toDataURL('image/png'), 'canvas-selection.png');
+        
+        // Restore objects to original container
+        this.selectedObjects.forEach(obj => {
+          this.objectContainer.addChild(obj);
+        });
+        
+        tempContainer.destroy();
+        renderTexture.destroy();
+      } else {
+        // Export entire canvas
+        // Calculate bounds of all objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        this.objects.forEach(obj => {
+          const bounds = obj.getBounds();
+          minX = Math.min(minX, bounds.x);
+          minY = Math.min(minY, bounds.y);
+          maxX = Math.max(maxX, bounds.x + bounds.width);
+          maxY = Math.max(maxY, bounds.y + bounds.height);
+        });
+        
+        const width = maxX - minX;
+        const height = maxY - minY;
+        
+        // Create render texture
+        const renderTexture = PIXI.RenderTexture.create({
+          width: Math.ceil(width) || 800,
+          height: Math.ceil(height) || 600,
+          resolution: window.devicePixelRatio || 1
+        });
+        
+        // Temporarily offset container
+        const originalX = this.objectContainer.x;
+        const originalY = this.objectContainer.y;
+        this.objectContainer.x = -minX;
+        this.objectContainer.y = -minY;
+        
+        this.app.renderer.render(this.objectContainer, { renderTexture });
+        
+        // Restore original position
+        this.objectContainer.x = originalX;
+        this.objectContainer.y = originalY;
+        
+        // Extract canvas and trigger download
+        const canvas = this.app.renderer.extract.canvas(renderTexture);
+        this.triggerDownload(canvas.toDataURL('image/png'), 'canvas-export.png');
+        
+        renderTexture.destroy();
+      }
+      
+      console.log('[CanvasManager] PNG export complete');
+    } catch (error) {
+      console.error('[CanvasManager] PNG export failed:', error);
+    }
+  }
+
+  /**
+   * Export canvas to SVG
+   * @param {boolean} selectionOnly - Export only selected objects
+   */
+  exportToSVG(selectionOnly = false) {
+    try {
+      const objectsToExport = selectionOnly && this.selectedObjects.size > 0
+        ? Array.from(this.selectedObjects)
+        : Array.from(this.objects.values());
+      
+      if (objectsToExport.length === 0) {
+        console.warn('[CanvasManager] No objects to export');
+        return;
+      }
+      
+      // Calculate bounds
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      
+      objectsToExport.forEach(obj => {
+        const bounds = obj.getBounds();
+        minX = Math.min(minX, bounds.x);
+        minY = Math.min(minY, bounds.y);
+        maxX = Math.max(maxX, bounds.x + bounds.width);
+        maxY = Math.max(maxY, bounds.y + bounds.height);
+      });
+      
+      const width = maxX - minX;
+      const height = maxY - minY;
+      
+      // Create SVG
+      let svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${minX} ${minY} ${width} ${height}">
+`;
+      
+      // Convert each object to SVG
+      objectsToExport.forEach(obj => {
+        svg += this.objectToSVG(obj);
+      });
+      
+      svg += '</svg>';
+      
+      // Trigger download
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      this.triggerDownload(url, 'canvas-export.svg');
+      URL.revokeObjectURL(url);
+      
+      console.log('[CanvasManager] SVG export complete');
+    } catch (error) {
+      console.error('[CanvasManager] SVG export failed:', error);
+    }
+  }
+
+  /**
+   * Convert a PixiJS object to SVG string
+   * @param {PIXI.DisplayObject} obj - Object to convert
+   * @returns {string} SVG string
+   */
+  objectToSVG(obj) {
+    let svg = '';
+    
+    if (obj instanceof PIXI.Graphics) {
+      // Extract bounds and color info from the graphics object
+      const bounds = obj.getBounds();
+      const fill = obj.fill?.color !== undefined 
+        ? `#${obj.fill.color.toString(16).padStart(6, '0')}`
+        : '#3b82f6';
+      const stroke = obj.stroke?.color !== undefined
+        ? `#${obj.stroke.color.toString(16).padStart(6, '0')}`
+        : fill;
+      const strokeWidth = obj.stroke?.width || 2;
+      
+      // Simple rectangle approximation for graphics objects
+      svg = `  <rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" 
+        fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" 
+        opacity="${obj.alpha}" transform="rotate(${obj.angle} ${bounds.x + bounds.width/2} ${bounds.y + bounds.height/2})" />\n`;
+    } else if (obj instanceof PIXI.Text) {
+      const bounds = obj.getBounds();
+      const fill = obj.style.fill || '#000000';
+      const fontSize = obj.style.fontSize || 16;
+      const fontFamily = obj.style.fontFamily || 'Arial';
+      
+      svg = `  <text x="${bounds.x}" y="${bounds.y + fontSize}" 
+        fill="${fill}" font-size="${fontSize}" font-family="${fontFamily}" 
+        opacity="${obj.alpha}">${obj.text}</text>\n`;
+    }
+    
+    return svg;
+  }
+
+  /**
+   * Trigger file download
+   * @param {string} dataUrl - Data URL or blob URL
+   * @param {string} filename - Filename for download
+   */
+  triggerDownload(dataUrl, filename) {
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = dataUrl;
+    link.click();
   }
 
   /**

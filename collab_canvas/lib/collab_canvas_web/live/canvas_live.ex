@@ -908,6 +908,131 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles alignment of selected objects.
+
+  Uses the Layout module to calculate new positions for objects based on
+  the specified alignment type.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_ids" - List of object IDs to align
+    - "alignment" - Alignment type (left, right, center, top, bottom, middle)
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects.
+  """
+  @impl true
+  def handle_event("align_objects", %{"object_ids" => object_ids, "alignment" => alignment}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    # Fetch the objects
+    objects = Enum.map(object_ids, fn id ->
+      case Canvases.get_object(id) do
+        nil -> nil
+        obj ->
+          # Parse data if it's a string
+          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
+          %{id: obj.id, position: obj.position, data: data}
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+
+    if length(objects) < 2 do
+      {:noreply, put_flash(socket, :error, "Need at least 2 objects to align")}
+    else
+      # Calculate new positions using Layout module
+      updates = CollabCanvas.AI.Layout.align_objects(objects, alignment)
+
+      # Apply updates to database
+      Enum.each(updates, fn update ->
+        Canvases.update_object(update.id, %{position: update.position})
+      end)
+
+      # Broadcast to all clients
+      updated_objects = Enum.map(updates, fn update ->
+        Canvases.get_object(update.id)
+      end)
+
+      Phoenix.PubSub.broadcast(
+        CollabCanvas.PubSub,
+        socket.assigns.topic,
+        {:objects_updated_batch, updated_objects}
+      )
+
+      {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Handles distribution of selected objects.
+
+  Uses the Layout module to evenly space objects horizontally or vertically.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_ids" - List of object IDs to distribute
+    - "direction" - Distribution direction (horizontal or vertical)
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects.
+  """
+  @impl true
+  def handle_event("distribute_objects", %{"object_ids" => object_ids, "direction" => direction}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    # Fetch the objects
+    objects = Enum.map(object_ids, fn id ->
+      case Canvases.get_object(id) do
+        nil -> nil
+        obj ->
+          # Parse data if it's a string
+          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
+          %{id: obj.id, position: obj.position, data: data}
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+
+    if length(objects) < 3 do
+      {:noreply, put_flash(socket, :error, "Need at least 3 objects to distribute")}
+    else
+      # Calculate new positions using Layout module
+      updates = case direction do
+        "horizontal" -> CollabCanvas.AI.Layout.distribute_horizontally(objects)
+        "vertical" -> CollabCanvas.AI.Layout.distribute_vertically(objects)
+        _ -> []
+      end
+
+      # Apply updates to database
+      Enum.each(updates, fn update ->
+        Canvases.update_object(update.id, %{position: update.position})
+      end)
+
+      # Broadcast to all clients
+      updated_objects = Enum.map(updates, fn update ->
+        Canvases.get_object(update.id)
+      end)
+
+      Phoenix.PubSub.broadcast(
+        CollabCanvas.PubSub,
+        socket.assigns.topic,
+        {:objects_updated_batch, updated_objects}
+      )
+
+      {:noreply, socket}
+    end
+  end
+
+  @doc """
   Handles AI command input changes from the client.
 
   Updates the AI command text in socket assigns as the user types in the
