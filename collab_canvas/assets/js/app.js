@@ -36,11 +36,12 @@ import AICommandInput from "./hooks/ai_command_input"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 
-// Custom logger to filter out noisy cursor_move events
+// Custom logger to filter out noisy cursor_move events from all LiveView logs
 const customLogger = (kind, msg, data) => {
-  // Filter out cursor_move events to reduce console noise
-  if (msg && msg.includes && msg.includes('cursor_move')) {
-    return;
+  // Filter out cursor_move events from all log types
+  const msgStr = typeof msg === 'string' ? msg : JSON.stringify(msg);
+  if (msgStr.includes('cursor_move')) {
+    return; // Silently ignore cursor_move logs
   }
   // Log everything else
   console.log(`[LiveView ${kind}]`, msg, data);
@@ -67,8 +68,11 @@ window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 // connect if there are any LiveViews on the page
 liveSocket.connect()
 
+// Disable debug mode to prevent cursor_move spam
+liveSocket.disableDebug()
+
 // expose liveSocket on window for web console debug logs and latency simulation:
-// >> liveSocket.enableDebug()
+// >> liveSocket.enableDebug()  // Note: This will include cursor_move logs
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
