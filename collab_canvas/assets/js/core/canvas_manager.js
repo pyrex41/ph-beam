@@ -1,5 +1,7 @@
 import * as PIXI from '../../vendor/pixi.min.mjs';
 import { PerformanceMonitor } from './performance_monitor.js';
+import { OfflineQueue } from './offline_queue.js';
+import { HistoryManager } from './history_manager.js';
 
 /**
  * CanvasManager - Standalone PixiJS Canvas Management
@@ -20,6 +22,14 @@ export class CanvasManager {
     this.cursors = new Map();
     this.objectLabels = new Map(); // Map of objectId -> label Text object
     this.labelsVisible = false; // Track if labels are currently visible
+    this.lockIndicators = new Map(); // Map of objectId -> lock indicator container
+
+    // Offline support
+    this.offlineQueue = null;
+    this.connectionStatusIndicator = null;
+
+    // History management (undo/redo)
+    this.historyManager = new HistoryManager(50);
 
     // Interaction state
     this.currentUserId = null;
@@ -65,6 +75,8 @@ export class CanvasManager {
     // Throttle tracking
     this.lastCursorUpdate = 0;
     this.lastDragUpdate = 0;
+    this.lastRotateUpdate = 0;
+    this.lastResizeUpdate = 0;
     this.lastCullUpdate = 0;
 
     // Viewport dimensions
@@ -83,14 +95,21 @@ export class CanvasManager {
     // Shared resources for cursor label optimization
     this.sharedCursorLabelStyle = null;
     this.sharedLabelBgContext = null;
+
+    // Remote transform tracking for smooth updates and visual feedback
+    this.remoteTransforms = new Map(); // Map of objectId -> {userId, type: 'drag'|'rotate'|'resize'}
+    this.remoteTransformGlows = new Map(); // Map of objectId -> PIXI.Graphics glow
+    this.interpolationTargets = new Map(); // Map of objectId -> {x, y, width, height, rotation, startTime}
+    this.presences = {}; // Store presence data for user colors
   }
 
   /**
    * Initialize the PixiJS application
    * @param {HTMLElement} container - DOM element to attach canvas to
    * @param {string} userId - Current user ID
+   * @param {string} canvasId - Canvas ID for offline queue
    */
-  async initialize(container, userId) {
+  async initialize(container, userId, canvasId) {
     this.currentUserId = userId;
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -152,6 +171,70 @@ export class CanvasManager {
     // Initialize and start performance monitoring
     this.performanceMonitor = new PerformanceMonitor({ sampleSize: 60 });
     this.performanceMonitor.start();
+
+    // Start interpolation ticker for smooth remote transforms
+    this.app.ticker.add(this.updateInterpolations.bind(this));
+
+    // Initialize offline queue
+    if (canvasId) {
+      this.offlineQueue = new OfflineQueue(canvasId);
+      
+      // Register sync callback
+      this.offlineQueue.onSync(async (type, data) => {
+        this.emit(type + '_object', data);
+      });
+
+      // Register status change callback
+      this.offlineQueue.onStatusChange((status, queueSize) => {
+        this.updateConnectionStatus(status, queueSize);
+      });
+
+      // Create connection status indicator
+      this.createConnectionStatusIndicator();
+    }
+
+    // Setup history manager callbacks
+    this.historyManager.onUndo(async (operation) => {
+      console.log('[CanvasManager] Undoing operation:', operation);
+      
+      switch (operation.type) {
+        case 'create':
+          // Delete the created object
+          this.emit('delete_object', { object_id: operation.data.id });
+          break;
+        case 'update':
+          // Restore previous state
+          if (operation.previousState) {
+            this.emit('update_object', operation.previousState);
+          }
+          break;
+        case 'delete':
+          // Recreate the deleted object
+          if (operation.previousState) {
+            this.emit('create_object', operation.previousState);
+          }
+          break;
+      }
+    });
+
+    this.historyManager.onRedo(async (operation) => {
+      console.log('[CanvasManager] Redoing operation:', operation);
+      
+      switch (operation.type) {
+        case 'create':
+          // Recreate the object
+          this.emit('create_object', operation.data);
+          break;
+        case 'update':
+          // Reapply the update
+          this.emit('update_object', operation.data);
+          break;
+        case 'delete':
+          // Delete again
+          this.emit('delete_object', { object_id: operation.data.id });
+          break;
+      }
+    });
 
     // Initial viewport culling (disabled for now)
     // this.updateVisibleObjects();
@@ -218,10 +301,21 @@ export class CanvasManager {
 
   /**
    * Emit an event to all registered listeners
+   * Queues events when offline for later sync
    * @param {string} event - Event name
    * @param {*} data - Event data
    */
   emit(event, data) {
+    // Check if this is a canvas operation that should be queued when offline
+    const queueableEvents = ['create_object', 'update_object', 'delete_object'];
+
+    if (queueableEvents.includes(event) && this.offlineQueue && !this.offlineQueue.online) {
+      // Queue the operation for later sync
+      this.offlineQueue.queueOperation(event.replace('_object', ''), data);
+      // Don't return early - still emit the event so local UI updates
+    }
+
+    // Normal event emission (happens both online and offline)
     const listeners = this.eventListeners.get(event);
     if (listeners) {
       listeners.forEach(callback => callback(data));
@@ -276,6 +370,8 @@ export class CanvasManager {
     // Store object reference and lock information
     pixiObject.objectId = objectData.id;
     pixiObject.lockedBy = objectData.locked_by;
+    pixiObject.objectType = objectData.type; // Store type for resize redrawing
+    pixiObject.objectData = data; // Store original data for resize redrawing
     pixiObject.eventMode = 'static'; // Replaces interactive = true
 
     // Set cursor and visual appearance based on lock status
@@ -374,6 +470,50 @@ export class CanvasManager {
     }
 
     return graphics;
+  }
+
+  /**
+   * Redraw a Graphics object with new dimensions
+   * Used during resize to show smooth visual updates
+   * @param {PIXI.Graphics} graphics - The graphics object to redraw
+   * @param {number} width - New width
+   * @param {number} height - New height
+   */
+  redrawGraphicsWithSize(graphics, width, height) {
+    if (!(graphics instanceof PIXI.Graphics)) {
+      return; // Only works for Graphics objects
+    }
+
+    const data = graphics.objectData || {};
+    const type = graphics.objectType;
+
+    // Get fill and stroke from stored data
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || data.color || '#1e40af';
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Clear and redraw
+    graphics.clear();
+
+    if (type === 'circle') {
+      const radius = width / 2;
+      graphics.circle(radius, radius, radius)
+        .fill(fill)
+        .stroke({ width: strokeWidth, color: stroke });
+      graphics.pivot.set(radius, radius);
+    } else {
+      // Rectangle (default)
+      graphics.rect(0, 0, width, height)
+        .fill(fill)
+        .stroke({ width: strokeWidth, color: stroke });
+      graphics.pivot.set(width / 2, height / 2);
+    }
+
+    // Restore opacity if it was set
+    // Preserve alpha, default to 1.0 (fully opaque) if not specified
+    graphics.alpha = data.opacity !== undefined ? data.opacity : 1.0;
   }
 
   /**
@@ -580,52 +720,6 @@ export class CanvasManager {
   }
 
   /**
-   * Show visual feedback animation for AI-modified objects (Task 8)
-   * @param {number} objectId - ID of the modified object
-   */
-  showAIFeedback(objectId) {
-    const pixiObject = this.objects.get(objectId);
-    if (!pixiObject) return;
-
-    // Use local bounds (container-relative) instead of global bounds
-    const bounds = pixiObject.getLocalBounds();
-    const highlight = new PIXI.Graphics();
-
-    // Draw a glowing border around the object
-    highlight.rect(
-      -4,
-      -4,
-      bounds.width + 8,
-      bounds.height + 8
-    ).stroke({ width: 3, color: 0x10b981 }); // Green highlight
-
-    // Position highlight at object's position
-    highlight.x = pixiObject.x;
-    highlight.y = pixiObject.y;
-
-    // Match rotation and pivot of the object so highlight rotates with it
-    highlight.angle = pixiObject.angle;
-    highlight.pivot.set(pixiObject.pivot.x, pixiObject.pivot.y);
-
-    this.objectContainer.addChild(highlight);
-
-    // Animate the highlight (fade out and remove)
-    let alpha = 1.0;
-    const fadeInterval = setInterval(() => {
-      alpha -= 0.05;
-      highlight.alpha = alpha;
-
-      if (alpha <= 0) {
-        clearInterval(fadeInterval);
-        if (highlight.parent) {
-          highlight.parent.removeChild(highlight);
-        }
-        highlight.destroy();
-      }
-    }, 50);
-  }
-
-  /**
    * Update an existing object
    * @param {Object} objectData - Object data from server
    */
@@ -652,13 +746,31 @@ export class CanvasManager {
       return;
     }
 
+    // Determine if this is a remote transform (not from current user)
+    const isRemoteTransform = pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId;
+
+    if (isRemoteTransform) {
+      console.log('[CanvasManager] Remote transform detected for object', objectData.id, 'locked by', pixiObject.lockedBy, 'current user', this.currentUserId);
+    }
+
     // Update position if changed
     if (objectData.position) {
-      pixiObject.x = objectData.position.x;
-      pixiObject.y = objectData.position.y;
+      if (isRemoteTransform) {
+        // Remote user is transforming - use smooth interpolation
+        // ONLY set position, not size or rotation
+        this.setInterpolationTarget(objectData.id, {
+          x: objectData.position.x,
+          y: objectData.position.y,
+          onlyPosition: true  // Flag to prevent size/rotation interpolation
+        });
+      } else {
+        // Local update or unlocked object - immediate update
+        pixiObject.x = objectData.position.x;
+        pixiObject.y = objectData.position.y;
+      }
 
       // Update label position for this object if labels are visible
-      if (this.labelsVisible) {
+      if (this.labelsVisible && !isRemoteTransform) {
         const label = this.objectLabels.get(objectData.id);
         if (label) {
           // Use local bounds and object position (same as selection boxes)
@@ -671,20 +783,120 @@ export class CanvasManager {
 
     // Update lock status
     if (objectData.locked_by !== undefined) {
+      const wasRemoteLocked = pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId;
+      const isNowRemoteLocked = objectData.locked_by && objectData.locked_by !== this.currentUserId;
+      const isNowUnlocked = objectData.locked_by === null;
+
+      console.log('[CanvasManager] Updating lock status for object', objectData.id, 'locked_by:', objectData.locked_by, 'current user:', this.currentUserId);
       pixiObject.lockedBy = objectData.locked_by;
       this.updateObjectAppearance(pixiObject);
+
+      // If object is NOW locked by another user, immediately hide selection box
+      if (isNowRemoteLocked) {
+        console.log('[CanvasManager] Object locked by remote user, removing selection box', objectData.id);
+        const box = this.selectionBoxes.get(objectData.id);
+        if (box) {
+          box.visible = false;
+        }
+        const rotationHandle = this.rotationHandles.get(objectData.id);
+        if (rotationHandle) {
+          rotationHandle.visible = false;
+        }
+        const resizeHandle = this.resizeHandles.get(objectData.id);
+        if (resizeHandle) {
+          resizeHandle.visible = false;
+        }
+      }
+
+      // Clean up remote transform state if object was unlocked
+      if (wasRemoteLocked && isNowUnlocked) {
+        console.log('[CanvasManager] Object unlocked, cleaning up interpolation state', objectData.id);
+        this.interpolationTargets.delete(objectData.id);
+
+        // Make selection box visible again if it exists
+        const box = this.selectionBoxes.get(objectData.id);
+        if (box) {
+          box.visible = true;
+        }
+        const rotationHandle = this.rotationHandles.get(objectData.id);
+        if (rotationHandle) {
+          rotationHandle.visible = true;
+        }
+        const resizeHandle = this.resizeHandles.get(objectData.id);
+        if (resizeHandle) {
+          resizeHandle.visible = true;
+        }
+      }
     }
 
-    // For more complex updates, recreate the object
+    // Handle data changes - check if this is a partial update (like rotation only) or full object replacement
     if (objectData.data) {
-      this.deleteObject(objectData.id);
-      this.createObject(objectData);
+      try {
+        const newData = JSON.parse(objectData.data);
 
-      // Show AI feedback for data changes (Task 8)
-      this.showAIFeedback(objectData.id);
+        // If this is ONLY a rotation update (single key), apply it without recreating
+        const keys = Object.keys(newData);
+        if (keys.length === 1 && keys[0] === 'rotation') {
+          if (isRemoteTransform) {
+            // Remote user is rotating - use smooth interpolation
+            // ONLY set rotation, not position or size
+            this.setInterpolationTarget(objectData.id, {
+              rotation: newData.rotation,
+              onlyRotation: true  // Flag to prevent size interpolation
+            });
+          } else {
+            // Local update - immediate rotation
+            pixiObject.angle = newData.rotation;
 
-      // Update label for recreated object if labels are visible
-      this.updateObjectLabels();
+            // Update selection box to match rotation
+            const selectionBox = this.selectionBoxes.get(objectData.id);
+            if (selectionBox) {
+              selectionBox.angle = newData.rotation;
+            }
+          }
+
+          return;
+        }
+
+        // If this is ONLY a size update (width/height), try to update without recreating
+        if (keys.length <= 2 && keys.every(k => k === 'width' || k === 'height')) {
+          // Only handle size updates for Graphics objects (not Text)
+          if (pixiObject instanceof PIXI.Graphics) {
+            if (isRemoteTransform) {
+              // Remote user is resizing - use smooth interpolation
+              // ONLY set width/height, not rotation
+              this.setInterpolationTarget(objectData.id, {
+                width: newData.width,
+                height: newData.height,
+                onlyResize: true  // Flag to prevent rotation interpolation
+              });
+            } else {
+              // Local update - immediate resize
+              const bounds = pixiObject.getLocalBounds();
+              const width = newData.width !== undefined ? newData.width : bounds.width;
+              const height = newData.height !== undefined ? newData.height : bounds.height;
+
+              // Redraw using our helper method (preserves colors/styles)
+              this.redrawGraphicsWithSize(pixiObject, width, height);
+
+              // Update selection boxes
+              this.updateSelectionBoxes();
+            }
+            return;
+          }
+        }
+
+        // For complex updates or full data replacement, recreate the object
+        // Note: This path is now less frequent due to partial update optimizations
+        // for rotation-only (line 738) and size-only updates (line 761)
+        this.deleteObject(objectData.id);
+        this.createObject(objectData);
+
+        // Update label for recreated object if labels are visible
+        this.updateObjectLabels();
+      } catch (error) {
+        console.error('[CanvasManager] Error handling object data update:', error);
+      }
     }
   }
 
@@ -702,6 +914,234 @@ export class CanvasManager {
       pixiObject.alpha = 1.0;
       pixiObject.cursor = 'pointer';
     }
+  }
+
+  /**
+   * Show a lock indicator (avatar/name tag) next to a locked object
+   * @param {number} objectId - ID of the locked object
+   * @param {Object} userInfo - User info with name, color, avatar
+   */
+  showLockIndicator(objectId, userInfo) {
+    // Remove existing indicator if any
+    this.hideLockIndicator(objectId);
+
+    const pixiObject = this.objects.get(objectId);
+    if (!pixiObject) return;
+
+    // Only show indicator if locked by another user
+    if (pixiObject.lockedBy === this.currentUserId) return;
+
+    // Create container for the lock indicator
+    const container = new PIXI.Container();
+
+    // Create background pill
+    const bg = new PIXI.Graphics();
+    const bgColor = parseInt(userInfo.color.replace('#', '0x'));
+    const textColor = this.getContrastColor(userInfo.color);
+    
+    // Create text
+    const text = new PIXI.Text({
+      text: `🔒 ${userInfo.name}`,
+      style: new PIXI.TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 12,
+        fill: textColor,
+        fontWeight: 'bold'
+      })
+    });
+
+    // Draw rounded rectangle background
+    const padding = 6;
+    const radius = 6;
+    bg.roundRect(
+      0,
+      0,
+      text.width + padding * 2,
+      text.height + padding * 2,
+      radius
+    )
+    .fill(bgColor)
+    .stroke({ width: 2, color: 0xffffff });
+
+    // Position text inside background
+    text.x = padding;
+    text.y = padding;
+
+    container.addChild(bg);
+    container.addChild(text);
+
+    // Position indicator above the object
+    const bounds = pixiObject.getBounds();
+    container.x = bounds.x;
+    container.y = bounds.y - container.height - 10;
+
+    // Add to label container (renders above objects)
+    this.labelContainer.addChild(container);
+    this.lockIndicators.set(objectId, container);
+  }
+
+  /**
+   * Hide the lock indicator for an object
+   * @param {number} objectId - ID of the object
+   */
+  hideLockIndicator(objectId) {
+    const indicator = this.lockIndicators.get(objectId);
+    if (indicator) {
+      this.labelContainer.removeChild(indicator);
+      indicator.destroy();
+      this.lockIndicators.delete(objectId);
+    }
+  }
+
+  /**
+   * Get contrast color (black or white) for a given background color
+   * @param {string} hexColor - Hex color string like "#3b82f6"
+   * @returns {string} - Hex color string for text
+   */
+  getContrastColor(hexColor) {
+    // Remove # if present
+    const hex = hexColor.replace('#', '');
+    
+    // Convert to RGB
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    
+    // Calculate perceived brightness
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    
+    // Return black for light backgrounds, white for dark
+    return brightness > 128 ? 0x000000 : 0xffffff;
+  }
+
+  /**
+   * Update positions of all lock indicators to follow their objects
+   */
+  updateLockIndicators() {
+    this.lockIndicators.forEach((indicator, objectId) => {
+      const pixiObject = this.objects.get(objectId);
+      if (pixiObject) {
+        const bounds = pixiObject.getBounds();
+        indicator.x = bounds.x;
+        indicator.y = bounds.y - indicator.height - 10;
+      }
+    });
+  }
+
+  /**
+   * Create connection status indicator
+   */
+  createConnectionStatusIndicator() {
+    const container = new PIXI.Container();
+    
+    // Create background
+    const bg = new PIXI.Graphics();
+    bg.roundRect(0, 0, 200, 40, 6)
+      .fill(0x10b981)
+      .stroke({ width: 2, color: 0xffffff });
+    
+    // Create status text
+    const text = new PIXI.Text({
+      text: 'Online',
+      style: new PIXI.TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 14,
+        fill: 0xffffff,
+        fontWeight: 'bold'
+      })
+    });
+    text.x = 10;
+    text.y = 10;
+    
+    container.addChild(bg);
+    container.addChild(text);
+    
+    // Position in top-right corner
+    container.x = this.canvasWidth - 220;
+    container.y = 20;
+    container.visible = false; // Hidden by default (only show when offline)
+    
+    this.app.stage.addChild(container);
+    this.connectionStatusIndicator = { container, bg, text };
+  }
+
+  /**
+   * Update connection status indicator
+   * @param {string} status - 'online', 'offline', or 'reconnecting'
+   * @param {number} queueSize - Number of queued operations
+   */
+  updateConnectionStatus(status, queueSize) {
+    if (!this.connectionStatusIndicator) return;
+    
+    const { container, bg, text } = this.connectionStatusIndicator;
+    
+    switch (status) {
+      case 'online':
+        container.visible = false;
+        break;
+        
+      case 'offline':
+        container.visible = true;
+        bg.clear();
+        bg.roundRect(0, 0, 200, 40, 6)
+          .fill(0xef4444)
+          .stroke({ width: 2, color: 0xffffff });
+        text.text = `Offline (${queueSize} queued)`;
+        break;
+        
+      case 'reconnecting':
+        container.visible = true;
+        bg.clear();
+        bg.roundRect(0, 0, 200, 40, 6)
+          .fill(0xf59e0b)
+          .stroke({ width: 2, color: 0xffffff });
+        text.text = `Syncing... (${queueSize} left)`;
+        break;
+    }
+  }
+
+  /**
+   * Perform undo operation
+   */
+  async performUndo() {
+    const success = await this.historyManager.undo();
+    if (success) {
+      console.log('[CanvasManager] Undo performed');
+    }
+  }
+
+  /**
+   * Perform redo operation
+   */
+  async performRedo() {
+    const success = await this.historyManager.redo();
+    if (success) {
+      console.log('[CanvasManager] Redo performed');
+    }
+  }
+
+  /**
+   * Add operation to history for undo/redo
+   * @param {string} type - Operation type: 'create', 'update', 'delete'
+   * @param {Object} data - Operation data
+   * @param {Object} previousState - Previous state for undo
+   */
+  addToHistory(type, data, previousState = null) {
+    this.historyManager.addOperation(type, data, previousState);
+  }
+
+  /**
+   * Start batching operations (for multi-object or AI operations)
+   */
+  startHistoryBatch() {
+    this.historyManager.startBatch();
+  }
+
+  /**
+   * End batching operations
+   */
+  endHistoryBatch() {
+    this.historyManager.endBatch();
   }
 
   /**
@@ -723,6 +1163,9 @@ export class CanvasManager {
       label.container.destroy();
       this.objectLabels.delete(objectId);
     }
+
+    // Also remove the lock indicator if it exists
+    this.hideLockIndicator(objectId);
   }
 
   /**
@@ -802,6 +1245,9 @@ export class CanvasManager {
    * @param {Object} presences - Presence data from server
    */
   updatePresences(presences) {
+    // Store presence data for user colors and info
+    this.presences = presences;
+
     // Remove cursors for users who left
     this.cursors.forEach((cursor, userId) => {
       if (!presences[userId]) {
@@ -1009,6 +1455,21 @@ export class CanvasManager {
       if (selectionBox) {
         selectionBox.angle = angle;
       }
+
+      // Broadcast rotation changes during rotate (throttled to avoid spam)
+      if (!this.lastRotateUpdate || Date.now() - this.lastRotateUpdate > 50) {
+        const objectData = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+        if (objectData) {
+          const [objectId] = objectData;
+          this.emit('update_object', {
+            object_id: objectId,
+            data: {
+              rotation: Math.round(angle)
+            }
+          });
+        }
+        this.lastRotateUpdate = Date.now();
+      }
     } else if (this.isResizing && this.resizingObject) {
       // Calculate new size using relative mouse movement
       const obj = this.resizingObject;
@@ -1030,8 +1491,27 @@ export class CanvasManager {
       obj.tempWidth = newWidth;
       obj.tempHeight = newHeight;
 
+      // Redraw object with new size for smooth visual feedback
+      this.redrawGraphicsWithSize(obj, newWidth, newHeight);
+
       // Update selection box to match new size
       this.updateSelectionBoxes();
+
+      // Broadcast size changes during resize (throttled to avoid spam)
+      if (!this.lastResizeUpdate || Date.now() - this.lastResizeUpdate > 50) {
+        const objectData = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+        if (objectData) {
+          const [objectId] = objectData;
+          this.emit('update_object', {
+            object_id: objectId,
+            data: {
+              width: Math.round(newWidth),
+              height: Math.round(newHeight)
+            }
+          });
+        }
+        this.lastResizeUpdate = Date.now();
+      }
     } else if (this.isLassoSelecting) {
       // Update lasso selection rectangle
       this.updateLassoRect(position);
@@ -1056,6 +1536,9 @@ export class CanvasManager {
 
       // Update all object labels to follow dragged objects
       this.updateObjectLabels();
+
+      // Update all lock indicators to follow dragged objects
+      this.updateLockIndicators();
 
       // Broadcast positions for all selected objects during drag (throttled to avoid spam)
       if (!this.lastDragUpdate || Date.now() - this.lastDragUpdate > 50) {
@@ -1232,12 +1715,30 @@ export class CanvasManager {
    * Handle keyboard events
    */
   handleKeyDown(event) {
+    // Don't handle keyboard shortcuts if user is typing
+    const isTyping = event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA';
+
+    // Handle Cmd/Ctrl+Z for Undo
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      if (!isTyping) {
+        event.preventDefault();
+        this.performUndo();
+      }
+      return;
+    }
+
+    // Handle Cmd/Ctrl+Shift+Z for Redo
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && event.shiftKey) {
+      if (!isTyping) {
+        event.preventDefault();
+        this.performRedo();
+      }
+      return;
+    }
+
     // Handle spacebar for panning
     if (event.code === 'Space' && !this.spacePressed) {
-      // Don't handle spacebar if user is typing in an input
-      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-        return;
-      }
+      if (isTyping) return;
       event.preventDefault();
       this.spacePressed = true;
       if (!this.isPanning) {
@@ -1247,9 +1748,7 @@ export class CanvasManager {
     }
 
     // Don't handle keyboard shortcuts if user is typing in an input
-    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-      return;
-    }
+    if (isTyping) return;
 
     // Check for modifier keys
     const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -1848,6 +2347,25 @@ export class CanvasManager {
     this.selectionBoxes.forEach((box, objectId) => {
       const obj = this.objects.get(objectId);
       if (obj) {
+        // Skip if object is locked by another user (remote transform in progress)
+        // Remote users should see glow, not selection boxes
+        if (obj.lockedBy && obj.lockedBy !== this.currentUserId) {
+          console.log('[CanvasManager] Hiding selection box for remote locked object', objectId, 'locked by', obj.lockedBy);
+          box.visible = false;
+
+          // Also hide rotation and resize handles
+          const rotationHandle = this.rotationHandles.get(objectId);
+          if (rotationHandle) rotationHandle.visible = false;
+
+          const resizeHandle = this.resizeHandles.get(objectId);
+          if (resizeHandle) resizeHandle.visible = false;
+
+          return; // Skip updating positions
+        }
+
+        // Ensure visible for local objects or unlocked objects
+        box.visible = true;
+
         // Use local bounds (container-relative)
         const bounds = obj.getLocalBounds();
         box.clear();
@@ -1869,6 +2387,7 @@ export class CanvasManager {
         // Update rotation handle position (top-right corner)
         const rotationHandle = this.rotationHandles.get(objectId);
         if (rotationHandle) {
+          rotationHandle.visible = true; // Ensure visible for local objects
           // Use temp size if resizing, otherwise use actual bounds
           const width = obj.tempWidth || bounds.width;
           const height = obj.tempHeight || bounds.height;
@@ -1890,6 +2409,8 @@ export class CanvasManager {
         // Update resize handle position (bottom-right corner)
         const resizeHandle = this.resizeHandles.get(objectId);
         if (resizeHandle) {
+          resizeHandle.visible = true; // Ensure visible for local objects
+
           // Use temp size if resizing, otherwise use actual bounds
           const width = obj.tempWidth || bounds.width;
           const height = obj.tempHeight || bounds.height;
@@ -2848,6 +3369,169 @@ export class CanvasManager {
 
       this.objectLabels.clear();
     }
+  }
+
+  /**
+   * Show a subtle glow effect for remote transforms
+   * @param {number} objectId - Object ID
+   * @param {string} userId - User ID performing the transform
+   */
+  showRemoteTransformGlow(objectId, userId) {
+    // Remove existing glow if any
+    this.hideRemoteTransformGlow(objectId);
+
+    const pixiObject = this.objects.get(objectId);
+    if (!pixiObject) {
+      console.log('[CanvasManager] showRemoteTransformGlow: pixiObject not found for', objectId);
+      return;
+    }
+
+    // Get user's color from presence data
+    const userData = this.presences[userId];
+    const userColor = userData?.metas?.[0]?.color || '#3b82f6';
+    const glowColor = parseInt(userColor.replace('#', '0x'));
+
+    console.log('[CanvasManager] Creating glow for object', objectId, 'user', userId, 'color', userColor);
+
+    // Create glow graphics
+    const glow = new PIXI.Graphics();
+    const bounds = pixiObject.getLocalBounds();
+
+    // Draw subtle glow outline (larger than object, with transparency)
+    const glowPadding = 8;
+    glow.rect(
+      -glowPadding,
+      -glowPadding,
+      bounds.width + glowPadding * 2,
+      bounds.height + glowPadding * 2
+    ).stroke({ width: 3, color: glowColor, alpha: 0.6 });
+
+    // Position glow at object's position
+    glow.x = pixiObject.x;
+    glow.y = pixiObject.y;
+
+    // Match rotation and pivot of the object
+    glow.angle = pixiObject.angle;
+    glow.pivot.set(pixiObject.pivot.x, pixiObject.pivot.y);
+
+    // Store the color for later use during updates
+    glow.strokeColor = glowColor;
+    glow.userId = userId;
+
+    this.objectContainer.addChild(glow);
+    this.remoteTransformGlows.set(objectId, glow);
+  }
+
+  /**
+   * Hide the remote transform glow for an object
+   * @param {number} objectId - Object ID
+   */
+  hideRemoteTransformGlow(objectId) {
+    const glow = this.remoteTransformGlows.get(objectId);
+    if (glow) {
+      if (glow.parent) {
+        glow.parent.removeChild(glow);
+      }
+      glow.destroy();
+      this.remoteTransformGlows.delete(objectId);
+    }
+  }
+
+  /**
+   * Set interpolation target for smooth animation
+   * @param {number} objectId - Object ID
+   * @param {Object} target - Target values {x, y, width, height, rotation}
+   */
+  setInterpolationTarget(objectId, target) {
+    const pixiObject = this.objects.get(objectId);
+    if (!pixiObject) return;
+
+    const interpolationData = {
+      startTime: Date.now(),
+      duration: 150 // Animate over 150ms
+    };
+
+    // Only set position if it's being updated
+    if (target.x !== undefined || target.y !== undefined) {
+      interpolationData.startX = pixiObject.x;
+      interpolationData.startY = pixiObject.y;
+      interpolationData.targetX = target.x !== undefined ? target.x : pixiObject.x;
+      interpolationData.targetY = target.y !== undefined ? target.y : pixiObject.y;
+    }
+
+    // Only set size if it's being updated (and NOT during rotation-only updates)
+    if ((target.width !== undefined || target.height !== undefined) && !target.onlyRotation && !target.onlyPosition) {
+      const bounds = pixiObject.getLocalBounds();
+      interpolationData.startWidth = bounds.width;
+      interpolationData.startHeight = bounds.height;
+      interpolationData.targetWidth = target.width !== undefined ? target.width : bounds.width;
+      interpolationData.targetHeight = target.height !== undefined ? target.height : bounds.height;
+    }
+
+    // Only set rotation if it's being updated (and NOT during resize-only updates)
+    if (target.rotation !== undefined && !target.onlyResize && !target.onlyPosition) {
+      interpolationData.startRotation = pixiObject.angle || 0;
+      interpolationData.targetRotation = target.rotation;
+    }
+
+    this.interpolationTargets.set(objectId, interpolationData);
+  }
+
+  /**
+   * Update interpolations for smooth remote transforms (called each frame)
+   */
+  updateInterpolations() {
+    const now = Date.now();
+    const completedInterpolations = [];
+
+    this.interpolationTargets.forEach((target, objectId) => {
+      const pixiObject = this.objects.get(objectId);
+      if (!pixiObject) {
+        completedInterpolations.push(objectId);
+        return;
+      }
+
+      const elapsed = now - target.startTime;
+      const progress = Math.min(elapsed / target.duration, 1.0);
+
+      // Use easeOutCubic for smooth deceleration
+      const eased = 1 - Math.pow(1 - progress, 3);
+
+      // Interpolate position
+      if (target.targetX !== undefined && target.startX !== undefined) {
+        pixiObject.x = target.startX + (target.targetX - target.startX) * eased;
+      }
+      if (target.targetY !== undefined && target.startY !== undefined) {
+        pixiObject.y = target.startY + (target.targetY - target.startY) * eased;
+      }
+
+      // Interpolate rotation
+      if (target.targetRotation !== undefined && target.startRotation !== undefined) {
+        let rotationDelta = target.targetRotation - target.startRotation;
+        // Handle angle wrapping (shortest path)
+        if (rotationDelta > 180) rotationDelta -= 360;
+        if (rotationDelta < -180) rotationDelta += 360;
+        pixiObject.angle = target.startRotation + rotationDelta * eased;
+      }
+
+      // Interpolate size
+      if ((target.targetWidth !== undefined || target.targetHeight !== undefined) &&
+          pixiObject instanceof PIXI.Graphics) {
+        const width = target.startWidth + (target.targetWidth - target.startWidth) * eased;
+        const height = target.startHeight + (target.targetHeight - target.startHeight) * eased;
+        this.redrawGraphicsWithSize(pixiObject, width, height);
+      }
+
+      // Mark as complete if finished
+      if (progress >= 1.0) {
+        completedInterpolations.push(objectId);
+      }
+    });
+
+    // Clean up completed interpolations
+    completedInterpolations.forEach(objectId => {
+      this.interpolationTargets.delete(objectId);
+    });
   }
 
   /**

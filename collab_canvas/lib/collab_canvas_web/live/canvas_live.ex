@@ -301,11 +301,20 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     case Canvases.lock_object(object_id, user_id) do
       {:ok, locked_object} ->
-        # Broadcast to all connected clients
+        # Get user presence info for the locked object display
+        presences = Presence.list(socket.assigns.topic)
+        user_presence = Map.get(presences, user_id, %{})
+        user_meta = user_presence[:metas] |> List.first() || %{}
+        
+        # Broadcast to all connected clients with user info
         Phoenix.PubSub.broadcast(
           CollabCanvas.PubSub,
           socket.assigns.topic,
-          {:object_locked, locked_object}
+          {:object_locked, locked_object, %{
+            name: user_meta[:name] || "Unknown",
+            color: user_meta[:color] || "#000000",
+            avatar: user_meta[:avatar] || nil
+          }}
         )
 
         # Update local state
@@ -317,7 +326,14 @@ defmodule CollabCanvasWeb.CanvasLive do
         {:noreply,
          socket
          |> assign(:objects, objects)
-         |> push_event("object_locked", %{object: locked_object})}
+         |> push_event("object_locked", %{
+           object: locked_object,
+           user_info: %{
+             name: user_meta[:name] || "Unknown",
+             color: user_meta[:color] || "#000000",
+             avatar: user_meta[:avatar] || nil
+           }
+         })}
 
       {:error, :already_locked} ->
         {:noreply, put_flash(socket, :error, "Object is currently being edited by another user")}
@@ -447,12 +463,38 @@ defmodule CollabCanvasWeb.CanvasLive do
 
       _ ->
         # Object is unlocked or locked by current user, proceed with update
-        # Extract update attributes and convert data to JSON string if it's a map
+        # Get the existing object to merge partial data updates
+        existing_object = Canvases.get_object(object_id)
+
+        # Log warning if object not found during partial update (aids debugging)
+        if is_nil(existing_object) do
+          require Logger
+          Logger.warning("Object #{object_id} not found during partial update for user #{socket.assigns.current_user.id}")
+        end
+
+        # Extract update attributes and handle partial data updates
         data =
           case params["data"] do
-            data when is_map(data) and data != %{} -> Jason.encode!(data)
-            data when is_binary(data) -> data
-            nil -> nil
+            # Partial data update (map) - merge with existing data
+            data when is_map(data) and data != %{} ->
+              existing_data =
+                if existing_object && existing_object.data do
+                  Jason.decode!(existing_object.data)
+                else
+                  %{}
+                end
+
+              # Merge partial update with existing data
+              merged_data = Map.merge(existing_data, data)
+              Jason.encode!(merged_data)
+
+            # Full data replacement (string)
+            data when is_binary(data) ->
+              data
+
+            # No data update
+            nil ->
+              nil
           end
 
         attrs =
@@ -1582,18 +1624,20 @@ defmodule CollabCanvasWeb.CanvasLive do
   Handles object_locked broadcasts from PubSub (from other clients).
 
   Updates the object in local state to show it's locked and pushes to
-  JavaScript for visual feedback (grayed out, different cursor).
+  JavaScript for visual feedback (grayed out, different cursor) along with
+  user information (name, color, avatar) for display.
 
   ## Parameters
 
   - `locked_object` - The object that was locked with locked_by field set
+  - `user_info` - Map with user's name, color, and avatar for display
 
   ## Returns
 
   `{:noreply, socket}` with updated objects list and push_event to client.
   """
   @impl true
-  def handle_info({:object_locked, locked_object}, socket) do
+  def handle_info({:object_locked, locked_object, user_info}, socket) do
     objects =
       Enum.map(socket.assigns.objects, fn obj ->
         if obj.id == locked_object.id, do: locked_object, else: obj
@@ -1602,7 +1646,7 @@ defmodule CollabCanvasWeb.CanvasLive do
     {:noreply,
      socket
      |> assign(:objects, objects)
-     |> push_event("object_locked", %{object: locked_object})}
+     |> push_event("object_locked", %{object: locked_object, user_info: user_info})}
   end
 
   @doc """
@@ -2192,6 +2236,7 @@ defmodule CollabCanvasWeb.CanvasLive do
           data-objects={Jason.encode!(@objects)}
           data-presences={Jason.encode!(@presences)}
           data-user-id={@user_id}
+          data-canvas-id={@canvas_id}
           data-current-color={@current_color}
         >
           <!-- PixiJS will render here -->
