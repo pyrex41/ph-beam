@@ -11,6 +11,7 @@ primary_region = 'ord'
 
 [env]
   DATABASE_PATH = '/data/collab_canvas.db'
+  AI_PROVIDER = 'groq'
 
 [http_service]
   internal_port = 8080
