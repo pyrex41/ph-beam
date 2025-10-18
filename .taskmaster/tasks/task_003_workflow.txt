@@ -1,0 +1,43 @@
+# Task ID: 3
+# Title: Backend Implementation for Layer Management & Alignment Tools
+# Status: pending
+# Dependencies: 1
+# Priority: high
+# Description: Add z_index field to objects schema and leverage Layout.ex for alignment logic.
+# Details:
+Add a z_index float field to the objects schema. Utilize the existing Layout.ex module to compute alignment and distribution. This supports z-index control and alignment calculations. Pseudo-code: In Layout.ex, add functions like align_left(objects), distribute_evenly(objects) -> return updated positions.
+
+# Test Strategy:
+Ensure z_index values are correctly stored and retrieved, and alignment functions produce mathematically even spacing for 5+ objects.
+
+# Subtasks:
+## 1. Add z_index field to objects schema [pending]
+### Dependencies: None
+### Description: Modify the objects schema to include a new z_index float field for controlling layer order.
+### Details:
+Update the Ecto schema file for objects to add a z_index field of type :float, ensuring it can be null or have a default value. This field will store the z-index value for each object to manage layering.
+
+## 2. Create database migration for z_index field [pending]
+### Dependencies: 3.1
+### Description: Generate and run a migration to add the z_index column to the objects table.
+### Details:
+Create an Ecto migration file that adds a z_index column of type float to the objects table. Run the migration to update the database schema, ensuring backward compatibility if needed.
+
+## 3. Update Objects context to handle z_index [pending]
+### Dependencies: 3.2
+### Description: Modify the Objects context to support storing and retrieving z_index values.
+### Details:
+In the Objects context, update functions like create_object and update_object to accept and save z_index values. Ensure queries can filter or order by z_index for layer management.
+
+## 4. Add LiveView Handlers for Layer Management Actions [pending]
+### Dependencies: 3.3
+### Description: Implement event handlers for bring_to_front, send_to_back, align, distribute in CanvasLive.
+### Details:
+In canvas_live.ex, add handle_event for 'bring_to_front', 'send_to_back', 'align_objects', 'distribute_objects'. Call existing Layout.ex functions (distribute_horizontally, distribute_vertically, align_objects) and update z_index for layer actions. Broadcast changes via PubSub.
+
+## 5. Integrate z_index Updates with Layout Functions [pending]
+### Dependencies: 3.4
+### Description: Update existing Layout.ex functions to work with z_index values.
+### Details:
+Review existing Layout.ex functions (distribute_horizontally, distribute_vertically, align_objects, arrange_grid, circular_layout) to ensure they work correctly when objects have z_index. Add helper functions to calculate new z_index values for bring_to_front/send_to_back operations.
+

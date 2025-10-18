@@ -1,0 +1,49 @@
+# Task ID: 4
+# Title: Frontend Implementation for Layer Management & Alignment Tools
+# Status: pending
+# Dependencies: 2, 3
+# Priority: high
+# Description: Add UI for z-index actions and alignment tools in the toolbar or properties panel.
+# Details:
+Implement a right-click context menu with options like 'Bring to Front', 'Send to Back', 'Align Left', etc. Add buttons to the main toolbar or a new properties panel. Connect to backend for alignment logic. Ensure actions work on multi-selections and groups. Pseudo-code: On menu click, call pushEvent('align_left', selected_ids).
+
+# Test Strategy:
+Verify context menu appears on right-click, actions apply correctly to selections and groups, and distribution results in even spacing.
+
+# Subtasks:
+## 1. Create Right-Click Context Menu Component [pending]
+### Dependencies: None
+### Description: Build context menu UI component that appears on right-click.
+### Details:
+Create a context menu component (HTML/CSS or LiveView component) with menu items for layer and alignment actions. Position menu at mouse coordinates. Handle click-outside to close menu.
+
+## 2. Implement Bring to Front / Send to Back UI and Handlers [pending]
+### Dependencies: 4.1
+### Description: Add menu items and event handlers for z-index manipulation.
+### Details:
+Add 'Bring to Front', 'Bring Forward', 'Send Backward', 'Send to Back' to context menu. On click, calculate new z_index values and call pushEvent('update_z_index', {object_ids, action}). Frontend updates z-index immediately (optimistic UI).
+
+## 3. Implement Alignment Tools UI (Left/Center/Right/Top/Middle/Bottom) [pending]
+### Dependencies: 4.1
+### Description: Add alignment menu items and handlers.
+### Details:
+Add align submenu with: Align Left, Center, Right, Top, Middle, Bottom. On click, call pushEvent('align_objects', {object_ids, alignment_type}). Display alignment options only when 2+ objects selected.
+
+## 4. Implement Distribution Tools UI (Horizontal/Vertical) [pending]
+### Dependencies: 4.1
+### Description: Add distribution menu items and handlers.
+### Details:
+Add 'Distribute Horizontally' and 'Distribute Vertically' menu items. On click, call pushEvent('distribute_objects', {object_ids, direction}). Require 3+ objects for distribution.
+
+## 5. Add Toolbar Buttons for Common Actions [pending]
+### Dependencies: 4.2, 4.3, 4.4
+### Description: Add quick-access toolbar buttons for frequently used alignment/layer actions.
+### Details:
+Create toolbar section with icon buttons for common actions (align left/center/right, distribute). Wire to same pushEvent handlers as context menu. Disable when no/insufficient selection.
+
+## 6. Ensure Actions Work on Multi-Selections and Groups [pending]
+### Dependencies: 4.2, 4.3, 4.4
+### Description: Verify all layer/alignment actions work correctly with multi-selections and grouped objects.
+### Details:
+Test that layer and alignment actions handle: single objects, multi-selections, grouped objects, and mixed selections. Grouped objects should maintain their internal relationships during alignment.
+

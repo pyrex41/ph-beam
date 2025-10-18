@@ -1,0 +1,55 @@
+# Task ID: 2
+# Title: Frontend Implementation for Advanced Selection & Grouping
+# Status: pending
+# Dependencies: 1
+# Priority: high
+# Description: Implement multi-select via Shift+Click and draggable selection box, along with grouping and ungrouping functionality using Cmd/Ctrl+G.
+# Details:
+In canvas_manager.js, use PIXI.Graphics for lasso rendering. Add event listeners for Shift+Click and mouse drag to select multiple objects. Implement group/ungroup logic that calls backend via pushEvent to CanvasLive. Ensure grouped objects move, resize, and rotate as a unit. Pseudo-code: On selection, collect object IDs; on group, send 'create_group' event with IDs.
+
+# Test Strategy:
+Test selecting 10+ objects with both methods, verify grouped objects behave atomically, and check real-time syncing of changes.
+
+# Subtasks:
+## 1. Implement Shift+Click Multi-Selection [pending]
+### Dependencies: None
+### Description: Add event listener for Shift+Click to toggle selection of individual objects.
+### Details:
+In canvas_manager.js, add a click event listener that checks for shift key. When shift is held and an object is clicked, toggle its selection state. Maintain a Set of selected object IDs for efficient lookup.
+
+## 2. Implement Lasso/Drag Selection Box with PIXI.Graphics [pending]
+### Dependencies: None
+### Description: Create draggable selection box that selects all objects within its bounds.
+### Details:
+Add mousedown/mousemove/mouseup listeners for drag selection. On drag, create PIXI.Graphics rectangle showing selection area. On mouseup, calculate which objects intersect the selection box and add them to selection.
+
+## 3. Implement Selection State Management [pending]
+### Dependencies: 2.1, 2.2
+### Description: Create centralized selection state manager to track and update selected objects.
+### Details:
+Create a SelectionManager class or module that maintains the current selection Set. Provide methods: addToSelection(), removeFromSelection(), clearSelection(), getSelectedObjects(). Emit events when selection changes for UI updates.
+
+## 4. Implement Group Keyboard Shortcut (Cmd/Ctrl+G) [pending]
+### Dependencies: 2.3
+### Description: Add keyboard shortcut to create groups from selected objects.
+### Details:
+Add keydown listener for Cmd/Ctrl+G. When triggered with selected objects, call pushEvent('create_group', {object_ids: [...]}). Clear selection after grouping. Handle edge cases (empty selection, single object).
+
+## 5. Implement Ungroup Keyboard Shortcut (Cmd/Ctrl+Shift+G) [pending]
+### Dependencies: 2.4
+### Description: Add keyboard shortcut to ungroup selected grouped objects.
+### Details:
+Add keydown listener for Cmd/Ctrl+Shift+G. Identify which selected objects belong to groups, call pushEvent('ungroup', {group_ids: [...]}). Update selection to ungrouped objects.
+
+## 6. Implement Atomic Transformation for Grouped Objects [pending]
+### Dependencies: 2.4
+### Description: Ensure grouped objects move, resize, and rotate as a single unit.
+### Details:
+When transforming (drag/resize/rotate) an object that's in a group, apply the same transformation to all group members. Calculate transformation delta and apply to each grouped object's position/scale/rotation. Broadcast all changes together.
+
+## 7. Add Visual Indication for Grouped Objects [pending]
+### Dependencies: 2.4
+### Description: Draw visual indicators (border/badge) around grouped objects.
+### Details:
+Use PIXI.Graphics to draw a subtle border or corner badge on grouped objects. Update visual when objects are grouped/ungrouped. Use distinct color (e.g., blue outline) to indicate group membership.
+

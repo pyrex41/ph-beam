@@ -79,6 +79,7 @@ defmodule CollabCanvas.AI.Agent do
   require Logger
   alias CollabCanvas.Canvases
   alias CollabCanvas.AI.Tools
+  alias CollabCanvas.AI.ToolRegistry
   alias CollabCanvas.AI.ComponentBuilder
   alias CollabCanvas.AI.Layout
 
@@ -720,12 +721,49 @@ defmodule CollabCanvas.AI.Agent do
     {:error, :invalid_response_format}
   end
 
+  # NEW: Hybrid execution - tries ToolRegistry first, then falls back to legacy pattern matching
+  # This allows gradual migration from hardcoded tool execution to the plugin-based system.
+  defp execute_tool_call(%{name: name, input: input} = tool_call, canvas_id, current_color) do
+    context = %{canvas_id: canvas_id, current_color: current_color}
+
+    case ToolRegistry.get_tool(name) do
+      {:ok, tool_module} ->
+        # New plugin-based tool found - execute via registry
+        Logger.debug("Executing tool via registry: #{name}")
+
+        case tool_module.execute(input, context) do
+          {:ok, result} ->
+            %{
+              tool: name,
+              input: input,
+              result: {:ok, result}
+            }
+
+          {:error, _reason} = error ->
+            %{
+              tool: name,
+              input: input,
+              result: error
+            }
+        end
+
+      {:error, :not_found} ->
+        # Tool not in registry - fall back to legacy pattern matching below
+        Logger.debug("Tool not in registry, using legacy execution: #{name}")
+        execute_tool_call_legacy(tool_call, canvas_id, current_color)
+    end
+  end
+
+  # LEGACY: Pattern matching-based tool execution (being phased out)
+  # These clauses are kept for backward compatibility during the migration to the plugin system.
+  # Each tool should eventually be migrated to the new ToolRegistry system.
+
   # Executes a create_shape tool call to create a basic shape on the canvas.
   #
   # Supported shape types: rectangle, circle, triangle, etc.
   # Extracts width, height, color from input and creates object at specified x,y position.
   # Uses current_color as default if no color is specified in the input.
-  defp execute_tool_call(%{name: "create_shape", input: input}, canvas_id, current_color) do
+  defp execute_tool_call_legacy(%{name: "create_shape", input: input}, canvas_id, current_color) do
     # Check for both "fill" (from tool definition) and "color" (for backwards compatibility)
     ai_color = Map.get(input, "fill") || Map.get(input, "color")
     # Convert color names to hex if needed
@@ -761,7 +799,7 @@ defmodule CollabCanvas.AI.Agent do
   # Extracts text content, font_size (default 16), and color from input.
   # Creates text object at specified x,y position.
   # Uses current_color as default if no color is specified in the input.
-  defp execute_tool_call(%{name: "create_text", input: input}, canvas_id, current_color) do
+  defp execute_tool_call_legacy(%{name: "create_text", input: input}, canvas_id, current_color) do
     ai_color = Map.get(input, "color")
     # Convert color names to hex if needed
     final_color = normalize_color(ai_color || current_color)
@@ -794,7 +832,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a move_shape tool call to reposition an object on the canvas.
   #
   # Updates the object's position to the new x,y coordinates specified in input.
-  defp execute_tool_call(%{name: "move_shape", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "move_shape", input: input}, canvas_id, _current_color) do
     # Get object_id from either shape_id or object_id (for backwards compatibility)
     object_id = input["shape_id"] || input["object_id"]
 
@@ -829,7 +867,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Fetches existing object, merges width/height into data, and updates.
   # Returns error if object not found.
-  defp execute_tool_call(%{name: "resize_shape", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "resize_shape", input: input}, canvas_id, _current_color) do
     # Get object_id from either shape_id or object_id (for backwards compatibility)
     object_id = input["shape_id"] || input["object_id"]
 
@@ -879,7 +917,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a delete_object tool call to remove an object from the canvas.
   #
   # Deletes the object with the specified object_id.
-  defp execute_tool_call(%{name: "delete_object", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "delete_object", input: input}, _canvas_id, _current_color) do
     result = Canvases.delete_object(input["object_id"])
 
     %{
@@ -892,7 +930,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a list_objects tool call to retrieve all objects on the canvas.
   #
   # Fetches all objects and formats them for AI response with decoded data.
-  defp execute_tool_call(%{name: "list_objects", input: _input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "list_objects", input: _input}, canvas_id, _current_color) do
     objects = Canvases.list_objects(canvas_id)
 
     # Format objects for AI response
@@ -919,7 +957,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Supports multiple component types: login_form, navbar, card, button, sidebar.
   # Delegates to ComponentBuilder module with specified dimensions, theme, and content.
-  defp execute_tool_call(%{name: "create_component", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "create_component", input: input}, canvas_id, _current_color) do
     component_type = input["type"]
     x = input["x"]
     y = input["y"]
@@ -960,7 +998,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Currently returns success with generated group_id.
   # Full grouping logic would need to be implemented in Canvases context.
-  defp execute_tool_call(%{name: "group_objects", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "group_objects", input: input}, _canvas_id, _current_color) do
     # For now, just return success - actual grouping logic would need to be implemented in Canvases
     %{
       tool: "group_objects",
@@ -973,7 +1011,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Fetches existing object, calculates new dimensions (with aspect ratio if requested),
   # merges into data, and updates. Returns error if object not found.
-  defp execute_tool_call(%{name: "resize_object", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "resize_object", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1029,7 +1067,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a rotate_object tool call to rotate an object by a specified angle.
   #
   # Stores rotation angle and pivot point in object data. Frontend will apply the rotation.
-  defp execute_tool_call(%{name: "rotate_object", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "rotate_object", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1075,7 +1113,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a change_style tool call to modify styling properties of an object.
   #
   # Supports fill, stroke, stroke_width, opacity, font properties, and color changes.
-  defp execute_tool_call(%{name: "change_style", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "change_style", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1133,7 +1171,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes an update_text tool call to modify text content and formatting.
   #
   # Updates text content and any formatting options provided (font_size, font_family, color, etc.).
-  defp execute_tool_call(%{name: "update_text", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "update_text", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1189,7 +1227,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a move_object tool call to reposition an object using delta or absolute coordinates.
   #
   # Supports both relative movement (delta_x, delta_y) and absolute positioning (x, y).
-  defp execute_tool_call(%{name: "move_object", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "move_object", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1250,7 +1288,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Supports horizontal, vertical, grid, circular, and stack layouts.
   # Applies layout algorithms from CollabCanvas.AI.Layout module and batch updates all objects.
-  defp execute_tool_call(%{name: "arrange_objects", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "arrange_objects", input: input}, canvas_id, _current_color) do
     object_ids = input["object_ids"]
     layout_type = input["layout_type"]
 
@@ -1389,7 +1427,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a show_object_labels tool call to toggle display of visual labels on canvas objects.
   #
   # Returns a special result type that the frontend can handle to show/hide labels.
-  defp execute_tool_call(%{name: "show_object_labels", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "show_object_labels", input: input}, _canvas_id, _current_color) do
     show = Map.get(input, "show", true)
 
     %{
@@ -1402,7 +1440,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes an arrange_objects_with_pattern tool call for flexible programmatic layouts.
   #
   # Supports custom patterns like line, diagonal, wave, arc for arrangements not covered by standard layouts.
-  defp execute_tool_call(%{name: "arrange_objects_with_pattern", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "arrange_objects_with_pattern", input: input}, canvas_id, _current_color) do
     object_ids = input["object_ids"]
     pattern = input["pattern"]
 
@@ -1484,7 +1522,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a define_object_relationships tool call for constraint-based positioning.
   #
   # Uses declarative constraints (above, below, left_of, etc.) to calculate object positions.
-  defp execute_tool_call(%{name: "define_object_relationships", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(%{name: "define_object_relationships", input: input}, canvas_id, _current_color) do
     relationships = input["relationships"]
     apply_constraints = Map.get(input, "apply_constraints", true)
 
@@ -1571,11 +1609,11 @@ defmodule CollabCanvas.AI.Agent do
     end
   end
 
-  # Fallback handler for unknown tool calls.
+  # Fallback handler for unknown tool calls (legacy).
   #
   # Logs a warning and returns an error result for any unrecognized tool.
-  defp execute_tool_call(tool_call, _canvas_id, _current_color) do
-    Logger.warning("Unknown tool call: #{inspect(tool_call)}")
+  defp execute_tool_call_legacy(tool_call, _canvas_id, _current_color) do
+    Logger.warning("Unknown legacy tool call: #{inspect(tool_call)}")
 
     %{
       tool: "unknown",

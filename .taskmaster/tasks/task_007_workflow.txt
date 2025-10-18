@@ -1,0 +1,43 @@
+# Task ID: 7
+# Title: Frontend Implementation for High-Velocity Keyboard Shortcuts
+# Status: pending
+# Dependencies: 2
+# Priority: high
+# Description: Implement keyboard shortcuts for Duplicate, Nudge, Copy/Paste in the frontend.
+# Details:
+Add event listeners in app.js or a dedicated module for Cmd/Ctrl+D (duplicate), Arrow keys (nudge 1px), Shift+Arrow (10px), Cmd/Ctrl+C/V (copy/paste). Trigger pushEvent to CanvasLive. Ensure works on singles and groups. Pseudo-code: onKeyDown(e) { if (e.ctrlKey && e.key=='d') pushEvent('duplicate', selected_ids); }
+
+# Test Strategy:
+Measure response time <50ms, test duplicate and paste on single objects and groups.
+
+# Subtasks:
+## 1. Set up global keydown event listener [pending]
+### Dependencies: None
+### Description: Add a global event listener for keydown events in app.js or a dedicated module to capture keyboard inputs.
+### Details:
+Implement a keydown event listener on the document or a specific element that captures key presses, preventing default behavior where necessary, and routes to specific handler functions based on key combinations.
+
+## 2. Implement duplicate shortcut (Cmd/Ctrl+D) [pending]
+### Dependencies: 7.1
+### Description: Handle the Cmd/Ctrl+D key combination to duplicate selected objects or groups.
+### Details:
+In the keydown handler, check for ctrlKey (or metaKey for Cmd) and key 'd', then call pushEvent('duplicate', selected_ids) to trigger duplication on the backend via CanvasLive. Ensure it works for single objects and groups.
+
+## 3. Implement nudge shortcuts (Arrow keys and Shift+Arrow) [pending]
+### Dependencies: 7.1
+### Description: Handle arrow key presses for nudging selected objects 1px, and Shift+Arrow for 10px nudges.
+### Details:
+In the keydown handler, detect arrow keys (up, down, left, right), and if Shift is held, nudge by 10px instead of 1px. Call pushEvent('nudge', {direction, amount, selected_ids}) to update positions via CanvasLive. Apply to singles and groups.
+
+## 4. Implement copy shortcut (Cmd/Ctrl+C) [pending]
+### Dependencies: 7.1
+### Description: Handle the Cmd/Ctrl+C key combination to copy selected objects or groups to a clipboard buffer.
+### Details:
+In the keydown handler, check for ctrlKey (or metaKey) and key 'c', then store the selected_ids and their data in a local clipboard variable. Do not trigger backend yet, as copy is local preparation for paste.
+
+## 5. Implement paste shortcut (Cmd/Ctrl+V) [pending]
+### Dependencies: 7.1, 7.4
+### Description: Handle the Cmd/Ctrl+V key combination to paste copied objects or groups at a new position.
+### Details:
+In the keydown handler, check for ctrlKey (or metaKey) and key 'v', then if clipboard has data, call pushEvent('paste', {clipboard_data, position}) to create new instances via CanvasLive. Position near the original or at a default location. Ensure works for singles and groups.
+

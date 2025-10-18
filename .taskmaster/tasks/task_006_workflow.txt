@@ -1,0 +1,25 @@
+# Task ID: 6
+# Title: Frontend Implementation for Expanded Shape & Text Tools
+# Status: pending
+# Dependencies: 5
+# Priority: medium
+# Description: Add rendering logic for new shapes (stars, triangles, polygons) and enhanced text formatting in canvas_manager.js.
+# Details:
+Implement rendering for new shapes using PIXI.Graphics. Enhance text tool with properties panel for bold, italic, underline, font size. Update in real-time. Ensure AI agent supports these. Pseudo-code: In canvas_manager, if shape == 'polygon', draw with sides; for text, apply styles from data.
+
+# Test Strategy:
+Test creating and styling new shapes and text, verify real-time updates in properties panel, and confirm AI integration.
+
+# Subtasks:
+## 1. Implement Rendering Logic for New Shapes [pending]
+### Dependencies: None
+### Description: Add rendering logic for new shapes including stars, triangles, and polygons in canvas_manager.js using PIXI.Graphics.
+### Details:
+Modify canvas_manager.js to handle new shape types. For polygons, implement drawing based on number of sides. Ensure shapes render correctly and integrate with existing canvas functionality. Update the AI agent to support these shapes.
+
+## 2. Enhance Text Formatting with Properties Panel and Real-Time Updates [pending]
+### Dependencies: None
+### Description: Create/update properties panel LiveComponent for text formatting with bold, italic, underline, font size controls.
+### Details:
+Create or extend a PropertiesPanel LiveComponent. Add UI controls: bold/italic/underline toggle buttons, font size number input. On change, call handle_event to update selected text object's data field with new formatting. Push updates to canvas_manager.js via push_event for real-time preview. Ensure formatting is stored in data JSON: {fontWeight: 'bold', fontStyle: 'italic', textDecoration: 'underline', fontSize: 16}.
+

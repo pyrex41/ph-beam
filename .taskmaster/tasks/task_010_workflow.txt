@@ -1,0 +1,43 @@
+# Task ID: 10
+# Title: Frontend Implementation for Export to PNG/SVG
+# Status: pending
+# Dependencies: 2
+# Priority: low
+# Description: Add export functionality to render canvas or selection to PNG or SVG files.
+# Details:
+Use PixiJS to render to offscreen canvas, convert to data URL for download. Support exporting selections of 1+ objects. Pseudo-code: On export, get selected objects, render to canvas, create blob, trigger download.
+
+# Test Strategy:
+Export selections and full canvas, verify high-quality output matches canvas content.
+
+# Subtasks:
+## 1. Implement Selection Bounding Box Calculation [pending]
+### Dependencies: None
+### Description: Calculate bounding box that encompasses all selected objects.
+### Details:
+Create function to calculate min/max x/y coordinates of selected objects considering their positions and dimensions. Return bounding box {x, y, width, height} that contains all objects.
+
+## 2. Implement PNG Export with Offscreen Canvas [pending]
+### Dependencies: 10.1
+### Description: Render selection or full canvas to PNG file.
+### Details:
+Create function to: 1) Create offscreen PIXI.Application with bounding box dimensions, 2) Render selected objects (or all objects) to offscreen canvas, 3) Use app.renderer.extract.canvas() to get canvas, 4) Convert to blob with canvas.toBlob(), 5) Trigger download with URL.createObjectURL().
+
+## 3. Implement SVG Export [pending]
+### Dependencies: 10.1
+### Description: Convert PIXI objects to SVG elements for SVG export.
+### Details:
+Create function to convert each object type (rectangle, circle, text, etc.) to SVG elements. Build SVG document with proper viewBox from bounding box. Convert shapes to <rect>, <circle>, <text>, <polygon> etc. with correct attributes. Create SVG string and trigger download as .svg file.
+
+## 4. Add Export Button and Menu UI [pending]
+### Dependencies: None
+### Description: Create UI controls for triggering export.
+### Details:
+Add export button to toolbar or menu with dropdown for 'Export Selection' and 'Export All'. Show format options (PNG/SVG). Disable export when nothing is selected (for selection export). On click, call export function with appropriate parameters.
+
+## 5. Handle Full Canvas vs Selection Export Modes [pending]
+### Dependencies: 10.2, 10.3, 10.4
+### Description: Implement logic to export either selected objects or entire canvas.
+### Details:
+Create export function that accepts mode parameter ('selection' | 'all'). If selection mode, use selected objects and their bounding box. If all mode, use all objects on canvas and canvas dimensions. Pass appropriate object list to PNG/SVG export functions.
+

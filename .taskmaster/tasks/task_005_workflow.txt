@@ -1,0 +1,43 @@
+# Task ID: 5
+# Title: Backend Implementation for Expanded Shape & Text Tools
+# Status: pending
+# Dependencies: None
+# Priority: medium
+# Description: Update the data JSON blob in objects schema to store new shape and text properties, and update CollabCanvas.AI.Tools.
+# Details:
+Extend the data JSON blob to include properties like sides for polygons, fontWeight, fontStyle, textDecoration for text. Modify CollabCanvas.AI.Tools to recognize and handle these new properties. Pseudo-code: In schema, data: %{shape: 'polygon', sides: 5, text: %{weight: 'bold'}}; update AI tools to parse these.
+
+# Test Strategy:
+Confirm new properties are saved in the JSON blob and that AI tools can access and manipulate them.
+
+# Subtasks:
+## 1. Update Object Schema Validation for New Shape Types [pending]
+### Dependencies: None
+### Description: Add validation to accept new shape types: star, triangle, polygon.
+### Details:
+In lib/collab_canvas/canvases/object.ex, update the validate_inclusion for :type field to include 'star', 'triangle', 'polygon'. Document the expected data structure for each shape type in the schema comments.
+
+## 2. Document Data JSON Structure for New Shape Properties [pending]
+### Dependencies: 5.1
+### Description: Define and document the data JSON structure for new shapes (sides, points, etc.).
+### Details:
+Document in schema or separate file: polygon requires 'sides' (integer), star requires 'points' (integer) and 'innerRadius' (float), triangle requires 'orientation' (string). Add examples in comments.
+
+## 3. Update AI Tools to Handle New Shape Types [pending]
+### Dependencies: 5.2
+### Description: Extend CollabCanvas.AI.Tools to create and manipulate new shape types.
+### Details:
+In lib/collab_canvas/ai/tools.ex, update create_shape tool definition to accept new types. Add parameters for sides/points/innerRadius. Update execute_tool_call in agent.ex to handle new shape creation with proper data structure.
+
+## 4. Update AI Tools for Text Formatting Properties [pending]
+### Dependencies: None
+### Description: Extend AI tools to handle text formatting: fontWeight, fontStyle, textDecoration, fontSize.
+### Details:
+Update the modify_text or create_text tool in AI.Tools to accept formatting parameters. Ensure data JSON includes: fontWeight (bold/normal), fontStyle (italic/normal), textDecoration (underline/none), fontSize (number).
+
+## 5. Add Property Validation Logic [pending]
+### Dependencies: 5.2, 5.4
+### Description: Implement validation for new shape and text properties.
+### Details:
+Add validation functions that check: sides >= 3 for polygon, points >= 3 for star, fontSize > 0, fontWeight in ['normal', 'bold'], etc. Return descriptive errors for invalid values.
+

@@ -447,10 +447,18 @@ defmodule CollabCanvasWeb.CanvasLive do
 
       _ ->
         # Object is unlocked or locked by current user, proceed with update
-        # Extract update attributes and convert data to JSON string if it's a map
+        # If data is provided, merge it with existing data (don't replace entirely)
         data =
           case params["data"] do
-            data when is_map(data) and data != %{} -> Jason.encode!(data)
+            new_data when is_map(new_data) and new_data != %{} ->
+              # Get existing object and merge data
+              case Canvases.get_object(object_id) do
+                nil -> Jason.encode!(new_data)
+                object ->
+                  existing_data = if object.data, do: Jason.decode!(object.data), else: %{}
+                  merged_data = Map.merge(existing_data, new_data)
+                  Jason.encode!(merged_data)
+              end
             data when is_binary(data) -> data
             nil -> nil
           end

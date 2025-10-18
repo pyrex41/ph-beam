@@ -1,0 +1,61 @@
+# Task ID: 1
+# Title: Backend Implementation for Advanced Selection & Grouping
+# Status: pending
+# Dependencies: None
+# Priority: high
+# Description: Add support for grouping objects by implementing a group_id field in the objects schema and managing group creation in the Canvases context.
+# Details:
+Modify the objects schema to include a nullable UUID field called group_id. Update the Canvases context to handle group creation logic. This establishes the backend foundation for grouping objects into atomic units. Pseudo-code: In Canvases context, add function create_group(objects_list) -> generate UUID, assign to group_id for each object, save to DB.
+
+# Test Strategy:
+Verify that grouped objects are stored with the same group_id in the database and that the context correctly assigns and retrieves groups.
+
+# Subtasks:
+## 1. Modify Objects Schema to Include group_id Field [pending]
+### Dependencies: None
+### Description: Update the objects database schema to add a nullable UUID field named group_id to support grouping functionality.
+### Details:
+Locate the objects schema file in the database models. Add a new field 'group_id' of type UUID that is nullable. Ensure the schema change is documented for future migrations. This field will allow objects to be associated with a group.
+
+## 2. Create Database Migration for group_id Field [pending]
+### Dependencies: 1.1
+### Description: Generate and apply a database migration to add the group_id field to the objects table.
+### Details:
+Create a new migration file using the appropriate framework tool (e.g., Ecto for Elixir). The migration should add a nullable UUID column named 'group_id' to the objects table. Run the migration to update the database schema.
+
+## 3. Update Canvases Context to Include create_group Function [pending]
+### Dependencies: 1.2
+### Description: Extend the Canvases context to include a new function for creating groups of objects.
+### Details:
+Open the Canvases context file. Add a new function named 'create_group' that takes a list of objects as input. The function should generate a UUID for the group and prepare to assign it to the objects, setting up the logic for group management.
+
+## 4. Implement UUID Assignment and Database Saving Logic [pending]
+### Dependencies: 1.3
+### Description: Complete the create_group function to assign the UUID to each object's group_id and save changes to the database.
+### Details:
+In the create_group function, for each object in the list, set the group_id to the generated UUID. Use the context's save or update methods to persist the changes to the database. Ensure atomic transactions if multiple objects are involved.
+
+## 5. Add Retrieval Logic for Grouped Objects [pending]
+### Dependencies: 1.4
+### Description: Enhance the Canvases context to support retrieving objects by their group_id.
+### Details:
+Add a new function, such as 'get_grouped_objects(group_id)', to the Canvases context. This function should query the database to fetch all objects that share the specified group_id, enabling group-based operations.
+
+## 6. Add Ungroup Functionality to Canvases Context [pending]
+### Dependencies: 1.5
+### Description: Implement function to ungroup objects by clearing their group_id.
+### Details:
+Add ungroup_objects/1 function to Canvases context that takes a group_id, finds all objects with that group_id, sets their group_id to nil, and saves changes. Handle validation and return {:ok, objects} or {:error, reason}.
+
+## 7. Add LiveView Handlers for Group/Ungroup Events [pending]
+### Dependencies: 1.3, 1.6
+### Description: Implement event handlers for create_group and ungroup in CanvasLive.
+### Details:
+In canvas_live.ex, add handle_event for 'create_group' (calls create_group with object IDs) and 'ungroup' (calls ungroup_objects with group_id). Broadcast group/ungroup events via PubSub for real-time sync.
+
+## 8. Add Group Validation Logic [pending]
+### Dependencies: 1.3
+### Description: Implement validation to prevent invalid grouping operations.
+### Details:
+Add validation: prevent grouping objects from different canvases, prevent grouping already-grouped objects (or handle nested groups explicitly), require at least 2 objects for grouping. Return descriptive errors.
+

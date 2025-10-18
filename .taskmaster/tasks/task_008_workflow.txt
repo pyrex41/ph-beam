@@ -1,0 +1,61 @@
+# Task ID: 8
+# Title: Backend Implementation for Reusable Color Palettes
+# Status: pending
+# Dependencies: None
+# Priority: medium
+# Description: Create new palettes and palette_colors tables, and expand the ColorPalettes context.
+# Details:
+Add database tables: palettes (id, name, user_id) and palette_colors (palette_id, color_hex). Expand ColorPalettes context to manage creation, saving, and retrieval of palettes with 5-8 colors each. Pseudo-code: In context, create_palette(name, colors_list) -> insert into tables.
+
+# Test Strategy:
+Verify saving and retrieving at least 10 named palettes with correct colors.
+
+# Subtasks:
+## 1. Create Palette Schema [pending]
+### Dependencies: None
+### Description: Create Palette Ecto schema with id, name, user_id, timestamps.
+### Details:
+Create file lib/collab_canvas/color_palettes/palette.ex with schema: id (UUID), name (string), user_id (references users), timestamps. Add belongs_to :user and has_many :palette_colors associations.
+
+## 2. Create PaletteColor Schema [pending]
+### Dependencies: None
+### Description: Create PaletteColor schema with id, palette_id, color_hex, position.
+### Details:
+Create file lib/collab_canvas/color_palettes/palette_color.ex with schema: id (UUID), palette_id (references palettes), color_hex (string), position (integer for ordering). Add belongs_to :palette.
+
+## 3. Create Database Migrations for Palettes Tables [pending]
+### Dependencies: 8.1, 8.2
+### Description: Generate migrations to create palettes and palette_colors tables.
+### Details:
+Run 'mix ecto.gen.migration create_palettes_tables'. Create palettes table with columns: id, name, user_id, inserted_at, updated_at. Create palette_colors table with: id, palette_id, color_hex, position, timestamps. Add foreign keys and indexes.
+
+## 4. Add create_palette Function to ColorPalettes Context [pending]
+### Dependencies: 8.3
+### Description: Implement function to create a new palette with colors.
+### Details:
+In lib/collab_canvas/color_palettes.ex, add create_palette/2 function that takes user_id and palette attrs (name, colors list). Create palette and associated colors in a transaction. Return {:ok, palette} or {:error, changeset}.
+
+## 5. Add list_user_palettes Function [pending]
+### Dependencies: 8.3
+### Description: Implement function to retrieve all palettes for a user.
+### Details:
+Add list_user_palettes/1 function that queries palettes by user_id and preloads palette_colors ordered by position. Return list of palette structs with colors.
+
+## 6. Add update_palette and delete_palette Functions [pending]
+### Dependencies: 8.4
+### Description: Implement functions to update and delete palettes.
+### Details:
+Add update_palette/2 (palette_id, attrs) to update name or colors. Add delete_palette/1 (palette_id) with cascade delete of colors. Both should handle not_found errors.
+
+## 7. Add LiveView Handlers for Palette CRUD [pending]
+### Dependencies: 8.4, 8.5, 8.6
+### Description: Implement event handlers in CanvasLive for palette operations.
+### Details:
+In canvas_live.ex, add handle_event callbacks for: 'create_palette', 'update_palette', 'delete_palette', 'load_palettes'. Call ColorPalettes context functions and broadcast changes if needed.
+
+## 8. Add Validation for Palette Constraints [pending]
+### Dependencies: 8.4
+### Description: Validate palette name uniqueness per user and color count limits.
+### Details:
+In Palette changeset, add validations: name required and unique per user_id, maximum 10 palettes per user. In create_palette, validate 5-8 colors per palette. Return clear error messages.
+

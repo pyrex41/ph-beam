@@ -1,0 +1,53 @@
+{
+	"meta": {
+		"generatedAt": "2025-10-18T04:44:13.573Z",
+		"tasksAnalyzed": 5,
+		"totalTasks": 5,
+		"analysisCount": 5,
+		"thresholdScore": 5,
+		"projectName": "Taskmaster",
+		"usedResearch": false
+	},
+	"complexityAnalysis": [
+		{
+			"taskId": 1,
+			"taskTitle": "Implement AI Semantic Selection Tool",
+			"complexityScore": 8,
+			"recommendedSubtasks": 3,
+			"expansionPrompt": "Break down the implementation of the AI semantic selection tool into subtasks focusing on NLP parsing logic, object property filtering, integration with Agent.ex for context building, and initial testing for combined attributes.",
+			"reasoning": "High complexity due to AI/NLP integration, requiring natural language parsing, context reasoning, and modifications to core modules like Agent.ex and tools.ex, with significant testing for vague and combined attributes."
+		},
+		{
+			"taskId": 2,
+			"taskTitle": "Add Voice Command Input with Push-to-Talk",
+			"complexityScore": 6,
+			"recommendedSubtasks": 2,
+			"expansionPrompt": "Divide the voice command input feature into subtasks for creating the SpeechRecognition hook, implementing UI feedback states, and handling permissions and fallbacks.",
+			"reasoning": "Moderate complexity involving browser API integration (SpeechRecognition), real-time transcription, permission management, and cross-browser compatibility, with UI state handling adding some challenge."
+		},
+		{
+			"taskId": 3,
+			"taskTitle": "Implement AI Interaction History Panel",
+			"complexityScore": 5,
+			"recommendedSubtasks": 2,
+			"expansionPrompt": "Split the history panel implementation into subtasks for updating LiveView state management to store interaction history and modifying the template for scrollable rendering with docked input.",
+			"reasoning": "Medium complexity with Phoenix LiveView state management for session persistence, UI rendering of history, and ensuring responsiveness, but straightforward without heavy AI or external integrations."
+		},
+		{
+			"taskId": 4,
+			"taskTitle": "Configure Enter Key to Submit AI Command",
+			"complexityScore": 3,
+			"recommendedSubtasks": 0,
+			"expansionPrompt": "No expansion needed as this is a simple JavaScript hook for key event handling.",
+			"reasoning": "Low complexity, involving minimal JavaScript code for textarea event listeners, with no dependencies or advanced features, making it a quick implementation."
+		},
+		{
+			"taskId": 5,
+			"taskTitle": "Create AI Command Test Suite",
+			"complexityScore": 7,
+			"recommendedSubtasks": 4,
+			"expansionPrompt": "Expand the test suite creation into subtasks for setting up the test file structure, writing tests for creation commands, manipulation commands, layout commands, selection commands, and variations for robustness.",
+			"reasoning": "High effort due to creating 20-30 tests with variations, requiring mock setups and assertions on canvas state, plus dependencies on other tasks, but focused on testing rather than new features."
+		}
+	]
+}

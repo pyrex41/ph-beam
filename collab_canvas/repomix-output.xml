@@ -1033,7 +1033,7 @@ defmodule CollabCanvas.AI.Agent do
   # Private Functions
 
   # Retrieves the AI provider setting from environment variables.
-  # Returns "claude" or "groq". Defaults to "claude" if not set.
+  # Returns "claude", "groq", or "openai". Defaults to "claude" if not set.
   defp get_ai_provider do
     System.get_env("AI_PROVIDER") || "claude"
   end
@@ -1043,7 +1043,7 @@ defmodule CollabCanvas.AI.Agent do
     # Fetch all canvas objects
     all_objects = Canvases.list_objects(canvas_id)
 
-    # Generate human-readable display names (e.g., "Rectangle 1", "Circle 2")
+    # Generate human-readable display names (e.g., "Object 1", "Object 2")
     objects_with_names = generate_display_names(all_objects)
 
     # Build context with all objects and their display names
@@ -1079,7 +1079,7 @@ defmodule CollabCanvas.AI.Agent do
     DISAMBIGUATION RULES:
     - When the user refers to "that square", "the circle", "that rectangle", etc. without specifying which one:
       * If objects are currently selected, operate on the selected objects
-      * If no selection, ask the user to specify which one using the display names above (e.g., "Rectangle 1", "Circle 2")
+      * If no selection, ask the user to specify which one using the display names above (e.g., "Object 1", "Object 2")
       * If ambiguous and you must assume, use the most recently created object of that type
 
     - When referencing objects in tool calls, ALWAYS use the database ID (the number in parentheses), not the display name
@@ -1143,30 +1143,23 @@ defmodule CollabCanvas.AI.Agent do
     context
   end
 
-  # Generates human-readable display names for objects based on type and creation order
+  # Generates human-readable display names for objects based on creation order
   # Returns list of {object, "Display Name"} tuples
   defp generate_display_names(objects) do
-    # Sort by insertion time (oldest first)
-    sorted_objects = Enum.sort_by(objects, & &1.inserted_at, DateTime)
-
-    # Group by type and number them
-    sorted_objects
-    |> Enum.group_by(& &1.type)
-    |> Enum.flat_map(fn {type, type_objects} ->
-      type_objects
-      |> Enum.with_index(1)
-      |> Enum.map(fn {obj, index} ->
-        display_name = format_display_name(type, index)
-        {obj, display_name}
-      end)
+    # Sort by insertion time (oldest first) and number sequentially
+    objects
+    |> Enum.sort_by(& &1.inserted_at, DateTime)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {obj, index} ->
+      display_name = format_display_name(index)
+      {obj, display_name}
     end)
     |> Enum.sort_by(fn {obj, _name} -> obj.id end)
   end
 
-  # Formats a display name for an object (e.g., "Rectangle 1", "Circle 2")
-  defp format_display_name(type, index) do
-    type_str = type |> String.capitalize()
-    "#{type_str} #{index}"
+  # Formats a display name for an object (e.g., "Object 1", "Object 2")
+  defp format_display_name(index) do
+    "Object #{index}"
   end
 
   # Enriches tool calls by injecting selected object IDs into arrange_objects calls
@@ -1193,7 +1186,6 @@ defmodule CollabCanvas.AI.Agent do
       end
     end)
   end
-
 
   # Parses the Claude API response to extract tool calls or text responses.
   #
@@ -1289,10 +1281,17 @@ defmodule CollabCanvas.AI.Agent do
   # Extracts width, height, color from input and creates object at specified x,y position.
   # Uses current_color as default if no color is specified in the input.
   defp execute_tool_call(%{name: "create_shape", input: input}, canvas_id, current_color) do
+    # Check for both "fill" (from tool definition) and "color" (for backwards compatibility)
+    ai_color = Map.get(input, "fill") || Map.get(input, "color")
+    # Convert color names to hex if needed
+    final_color = normalize_color(ai_color || current_color)
+
+    Logger.info("create_shape: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
+
     data = %{
       width: input["width"],
       height: input["height"],
-      color: Map.get(input, "color", current_color)
+      color: final_color
     }
 
     attrs = %{
@@ -1318,10 +1317,16 @@ defmodule CollabCanvas.AI.Agent do
   # Creates text object at specified x,y position.
   # Uses current_color as default if no color is specified in the input.
   defp execute_tool_call(%{name: "create_text", input: input}, canvas_id, current_color) do
+    ai_color = Map.get(input, "color")
+    # Convert color names to hex if needed
+    final_color = normalize_color(ai_color || current_color)
+
+    Logger.info("create_text: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
+
     data = %{
       text: input["text"],
       font_size: Map.get(input, "font_size", 16),
-      color: Map.get(input, "color", current_color)
+      color: final_color
     }
 
     attrs = %{
@@ -1344,7 +1349,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a move_shape tool call to reposition an object on the canvas.
   #
   # Updates the object's position to the new x,y coordinates specified in input.
-  defp execute_tool_call(%{name: "move_shape", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "move_shape", input: input}, canvas_id, _current_color) do
     # Get object_id from either shape_id or object_id (for backwards compatibility)
     object_id = input["shape_id"] || input["object_id"]
 
@@ -1357,6 +1362,17 @@ defmodule CollabCanvas.AI.Agent do
 
     result = Canvases.update_object(object_id, attrs)
 
+    # Broadcast update to all connected clients for real-time sync
+    case result do
+      {:ok, updated_object} ->
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          "canvas:#{canvas_id}",
+          {:object_updated, updated_object}
+        )
+      _ -> :ok
+    end
+
     %{
       tool: "move_shape",
       input: input,
@@ -1368,7 +1384,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Fetches existing object, merges width/height into data, and updates.
   # Returns error if object not found.
-  defp execute_tool_call(%{name: "resize_shape", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "resize_shape", input: input}, canvas_id, _current_color) do
     # Get object_id from either shape_id or object_id (for backwards compatibility)
     object_id = input["shape_id"] || input["object_id"]
 
@@ -1395,6 +1411,17 @@ defmodule CollabCanvas.AI.Agent do
         }
 
         result = Canvases.update_object(object_id, attrs)
+
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
 
         %{
           tool: "resize_shape",
@@ -1501,7 +1528,7 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Fetches existing object, calculates new dimensions (with aspect ratio if requested),
   # merges into data, and updates. Returns error if object not found.
-  defp execute_tool_call(%{name: "resize_object", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "resize_object", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1535,6 +1562,17 @@ defmodule CollabCanvas.AI.Agent do
         attrs = %{data: Jason.encode!(updated_data)}
         result = Canvases.update_object(input["object_id"], attrs)
 
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
+
         %{
           tool: "resize_object",
           input: input,
@@ -1546,7 +1584,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a rotate_object tool call to rotate an object by a specified angle.
   #
   # Stores rotation angle and pivot point in object data. Frontend will apply the rotation.
-  defp execute_tool_call(%{name: "rotate_object", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "rotate_object", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1570,6 +1608,17 @@ defmodule CollabCanvas.AI.Agent do
         attrs = %{data: Jason.encode!(updated_data)}
         result = Canvases.update_object(input["object_id"], attrs)
 
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
+
         %{
           tool: "rotate_object",
           input: input,
@@ -1581,7 +1630,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a change_style tool call to modify styling properties of an object.
   #
   # Supports fill, stroke, stroke_width, opacity, font properties, and color changes.
-  defp execute_tool_call(%{name: "change_style", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "change_style", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1617,6 +1666,17 @@ defmodule CollabCanvas.AI.Agent do
         attrs = %{data: Jason.encode!(updated_data)}
         result = Canvases.update_object(input["object_id"], attrs)
 
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
+
         %{
           tool: "change_style",
           input: input,
@@ -1628,7 +1688,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes an update_text tool call to modify text content and formatting.
   #
   # Updates text content and any formatting options provided (font_size, font_family, color, etc.).
-  defp execute_tool_call(%{name: "update_text", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "update_text", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1661,6 +1721,17 @@ defmodule CollabCanvas.AI.Agent do
           attrs = %{data: Jason.encode!(updated_data)}
           result = Canvases.update_object(input["object_id"], attrs)
 
+          # Broadcast update to all connected clients for real-time sync
+          case result do
+            {:ok, updated_object} ->
+              Phoenix.PubSub.broadcast(
+                CollabCanvas.PubSub,
+                "canvas:#{canvas_id}",
+                {:object_updated, updated_object}
+              )
+            _ -> :ok
+          end
+
           %{
             tool: "update_text",
             input: input,
@@ -1673,7 +1744,7 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a move_object tool call to reposition an object using delta or absolute coordinates.
   #
   # Supports both relative movement (delta_x, delta_y) and absolute positioning (x, y).
-  defp execute_tool_call(%{name: "move_object", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call(%{name: "move_object", input: input}, canvas_id, _current_color) do
     case Canvases.get_object(input["object_id"]) do
       nil ->
         %{
@@ -1710,6 +1781,17 @@ defmodule CollabCanvas.AI.Agent do
         }
 
         result = Canvases.update_object(input["object_id"], attrs)
+
+        # Broadcast update to all connected clients for real-time sync
+        case result do
+          {:ok, updated_object} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:object_updated, updated_object}
+            )
+          _ -> :ok
+        end
 
         %{
           tool: "move_object",
@@ -2055,6 +2137,112 @@ defmodule CollabCanvas.AI.Agent do
       input: tool_call,
       result: {:error, :unknown_tool}
     }
+  end
+
+  # Normalizes color input from AI - converts color names to hex format.
+  #
+  # Accepts both hex format (e.g., "#FF0000" or "FF0000") and common color names
+  # (e.g., "red", "green", "blue"). Returns a hex color string with "#" prefix.
+  #
+  # ## Parameters
+  #   * `color` - Color string (hex format or color name)
+  #
+  # ## Returns
+  #   * Hex color string with "#" prefix (e.g., "#FF0000")
+  #
+  # ## Examples
+  #
+  #     iex> normalize_color("#FF0000")
+  #     "#FF0000"
+  #
+  #     iex> normalize_color("red")
+  #     "#FF0000"
+  #
+  #     iex> normalize_color("green")
+  #     "#00FF00"
+  defp normalize_color(color) when is_binary(color) do
+    # If already in hex format, return as-is (with # prefix)
+    cond do
+      String.starts_with?(color, "#") ->
+        String.upcase(color)
+
+      String.match?(color, ~r/^[0-9A-Fa-f]{6}$/) ->
+        "#" <> String.upcase(color)
+
+      true ->
+        # Convert color name to hex
+        color_name = String.downcase(String.trim(color))
+        color_name_to_hex(color_name)
+    end
+  end
+
+  defp normalize_color(nil), do: "#000000"
+  defp normalize_color(_), do: "#000000"
+
+  # Converts common color names to hex format.
+  #
+  # Provides a comprehensive mapping of color names to their hex representations.
+  # Returns black (#000000) for unknown color names.
+  defp color_name_to_hex(name) do
+    case name do
+      # Primary colors
+      "red" -> "#FF0000"
+      "green" -> "#00FF00"
+      "blue" -> "#0000FF"
+
+      # Secondary colors
+      "yellow" -> "#FFFF00"
+      "cyan" -> "#00FFFF"
+      "magenta" -> "#FF00FF"
+
+      # Common colors
+      "orange" -> "#FFA500"
+      "purple" -> "#800080"
+      "pink" -> "#FFC0CB"
+      "brown" -> "#A52A2A"
+      "gray" -> "#808080"
+      "grey" -> "#808080"
+
+      # Light/Dark variants
+      "light gray" -> "#D3D3D3"
+      "light grey" -> "#D3D3D3"
+      "dark gray" -> "#A9A9A9"
+      "dark grey" -> "#A9A9A9"
+      "light blue" -> "#ADD8E6"
+      "dark blue" -> "#00008B"
+      "light green" -> "#90EE90"
+      "dark green" -> "#006400"
+      "light red" -> "#FF6B6B"
+      "dark red" -> "#8B0000"
+
+      # Extended colors
+      "lime" -> "#00FF00"
+      "navy" -> "#000080"
+      "teal" -> "#008080"
+      "maroon" -> "#800000"
+      "olive" -> "#808000"
+      "aqua" -> "#00FFFF"
+      "fuchsia" -> "#FF00FF"
+      "silver" -> "#C0C0C0"
+      "gold" -> "#FFD700"
+      "indigo" -> "#4B0082"
+      "violet" -> "#EE82EE"
+      "coral" -> "#FF7F50"
+      "salmon" -> "#FA8072"
+      "turquoise" -> "#40E0D0"
+      "khaki" -> "#F0E68C"
+      "plum" -> "#DDA0DD"
+      "crimson" -> "#DC143C"
+
+      # Grayscale
+      "black" -> "#000000"
+      "white" -> "#FFFFFF"
+
+      # Unknown color - default to black
+      _ ->
+        Logger.warning("Unknown color name: #{name}, defaulting to black")
+        "#000000"
+    end
   end
 end
 </file>
@@ -4088,7 +4276,7 @@ defmodule CollabCanvas.AI.Tools do
       },
       %{
         name: "arrange_objects",
-        description: "Arranges selected objects in specified layout pattern (horizontal, vertical, grid, circular)",
+        description: "Arranges selected objects in standard layout patterns. Use this for CIRCULAR, horizontal, vertical, grid, and stack layouts. For circular layouts, objects are distributed evenly around a circle at a specified radius. For custom patterns like diagonal lines, waves, or arcs, use arrange_objects_with_pattern instead.",
         input_schema: %{
           type: "object",
           properties: %{
@@ -4142,7 +4330,7 @@ defmodule CollabCanvas.AI.Tools do
       },
       %{
         name: "arrange_objects_with_pattern",
-        description: "Arrange objects using flexible programmatic patterns. POWERFUL AND FLEXIBLE - use this for ANY custom arrangement beyond basic grids: 'triangular', 'pyramid', 'zigzag', 'wave', 'arc', 'diagonal', 'scattered', 'circular arc', etc. Supports line, diagonal, wave, and arc patterns with customizable parameters. For complex shapes like triangles or pyramids, use 'line' or 'diagonal' patterns with appropriate start positions and spacing, or make multiple calls to build up the shape row by row.",
+        description: "Arrange objects using flexible programmatic patterns like diagonal lines, waves, and arcs. NOTE: For CIRCULAR layouts (objects distributed around a circle), use arrange_objects with layout_type='circular' instead. This tool is for: 'triangular', 'pyramid', 'zigzag', 'wave', 'arc', 'diagonal line', etc. Supports line, diagonal, wave, and arc patterns with customizable parameters. For complex shapes like triangles or pyramids, use 'line' or 'diagonal' patterns with appropriate start positions and spacing, or make multiple calls to build up the shape row by row.",
         input_schema: %{
           type: "object",
           properties: %{
@@ -4500,8 +4688,8 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
 
   Tracks a user's color history, favorites, and default color for canvas objects.
   Each user can have:
-  - Up to 10 recent colors (automatically managed LIFO queue)
-  - Unlimited favorite colors (manually pinned)
+  - Up to 8 recent colors (automatically managed LIFO queue)
+  - Up to 20 favorite colors (manually pinned)
   - One default color for new objects
   """
 
@@ -4510,7 +4698,8 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
 
   alias CollabCanvas.Accounts.User
 
-  @max_recent_colors 10
+  @max_recent_colors 8
+  @max_favorite_colors 20
 
   schema "user_color_preferences" do
     belongs_to :user, User
@@ -4526,7 +4715,7 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
 
   Validates:
   - user_id is required
-  - recent_colors is valid JSON array with max 10 hex color strings
+  - recent_colors is valid JSON array with max 8 hex color strings
   - favorite_colors is valid JSON array of hex color strings
   - default_color is a valid hex color string
   """
@@ -4589,7 +4778,10 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   def decode_recent_colors(preference) do
     case Jason.decode(preference.recent_colors) do
       {:ok, colors} -> colors
-      {:error, _} -> []
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Failed to decode recent colors for user #{preference.user_id}: #{inspect(reason)}")
+        []
     end
   end
 
@@ -4599,18 +4791,25 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   def decode_favorite_colors(preference) do
     case Jason.decode(preference.favorite_colors) do
       {:ok, colors} -> colors
-      {:error, _} -> []
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Failed to decode favorite colors for user #{preference.user_id}: #{inspect(reason)}")
+        []
     end
   end
 
   @doc """
-  Adds a color to recent colors (LIFO queue with max 10 items).
+  Adds a color to recent colors (LIFO queue with max 8 items).
   Removes duplicates and moves existing color to front.
   """
   def add_to_recent(recent_colors_json, new_color) when is_binary(recent_colors_json) and is_binary(new_color) do
     recent_colors =
       case Jason.decode(recent_colors_json) do
         {:ok, colors} when is_list(colors) -> colors
+        {:error, reason} ->
+          require Logger
+          Logger.warning("Failed to decode recent colors when adding new color: #{inspect(reason)}")
+          []
         _ -> []
       end
 
@@ -6007,7 +6206,7 @@ defmodule CollabCanvas.ColorPalettes do
 
   @doc """
   Adds a color to the user's recent colors list.
-  Automatically manages the LIFO queue (max 10 colors).
+  Automatically manages the LIFO queue (max 8 colors).
 
   ## Parameters
     * `user_id` - The ID of the user
@@ -6053,6 +6252,10 @@ defmodule CollabCanvas.ColorPalettes do
     favorite_colors =
       case Jason.decode(preferences.favorite_colors) do
         {:ok, colors} when is_list(colors) -> colors
+        {:error, reason} ->
+          require Logger
+          Logger.warning("Failed to decode favorite colors for user #{user_id}: #{inspect(reason)}")
+          []
         _ -> []
       end
 
@@ -6060,8 +6263,15 @@ defmodule CollabCanvas.ColorPalettes do
     if color in favorite_colors do
       {:ok, preferences}
     else
-      updated_favorites = Jason.encode!([color | favorite_colors])
-      update_preferences(preferences, %{favorite_colors: updated_favorites})
+      # Check if we've reached the maximum favorite colors limit
+      max_favorites = 20
+
+      if length(favorite_colors) >= max_favorites do
+        {:error, :max_favorites_reached}
+      else
+        updated_favorites = Jason.encode!([color | favorite_colors])
+        update_preferences(preferences, %{favorite_colors: updated_favorites})
+      end
     end
   end
 
@@ -6088,6 +6298,10 @@ defmodule CollabCanvas.ColorPalettes do
     favorite_colors =
       case Jason.decode(preferences.favorite_colors) do
         {:ok, colors} when is_list(colors) -> colors
+        {:error, reason} ->
+          require Logger
+          Logger.warning("Failed to decode favorite colors for user #{user_id}: #{inspect(reason)}")
+          []
         _ -> []
       end
 
@@ -7678,7 +7892,7 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
   Features:
   - HSL sliders for intuitive color selection
   - Hex color input
-  - Recent colors (last 10 used)
+  - Recent colors (last 8 used)
   - Favorite colors (pinned)
   - Default color setting
   """
@@ -7696,7 +7910,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
      |> assign(:hex_color, "#FF0000")
      |> assign(:recent_colors, [])
      |> assign(:favorite_colors, [])
-     |> assign(:default_color, "#000000")}
+     |> assign(:default_color, "#000000")
+     |> assign(:save_timer, nil)}
   end
 
   @impl true
@@ -7722,15 +7937,32 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
   end
 
   @impl true
+  def update(%{current_color: color} = assigns, socket) when is_binary(color) do
+    # Update only the color (called via send_update from parent LiveView)
+    # Don't reload user preferences, just update the color display
+    {h, s, l} = hex_to_hsl(color)
+
+    {:ok,
+     socket
+     |> assign(assigns)
+     |> assign(:hue, h)
+     |> assign(:saturation, s)
+     |> assign(:lightness, l)
+     |> assign(:hex_color, color)}
+  end
+
+  @impl true
   def handle_event("hue_changed", %{"value" => hue_str}, socket) do
     hue = String.to_integer(hue_str)
     hex_color = hsl_to_hex(hue, socket.assigns.saturation, socket.assigns.lightness)
 
-    # Auto-save as default color
-    ColorPalettes.set_default_color(socket.assigns.user_id, hex_color)
-    send(self(), {:color_changed, hex_color, socket.assigns.user_id})
+    # Send to parent immediately for UI updates
+    send(self(), {:color_changed, hex_color, "user_#{socket.assigns.user_id}"})
 
-    {:noreply, socket |> assign(:hue, hue) |> assign(:hex_color, hex_color) |> assign(:default_color, hex_color)}
+    # Schedule debounced database save
+    socket = schedule_save(socket, hex_color)
+
+    {:noreply, socket |> assign(:hue, hue) |> assign(:hex_color, hex_color)}
   end
 
   @impl true
@@ -7738,11 +7970,13 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     saturation = String.to_integer(sat_str)
     hex_color = hsl_to_hex(socket.assigns.hue, saturation, socket.assigns.lightness)
 
-    # Auto-save as default color
-    ColorPalettes.set_default_color(socket.assigns.user_id, hex_color)
-    send(self(), {:color_changed, hex_color, socket.assigns.user_id})
+    # Send to parent immediately for UI updates
+    send(self(), {:color_changed, hex_color, "user_#{socket.assigns.user_id}"})
 
-    {:noreply, socket |> assign(:saturation, saturation) |> assign(:hex_color, hex_color) |> assign(:default_color, hex_color)}
+    # Schedule debounced database save
+    socket = schedule_save(socket, hex_color)
+
+    {:noreply, socket |> assign(:saturation, saturation) |> assign(:hex_color, hex_color)}
   end
 
   @impl true
@@ -7750,11 +7984,13 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     lightness = String.to_integer(light_str)
     hex_color = hsl_to_hex(socket.assigns.hue, socket.assigns.saturation, lightness)
 
-    # Auto-save as default color
-    ColorPalettes.set_default_color(socket.assigns.user_id, hex_color)
-    send(self(), {:color_changed, hex_color, socket.assigns.user_id})
+    # Send to parent immediately for UI updates
+    send(self(), {:color_changed, hex_color, "user_#{socket.assigns.user_id}"})
 
-    {:noreply, socket |> assign(:lightness, lightness) |> assign(:hex_color, hex_color) |> assign(:default_color, hex_color)}
+    # Schedule debounced database save
+    socket = schedule_save(socket, hex_color)
+
+    {:noreply, socket |> assign(:lightness, lightness) |> assign(:hex_color, hex_color)}
   end
 
   @impl true
@@ -7765,17 +8001,18 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     case valid_hex?(normalized) do
       true ->
         {h, s, l} = hex_to_hsl(normalized)
-        # Auto-save as default color
-        ColorPalettes.set_default_color(socket.assigns.user_id, normalized)
-        send(self(), {:color_changed, normalized, socket.assigns.user_id})
+        # Send to parent immediately for UI updates
+        send(self(), {:color_changed, normalized, "user_#{socket.assigns.user_id}"})
+
+        # Schedule debounced database save
+        socket = schedule_save(socket, normalized)
 
         {:noreply,
          socket
          |> assign(:hex_color, normalized)
          |> assign(:hue, h)
          |> assign(:saturation, s)
-         |> assign(:lightness, l)
-         |> assign(:default_color, normalized)}
+         |> assign(:lightness, l)}
 
       false ->
         {:noreply, socket}
@@ -7784,26 +8021,46 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
 
   @impl true
   def handle_event("select_color", %{"color" => color}, socket) do
-    {h, s, l} = hex_to_hsl(color)
-    # Auto-save as default color
-    ColorPalettes.set_default_color(socket.assigns.user_id, color)
-    send(self(), {:color_changed, color, socket.assigns.user_id})
+    require Logger
 
-    {:noreply,
-     socket
-     |> assign(:hex_color, color)
-     |> assign(:hue, h)
-     |> assign(:saturation, s)
-     |> assign(:lightness, l)
-     |> assign(:default_color, color)}
+    try do
+      Logger.info("select_color event - user_id: #{inspect(socket.assigns.user_id)}, color: #{color}")
+      {h, s, l} = hex_to_hsl(color)
+
+      # Save immediately for deliberate color selection (not slider dragging)
+      result = ColorPalettes.set_default_color(socket.assigns.user_id, color)
+      Logger.info("set_default_color result: #{inspect(result)}")
+
+      send(self(), {:color_changed, color, "user_#{socket.assigns.user_id}"})
+
+      {:noreply,
+       socket
+       |> assign(:hex_color, color)
+       |> assign(:hue, h)
+       |> assign(:saturation, s)
+       |> assign(:lightness, l)
+       |> assign(:default_color, color)}
+    rescue
+      e ->
+        Logger.error("Error in select_color: #{inspect(e)}")
+        Logger.error("Stacktrace: #{inspect(__STACKTRACE__)}")
+        Logger.error("Socket assigns: #{inspect(socket.assigns)}")
+        {:noreply, socket}
+    end
   end
 
   @impl true
   def handle_event("add_to_favorites", _params, socket) do
-    {:ok, _} = ColorPalettes.add_favorite_color(socket.assigns.user_id, socket.assigns.hex_color)
-    favorite_colors = ColorPalettes.get_favorite_colors(socket.assigns.user_id)
+    case ColorPalettes.add_favorite_color(socket.assigns.user_id, socket.assigns.hex_color) do
+      {:ok, _} ->
+        favorite_colors = ColorPalettes.get_favorite_colors(socket.assigns.user_id)
+        {:noreply, assign(socket, :favorite_colors, favorite_colors)}
 
-    {:noreply, assign(socket, :favorite_colors, favorite_colors)}
+      {:error, :max_favorites_reached} ->
+        # Send error message to parent LiveView
+        send(self(), {:show_error, "Maximum of 20 favorite colors reached"})
+        {:noreply, socket}
+    end
   end
 
   @impl true
@@ -7815,24 +8072,39 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
   end
 
   @impl true
-  def handle_event("set_as_default", _params, socket) do
-    {:ok, _} = ColorPalettes.set_default_color(socket.assigns.user_id, socket.assigns.hex_color)
-
-    {:noreply, assign(socket, :default_color, socket.assigns.hex_color)}
-  end
-
-  @impl true
   def handle_event("picker_square_changed", %{"saturation" => sat_str, "lightness" => light_str}, socket) do
     saturation = String.to_float(sat_str) |> round()
     lightness = String.to_float(light_str) |> round()
 
     hex_color = hsl_to_hex(socket.assigns.hue, saturation, lightness)
 
-    # Auto-save as default color
-    ColorPalettes.set_default_color(socket.assigns.user_id, hex_color)
-    send(self(), {:color_changed, hex_color, socket.assigns.user_id})
+    # Send to parent immediately for UI updates
+    send(self(), {:color_changed, hex_color, "user_#{socket.assigns.user_id}"})
 
-    {:noreply, socket |> assign(:saturation, saturation) |> assign(:lightness, lightness) |> assign(:hex_color, hex_color) |> assign(:default_color, hex_color)}
+    # Schedule debounced database save
+    socket = schedule_save(socket, hex_color)
+
+    {:noreply, socket |> assign(:saturation, saturation) |> assign(:lightness, lightness) |> assign(:hex_color, hex_color)}
+  end
+
+  @impl true
+  def handle_info({:save_default_color, color}, socket) do
+    # Save to database after debounce delay
+    ColorPalettes.set_default_color(socket.assigns.user_id, color)
+    {:noreply, socket |> assign(:save_timer, nil) |> assign(:default_color, color)}
+  end
+
+  # Helper function to schedule debounced save
+  defp schedule_save(socket, color) do
+    # Cancel existing timer if any
+    if socket.assigns.save_timer do
+      Process.cancel_timer(socket.assigns.save_timer)
+    end
+
+    # Schedule new save after 500ms
+    timer_ref = Process.send_after(self(), {:save_default_color, color}, 500)
+
+    assign(socket, :save_timer, timer_ref)
   end
 
   @impl true
@@ -7891,7 +8163,7 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
               max="360"
               value={@hue}
               class="w-full h-3 rounded-lg appearance-none cursor-pointer"
-              style="background: linear-gradient(to right, #FF0000 0%, #FFFF00 17%, #00FF00 33%, #00FFFF 50%, #0000FF 67%, #FF00FF 83%, #FF0000 100%)"
+              style="background: linear-gradient(to right, #FF0000 0%, #FFFF00 16.67%, #00FF00 33.33%, #00FFFF 50%, #0000FF 66.67%, #FF00FF 83.33%, #FF0000 100%)"
             />
           </form>
         </div>
@@ -7982,33 +8254,38 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     min_val = Enum.min([r, g, b])
     delta = max_val - min_val
 
+    # Lightness
     l = (max_val + min_val) / 2
 
-    s =
-      cond do
-        delta == 0 -> 0
-        l < 0.5 -> delta / (max_val + min_val)
-        true -> delta / (2.0 - max_val - min_val)
-      end
+    # Saturation
+    s = if delta == 0 do
+      0
+    else
+      delta / (1 - abs(2 * l - 1))
+    end
 
-    h =
+    # Hue
+    h = if delta == 0 do
+      0
+    else
       cond do
-        delta == 0 ->
-          0
-
         max_val == r ->
-          60 * rem(trunc((g - b) / delta * 6), 6)
+          h_temp = (g - b) / delta
+          h_temp = if g < b, do: h_temp + 6, else: h_temp
+          60 * h_temp
 
         max_val == g ->
           60 * ((b - r) / delta + 2)
 
-        true ->
+        max_val == b ->
           60 * ((r - g) / delta + 4)
       end
+    end
 
+    h = rem(round(h), 360)
     h = if h < 0, do: h + 360, else: h
 
-    {round(h), round(s * 100), round(l * 100)}
+    {h, round(s * 100), round(l * 100)}
   end
 
   defp hsl_to_hex(h, s, l) do
@@ -8017,24 +8294,31 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
   end
 
   defp hsl_to_rgb(h, s, l) do
+    # Standard HSL to RGB conversion algorithm
     c = (1 - abs(2 * l - 1)) * s
-    h_prime = h / 60
-    x = c * (1 - abs(rem(trunc(h_prime), 2) - 1))
+    h_normalized = h / 60
+    x = c * (1 - abs(:math.fmod(h_normalized, 2) - 1))
     m = l - c / 2
 
-    {r1, g1, b1} =
-      cond do
-        h_prime < 1 -> {c, x, 0}
-        h_prime < 2 -> {x, c, 0}
-        h_prime < 3 -> {0, c, x}
-        h_prime < 4 -> {0, x, c}
-        h_prime < 5 -> {x, 0, c}
-        true -> {c, 0, x}
-      end
+    {r1, g1, b1} = case trunc(h_normalized) do
+      0 -> {c, x, 0}
+      1 -> {x, c, 0}
+      2 -> {0, c, x}
+      3 -> {0, x, c}
+      4 -> {x, 0, c}
+      5 -> {c, 0, x}
+      6 -> {c, 0, 0}  # Handle 360 degrees
+      _ -> {0, 0, 0}
+    end
 
     r = round((r1 + m) * 255)
     g = round((g1 + m) * 255)
     b = round((b1 + m) * 255)
+
+    # Clamp values to 0-255
+    r = max(0, min(255, r))
+    g = max(0, min(255, g))
+    b = max(0, min(255, b))
 
     {r, g, b}
   end
@@ -9530,10 +9814,18 @@ defmodule CollabCanvasWeb.CanvasLive do
 
       _ ->
         # Object is unlocked or locked by current user, proceed with update
-        # Extract update attributes and convert data to JSON string if it's a map
+        # If data is provided, merge it with existing data (don't replace entirely)
         data =
           case params["data"] do
-            data when is_map(data) and data != %{} -> Jason.encode!(data)
+            new_data when is_map(new_data) and new_data != %{} ->
+              # Get existing object and merge data
+              case Canvases.get_object(object_id) do
+                nil -> Jason.encode!(new_data)
+                object ->
+                  existing_data = if object.data, do: Jason.decode!(object.data), else: %{}
+                  merged_data = Map.merge(existing_data, new_data)
+                  Jason.encode!(merged_data)
+              end
             data when is_binary(data) -> data
             nil -> nil
           end
@@ -9801,6 +10093,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
       # Start async task with timeout (Task.async automatically links to current process)
       current_color = socket.assigns.current_color
+      Logger.info("CanvasLive: Passing current_color to AI: #{current_color}")
       task =
         Task.async(fn ->
           Agent.execute_command(command, canvas_id, selected_ids, current_color: current_color)
@@ -10046,6 +10339,32 @@ defmodule CollabCanvasWeb.CanvasLive do
     else
       {:noreply, socket}
     end
+  end
+
+  @doc """
+  Handles debounced color save messages from the ColorPicker component.
+
+  The ColorPicker component sends this message after a 500ms debounce delay
+  when users interact with color sliders. This prevents excessive database
+  writes during rapid slider movements.
+
+  Note: The actual save is performed by the ColorPicker component itself,
+  but messages sent via Process.send_after(self(), ...) in a LiveComponent
+  are delivered to the parent LiveView. We handle it here to prevent crashes.
+
+  ## Parameters
+
+  - `color` - Hex color string to save as default
+
+  ## Returns
+
+  `{:noreply, socket}` - No state changes needed, save handled by component.
+  """
+  @impl true
+  def handle_info({:save_default_color, _color}, socket) do
+    # Debounced save is handled by ColorPicker component
+    # This handler just prevents FunctionClauseError when message arrives
+    {:noreply, socket}
   end
 
   @doc """
@@ -10403,22 +10722,15 @@ defmodule CollabCanvasWeb.CanvasLive do
 
   @doc false
   # Private helper to generate human-readable labels for canvas objects.
-  # Groups objects by type and numbers them sequentially.
-  # Returns a map of object_id => display_name (e.g., "Rectangle 1", "Circle 2")
+  # Numbers all objects sequentially by creation time.
+  # Returns a map of object_id => display_name (e.g., "Object 1", "Object 2")
   defp generate_object_labels(objects) do
-    # Group objects by type and count occurrences
+    # Sort by insertion time (oldest first) and number sequentially
     objects
-    |> Enum.group_by(& &1.type)
-    |> Enum.flat_map(fn {type, objects_of_type} ->
-      # Sort by ID to maintain consistent ordering
-      objects_of_type
-      |> Enum.sort_by(& &1.id)
-      |> Enum.with_index(1)
-      |> Enum.map(fn {object, index} ->
-        # Capitalize type name (e.g., "rectangle" -> "Rectangle")
-        type_name = String.capitalize(type)
-        {object.id, "#{type_name} #{index}"}
-      end)
+    |> Enum.sort_by(& &1.inserted_at, DateTime)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {object, index} ->
+      {object.id, "Object #{index}"}
     end)
     |> Map.new()
   end
@@ -10710,7 +11022,8 @@ defmodule CollabCanvasWeb.CanvasLive do
           <span class="absolute right-1 bottom-1 text-[10px] font-bold opacity-50">D</span>
         </button>
 
-        <div class="flex-1"></div>
+        <!-- Divider -->
+        <div class="w-10 h-px bg-gray-300 my-2"></div>
 
         <!-- Color Picker Button -->
         <button
@@ -10732,6 +11045,8 @@ defmodule CollabCanvasWeb.CanvasLive do
             />
           </svg>
         </button>
+
+        <div class="flex-1"></div>
 
         <!-- Keyboard shortcuts help -->
         <div class="text-[10px] text-gray-400 text-center px-1 leading-tight mb-2">
@@ -14076,7 +14391,7 @@ defmodule CollabCanvas.Repo.Migrations.CreateUserColorPreferences do
   def change do
     create table(:user_color_preferences) do
       add :user_id, references(:users, on_delete: :delete_all), null: false
-      add :recent_colors, :text, default: "[]", null: false  # JSON array of up to 10 recent hex colors
+      add :recent_colors, :text, default: "[]", null: false  # JSON array of up to 8 recent hex colors
       add :favorite_colors, :text, default: "[]", null: false  # JSON array of pinned favorite hex colors
       add :default_color, :string, default: "#000000", null: false  # Default color for new objects
 
