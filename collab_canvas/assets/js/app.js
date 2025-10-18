@@ -29,6 +29,10 @@ import CanvasManager from "./hooks/canvas_manager"
 import ComponentDraggable from "./hooks/component_draggable"
 // Import Color Picker hook
 import { ColorPickerHook } from "./hooks/color_picker"
+// Import Voice Input hook for AI commands
+import VoiceInput from "./hooks/voice_input"
+// Import AI Command Input hook for Enter key handling
+import AICommandInput from "./hooks/ai_command_input"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
@@ -37,7 +41,9 @@ const liveSocket = new LiveSocket("/live", Socket, {
   hooks: {
     CanvasRenderer: CanvasManager,
     ComponentDraggable: ComponentDraggable,
-    ColorPicker: ColorPickerHook
+    ColorPicker: ColorPickerHook,
+    VoiceInput: VoiceInput,
+    AICommandInput: AICommandInput
   },
 })
 

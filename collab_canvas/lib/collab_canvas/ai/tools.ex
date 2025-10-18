@@ -655,6 +655,48 @@ defmodule CollabCanvas.AI.Tools do
           },
           required: ["relationships"]
         }
+      },
+      %{
+        name: "select_objects_by_description",
+        description: "Select objects on the canvas using natural language descriptions. This tool allows selecting objects by their visual properties (color, size, shape), spatial position (top-left, center, bottom), or combinations of attributes. Use this when the user asks to 'select all red circles', 'select the small objects', 'select objects in the top-left corner', etc. Returns the IDs of objects matching the description.",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            description: %{
+              type: "string",
+              description: "Natural language description of objects to select (e.g., 'all small red circles', 'objects in the top-left', 'blue rectangles larger than 100px')"
+            },
+            objects_context: %{
+              type: "array",
+              description: "List of all canvas objects with their properties for filtering",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: %{type: "integer"},
+                  type: %{type: "string"},
+                  position: %{
+                    type: "object",
+                    properties: %{
+                      x: %{type: "number"},
+                      y: %{type: "number"}
+                    }
+                  },
+                  data: %{
+                    type: "object",
+                    properties: %{
+                      width: %{type: "number"},
+                      height: %{type: "number"},
+                      color: %{type: "string"},
+                      text: %{type: "string"},
+                      font_size: %{type: "number"}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          required: ["description", "objects_context"]
+        }
       }
     ]
   end
