@@ -600,13 +600,14 @@ defmodule CollabCanvas.AI.Agent do
     CRITICAL EXECUTION RULES:
     - NEVER ask for permission or confirmation - JUST DO IT
     - NEVER respond with "Should I proceed?" or "Let me know if you'd like me to..." - EXECUTE IMMEDIATELY
-    - When creating shapes/objects: Calculate positions and CALL create_shape/create_text tools multiple times
-    - For grids/patterns: Make MULTIPLE tool calls in sequence with calculated x,y positions for each object
-    - Example: "10x10 grid of circles" = make 100 create_shape tool calls with calculated positions (0,0), (50,0), (100,0)... etc.
+    - When creating MULTIPLE IDENTICAL shapes: Use the 'count' parameter in create_shape tool (e.g., count=10 for "10 circles")
+    - The count parameter will automatically arrange shapes horizontally with appropriate spacing
+    - For grids or custom patterns: Use arrange_objects or arrange_objects_with_pattern tools after creating the shapes
+    - Example: "10 purple circles" = create_shape with type="circle", fill="#800080", count=10
 
     WHEN TO RESPOND WITH TEXT VS TOOLS:
     - USE TOOLS (ALWAYS PREFERRED): For any spatial arrangement, creation, or manipulation task
-    - MAKE MULTIPLE TOOL CALLS: When creating patterns or grids, calculate positions and call create_shape for each object
+    - USE create_shape with 'count' parameter: For creating multiple identical shapes (much better than multiple tool calls)
     - USE TEXT ONLY WHEN: Truly impossible with available tools (e.g., "delete the database") or genuinely ambiguous (e.g., "that one" with no context)
     - You CAN show visual labels using show_object_labels tool when users ask to see IDs or names
 
@@ -761,29 +762,75 @@ defmodule CollabCanvas.AI.Agent do
     # Convert color names to hex if needed
     final_color = normalize_color(ai_color || current_color)
 
-    Logger.info("create_shape: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
+    # Get count parameter (default to 1)
+    count = Map.get(input, "count", 1)
 
-    data = %{
-      width: input["width"],
-      height: input["height"],
-      color: final_color
-    }
+    Logger.info("create_shape: count=#{count}, current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
 
-    attrs = %{
-      position: %{
-        x: input["x"],
-        y: input["y"]
-      },
-      data: Jason.encode!(data)
-    }
+    # If creating multiple shapes
+    if count > 1 do
+      # Calculate spacing (default to 1.5x width if not specified)
+      base_width = input["width"] || 50
+      default_spacing = base_width * 1.5
+      spacing = Map.get(input, "spacing", default_spacing)
 
-    result = Canvases.create_object(canvas_id, input["type"], attrs)
+      # Create all shapes
+      results = Enum.map(0..(count - 1), fn index ->
+        data = %{
+          width: input["width"],
+          height: input["height"],
+          color: final_color
+        }
 
-    %{
-      tool: "create_shape",
-      input: input,
-      result: result
-    }
+        # Calculate position for this shape
+        x_offset = index * (base_width + spacing)
+        attrs = %{
+          position: %{
+            x: input["x"] + x_offset,
+            y: input["y"]
+          },
+          data: Jason.encode!(data)
+        }
+
+        Canvases.create_object(canvas_id, input["type"], attrs)
+      end)
+
+      # Return summary of all created objects
+      successful = Enum.count(results, fn
+        {:ok, _} -> true
+        _ -> false
+      end)
+
+      %{
+        tool: "create_shape",
+        input: input,
+        result: {:ok, %{count: successful, total: count}},
+        created_objects: results
+      }
+    else
+      # Single shape creation (original behavior)
+      data = %{
+        width: input["width"],
+        height: input["height"],
+        color: final_color
+      }
+
+      attrs = %{
+        position: %{
+          x: input["x"],
+          y: input["y"]
+        },
+        data: Jason.encode!(data)
+      }
+
+      result = Canvases.create_object(canvas_id, input["type"], attrs)
+
+      %{
+        tool: "create_shape",
+        input: input,
+        result: result
+      }
+    end
   end
 
   # Executes a create_text tool call to add a text object to the canvas.

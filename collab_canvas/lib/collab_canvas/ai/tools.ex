@@ -133,7 +133,7 @@ defmodule CollabCanvas.AI.Tools do
     [
       %{
         name: "create_shape",
-        description: "Create a shape (rectangle or circle) on the canvas",
+        description: "Create one or more shapes (rectangle or circle) on the canvas. For creating multiple shapes, use the count parameter to specify how many to create. Multiple shapes will be arranged in a horizontal line with automatic spacing.",
         input_schema: %{
           type: "object",
           properties: %{
@@ -144,11 +144,11 @@ defmodule CollabCanvas.AI.Tools do
             },
             x: %{
               type: "number",
-              description: "X coordinate for the shape position"
+              description: "X coordinate for the first shape position (or only shape if count=1)"
             },
             y: %{
               type: "number",
-              description: "Y coordinate for the shape position"
+              description: "Y coordinate for the first shape position (or only shape if count=1)"
             },
             width: %{
               type: "number",
@@ -172,6 +172,18 @@ defmodule CollabCanvas.AI.Tools do
               type: "number",
               description: "Width of the stroke",
               default: 2
+            },
+            count: %{
+              type: "integer",
+              description: "Number of shapes to create (default: 1). When count > 1, shapes are arranged horizontally with spacing based on their width.",
+              default: 1,
+              minimum: 1,
+              maximum: 100
+            },
+            spacing: %{
+              type: "number",
+              description: "Spacing between multiple shapes in pixels (default: 1.5x the width). Only used when count > 1.",
+              default: nil
             }
           },
           required: ["type", "x", "y", "width"]
