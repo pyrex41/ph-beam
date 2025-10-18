@@ -37,7 +37,15 @@ export class CanvasManager {
     this.rotationHandles = new Map(); // Map of objectId -> rotation handle graphics
     this.isRotating = false;
     this.rotatingObject = null;
-    this.rotationStartAngle = 0;
+    this.rotationStartAngle = 0; // Object's angle when rotation started
+    this.rotationGrabAngle = 0; // Angle from object center to mouse when grab started
+
+    // Resize handle state
+    this.resizeHandles = new Map(); // Map of objectId -> resize handle graphics
+    this.isResizing = false;
+    this.resizingObject = null;
+    this.resizeStartSize = { width: 0, height: 0 };
+    this.resizeStartMousePos = { x: 0, y: 0 }; // Mouse position when resize started
 
     // Pan and zoom state
     this.isPanning = false;
@@ -291,6 +299,9 @@ export class CanvasManager {
     // Apply rotation if specified (Task 8: rotate_object support)
     if (data.rotation !== undefined && data.rotation !== 0) {
       this.applyRotation(graphics, data.rotation, data.pivot_point, width, height);
+    } else {
+      // Initialize pivot to center even if not rotated (prevents null pivot errors)
+      graphics.pivot.set(width / 2, height / 2);
     }
 
     // Apply opacity if specified (Task 8: change_style support)
@@ -328,6 +339,9 @@ export class CanvasManager {
     // Apply rotation if specified (Task 8: rotate_object support)
     if (data.rotation !== undefined && data.rotation !== 0) {
       this.applyRotation(graphics, data.rotation, data.pivot_point, radius * 2, radius * 2);
+    } else {
+      // Initialize pivot to center even if not rotated (prevents null pivot errors)
+      graphics.pivot.set(radius, radius);
     }
 
     // Apply opacity if specified (Task 8: change_style support)
@@ -360,9 +374,12 @@ export class CanvasManager {
     text.y = position.y;
 
     // Apply rotation if specified (Task 8: rotate_object support)
+    const bounds = text.getBounds();
     if (data.rotation !== undefined && data.rotation !== 0) {
-      const bounds = text.getBounds();
       this.applyRotation(text, data.rotation, data.pivot_point, bounds.width, bounds.height);
+    } else {
+      // Initialize pivot to center even if not rotated (prevents null pivot errors)
+      text.pivot.set(bounds.width / 2, bounds.height / 2);
     }
 
     // Apply opacity if specified (Task 8: change_style support)
@@ -468,6 +485,16 @@ export class CanvasManager {
 
     // Skip updates for objects currently being dragged by this user
     if (this.isDragging && this.selectedObjects.has(pixiObject)) {
+      return;
+    }
+
+    // Skip updates for objects currently being rotated by this user
+    if (this.isRotating && this.rotatingObject === pixiObject) {
+      return;
+    }
+
+    // Skip updates for objects currently being resized by this user
+    if (this.isResizing && this.resizingObject === pixiObject) {
       return;
     }
 
@@ -762,7 +789,7 @@ export class CanvasManager {
     const position = this.getMousePosition(event);
 
     // Update cursor position for other users (throttled to avoid spam)
-    if (!this.isPanning && !this.isRotating && (!this.lastCursorUpdate || Date.now() - this.lastCursorUpdate > 50)) {
+    if (!this.isPanning && !this.isRotating && !this.isResizing && (!this.lastCursorUpdate || Date.now() - this.lastCursorUpdate > 50)) {
       this.emit('cursor_move', { position });
       this.lastCursorUpdate = Date.now();
     }
@@ -789,14 +816,23 @@ export class CanvasManager {
       // Debounced culling during pan (disabled for now)
       // this.debouncedCullUpdate();
     } else if (this.isRotating && this.rotatingObject) {
-      // Calculate rotation angle from mouse position
+      // Calculate rotation angle using relative rotation from grab point
       const obj = this.rotatingObject;
-      const objCenter = { x: obj.x, y: obj.y };
 
-      // Calculate angle between object center and mouse position
-      const dx = position.x - objCenter.x;
-      const dy = position.y - objCenter.y;
-      let angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+      // Calculate current angle from object center to mouse
+      const dx = position.x - obj.x;
+      const dy = position.y - obj.y;
+      const currentAngle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+
+      // Calculate the delta from the initial grab angle
+      let angleDelta = currentAngle - this.rotationGrabAngle;
+
+      // Handle angle wrapping (if delta crosses 0/360 boundary)
+      if (angleDelta > 180) angleDelta -= 360;
+      if (angleDelta < -180) angleDelta += 360;
+
+      // Apply delta to the object's starting rotation
+      let angle = this.rotationStartAngle + angleDelta;
 
       // Snap to 15-degree increments if Shift key is held
       if (event.shiftKey) {
@@ -815,6 +851,29 @@ export class CanvasManager {
       if (selectionBox) {
         selectionBox.angle = angle;
       }
+    } else if (this.isResizing && this.resizingObject) {
+      // Calculate new size using relative mouse movement
+      const obj = this.resizingObject;
+
+      // Calculate how much the mouse has moved from initial grab position
+      const mouseDx = position.x - this.resizeStartMousePos.x;
+      const mouseDy = position.y - this.resizeStartMousePos.y;
+
+      // For rotated objects, transform mouse delta into object's local space
+      const angleRad = -(obj.angle * Math.PI / 180); // Negative to reverse rotation
+      const localDx = mouseDx * Math.cos(angleRad) - mouseDy * Math.sin(angleRad);
+      const localDy = mouseDx * Math.sin(angleRad) + mouseDy * Math.cos(angleRad);
+
+      // Apply delta * 2 to starting size (movement affects both sides from center)
+      const newWidth = Math.max(20, this.resizeStartSize.width + localDx * 2);
+      const newHeight = Math.max(20, this.resizeStartSize.height + localDy * 2);
+
+      // Store the new size temporarily (will be saved to server on mouseup)
+      obj.tempWidth = newWidth;
+      obj.tempHeight = newHeight;
+
+      // Update selection box to match new size
+      this.updateSelectionBoxes();
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
@@ -890,6 +949,36 @@ export class CanvasManager {
 
       this.isRotating = false;
       this.rotatingObject = null;
+      return;
+    }
+
+    // Handle resize finish
+    if (this.isResizing && this.resizingObject) {
+      const obj = this.resizingObject;
+
+      // Get the object's ID and current data
+      const objectData = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+      if (objectData) {
+        const [objectId, pixiObj] = objectData;
+
+        // Emit update with new size
+        this.emit('update_object', {
+          object_id: objectId,
+          data: {
+            width: Math.round(obj.tempWidth || this.resizeStartSize.width),
+            height: Math.round(obj.tempHeight || this.resizeStartSize.height)
+          }
+        });
+      }
+
+      // Reset resize handle cursor
+      const handle = this.resizeHandles.get(obj.objectId);
+      if (handle) {
+        handle.cursor = 'nwse-resize';
+      }
+
+      this.isResizing = false;
+      this.resizingObject = null;
       return;
     }
 
@@ -1096,12 +1185,19 @@ export class CanvasManager {
 
     // Only create if size is reasonable (at least 10px)
     if (width > 10 && height > 10) {
-      const position = {
+      // Calculate top-left corner
+      const topLeft = {
         x: Math.min(this.createStart.x, endPosition.x),
         y: Math.min(this.createStart.y, endPosition.y)
       };
 
       if (this.currentTool === 'rectangle') {
+        // Objects have center pivot, so position represents center point
+        const position = {
+          x: topLeft.x + width / 2,
+          y: topLeft.y + height / 2
+        };
+
         this.emit('create_object', {
           type: 'rectangle',
           position: position,
@@ -1115,6 +1211,13 @@ export class CanvasManager {
         });
       } else if (this.currentTool === 'circle') {
         const radius = Math.max(width, height) / 2;
+
+        // Objects have center pivot, so position represents center point
+        const position = {
+          x: topLeft.x + radius,
+          y: topLeft.y + radius
+        };
+
         this.emit('create_object', {
           type: 'circle',
           position: position,
@@ -1184,9 +1287,18 @@ export class CanvasManager {
       handle.destroy({ children: true });
     });
 
+    // Remove all resize handles
+    this.resizeHandles.forEach((handle, objectId) => {
+      if (handle.parent) {
+        handle.parent.removeChild(handle);
+      }
+      handle.destroy({ children: true });
+    });
+
     this.selectedObjects.clear();
     this.selectionBoxes.clear();
     this.rotationHandles.clear();
+    this.resizeHandles.clear();
   }
 
   /**
@@ -1228,13 +1340,23 @@ export class CanvasManager {
       }
 
       // Remove rotation handle
-      const handle = this.rotationHandles.get(object.objectId);
-      if (handle) {
-        if (handle.parent) {
-          handle.parent.removeChild(handle);
+      const rotationHandle = this.rotationHandles.get(object.objectId);
+      if (rotationHandle) {
+        if (rotationHandle.parent) {
+          rotationHandle.parent.removeChild(rotationHandle);
         }
-        handle.destroy({ children: true });
+        rotationHandle.destroy({ children: true });
         this.rotationHandles.delete(object.objectId);
+      }
+
+      // Remove resize handle
+      const resizeHandle = this.resizeHandles.get(object.objectId);
+      if (resizeHandle) {
+        if (resizeHandle.parent) {
+          resizeHandle.parent.removeChild(resizeHandle);
+        }
+        resizeHandle.destroy({ children: true });
+        this.resizeHandles.delete(object.objectId);
       }
     } else {
       // Add to selection
@@ -1258,11 +1380,19 @@ export class CanvasManager {
     }
 
     // Remove existing rotation handle
-    const existingHandle = this.rotationHandles.get(object.objectId);
-    if (existingHandle) {
-      this.objectContainer.removeChild(existingHandle);
-      existingHandle.destroy();
+    const existingRotationHandle = this.rotationHandles.get(object.objectId);
+    if (existingRotationHandle) {
+      this.objectContainer.removeChild(existingRotationHandle);
+      existingRotationHandle.destroy();
       this.rotationHandles.delete(object.objectId);
+    }
+
+    // Remove existing resize handle
+    const existingResizeHandle = this.resizeHandles.get(object.objectId);
+    if (existingResizeHandle) {
+      this.objectContainer.removeChild(existingResizeHandle);
+      existingResizeHandle.destroy();
+      this.resizeHandles.delete(object.objectId);
     }
 
     const selectionBox = new PIXI.Graphics();
@@ -1289,25 +1419,34 @@ export class CanvasManager {
     this.objectContainer.addChild(selectionBox);
     this.selectionBoxes.set(object.objectId, selectionBox);
 
-    // Create rotation handle (small circle above the object)
+    // Create rotation handle at top-right corner
     const rotationHandle = new PIXI.Graphics();
 
     // Draw circle with white fill and blue border
-    rotationHandle.circle(0, 0, 8)
+    rotationHandle.circle(0, 0, 10)
       .fill({ color: 0xffffff })
       .stroke({ width: 2, color: 0x3b82f6 });
 
-    // Draw a small rotation icon inside
-    rotationHandle.moveTo(-3, 0)
-      .lineTo(3, 0)
-      .moveTo(0, -3)
-      .lineTo(0, 3)
-      .stroke({ width: 1, color: 0x3b82f6 });
+    // Draw rotation arrow icon (curved arrow)
+    const arrowRadius = 4;
+    rotationHandle.arc(0, 0, arrowRadius, -Math.PI * 0.75, Math.PI * 0.25)
+      .stroke({ width: 1.5, color: 0x3b82f6 });
 
-    // Position rotation handle above the object (20px above the top edge)
-    const handleDistance = 20;
-    rotationHandle.x = object.x;
-    rotationHandle.y = object.y - bounds.height / 2 - handleDistance;
+    // Arrow head
+    rotationHandle.moveTo(arrowRadius * Math.cos(Math.PI * 0.25), arrowRadius * Math.sin(Math.PI * 0.25))
+      .lineTo(arrowRadius * Math.cos(Math.PI * 0.25) + 2, arrowRadius * Math.sin(Math.PI * 0.25) - 2)
+      .moveTo(arrowRadius * Math.cos(Math.PI * 0.25), arrowRadius * Math.sin(Math.PI * 0.25))
+      .lineTo(arrowRadius * Math.cos(Math.PI * 0.25) + 2, arrowRadius * Math.sin(Math.PI * 0.25) + 1)
+      .stroke({ width: 1.5, color: 0x3b82f6 });
+
+    // Position at top-right corner, accounting for object rotation
+    const rotLocalX = bounds.width / 2 + 2;
+    const rotLocalY = -bounds.height / 2 - 2;
+    const rotAngleRad = object.angle * Math.PI / 180;
+    const rotRotatedX = rotLocalX * Math.cos(rotAngleRad) - rotLocalY * Math.sin(rotAngleRad);
+    const rotRotatedY = rotLocalX * Math.sin(rotAngleRad) + rotLocalY * Math.cos(rotAngleRad);
+    rotationHandle.x = object.x + rotRotatedX;
+    rotationHandle.y = object.y + rotRotatedY;
 
     // Make handle interactive
     rotationHandle.eventMode = 'static';
@@ -1315,14 +1454,55 @@ export class CanvasManager {
     rotationHandle.objectId = object.objectId;
 
     // Add rotation handle event listeners
-    // Note: We only need pointerdown and pointerup. The global handleMouseMove (DOM event)
-    // handles the actual rotation while dragging, so we don't need pointermove here.
     rotationHandle.on('pointerdown', this.onRotationHandleDown.bind(this));
     rotationHandle.on('pointerup', this.onRotationHandleUp.bind(this));
     rotationHandle.on('pointerupoutside', this.onRotationHandleUp.bind(this));
 
     this.objectContainer.addChild(rotationHandle);
     this.rotationHandles.set(object.objectId, rotationHandle);
+
+    // Create resize handle at bottom-right corner
+    const resizeHandle = new PIXI.Graphics();
+
+    // Draw circle with white fill and blue border
+    resizeHandle.circle(0, 0, 10)
+      .fill({ color: 0xffffff })
+      .stroke({ width: 2, color: 0x3b82f6 });
+
+    // Draw resize arrows pointing towards center (diagonal inward)
+    // Arrow pointing up-left (towards center from bottom-right corner)
+    resizeHandle.moveTo(0, 0)
+      .lineTo(-4, -4)
+      .moveTo(-4, -4)
+      .lineTo(-2, -4)
+      .moveTo(-4, -4)
+      .lineTo(-4, -2)
+      .stroke({ width: 1.5, color: 0x3b82f6 });
+
+    // Position at bottom-right corner, accounting for object rotation
+    const resLocalX = bounds.width / 2 + 2;
+    const resLocalY = bounds.height / 2 + 2;
+    const resAngleRad = object.angle * Math.PI / 180;
+    const resRotatedX = resLocalX * Math.cos(resAngleRad) - resLocalY * Math.sin(resAngleRad);
+    const resRotatedY = resLocalX * Math.sin(resAngleRad) + resLocalY * Math.cos(resAngleRad);
+    resizeHandle.x = object.x + resRotatedX;
+    resizeHandle.y = object.y + resRotatedY;
+
+    // Rotate handle to point towards center (object angle + 180° to point inward)
+    resizeHandle.angle = object.angle + 180;
+
+    // Make handle interactive
+    resizeHandle.eventMode = 'static';
+    resizeHandle.cursor = 'nwse-resize';
+    resizeHandle.objectId = object.objectId;
+
+    // Add resize handle event listeners
+    resizeHandle.on('pointerdown', this.onResizeHandleDown.bind(this));
+    resizeHandle.on('pointerup', this.onResizeHandleUp.bind(this));
+    resizeHandle.on('pointerupoutside', this.onResizeHandleUp.bind(this));
+
+    this.objectContainer.addChild(resizeHandle);
+    this.resizeHandles.set(object.objectId, resizeHandle);
   }
 
   /**
@@ -1350,12 +1530,49 @@ export class CanvasManager {
         box.angle = obj.angle;
         box.pivot.set(obj.pivot.x, obj.pivot.y);
 
-        // Update rotation handle position
-        const handle = this.rotationHandles.get(objectId);
-        if (handle) {
-          const handleDistance = 20;
-          handle.x = obj.x;
-          handle.y = obj.y - bounds.height / 2 - handleDistance;
+        // Update rotation handle position (top-right corner)
+        const rotationHandle = this.rotationHandles.get(objectId);
+        if (rotationHandle) {
+          // Use temp size if resizing, otherwise use actual bounds
+          const width = obj.tempWidth || bounds.width;
+          const height = obj.tempHeight || bounds.height;
+
+          // Calculate corner position in local space (relative to object center)
+          const localX = width / 2 + 2;
+          const localY = -height / 2 - 2;
+
+          // Rotate the local position by the object's angle
+          const angleRad = obj.angle * Math.PI / 180;
+          const rotatedX = localX * Math.cos(angleRad) - localY * Math.sin(angleRad);
+          const rotatedY = localX * Math.sin(angleRad) + localY * Math.cos(angleRad);
+
+          // Position handle at rotated corner position
+          rotationHandle.x = obj.x + rotatedX;
+          rotationHandle.y = obj.y + rotatedY;
+        }
+
+        // Update resize handle position (bottom-right corner)
+        const resizeHandle = this.resizeHandles.get(objectId);
+        if (resizeHandle) {
+          // Use temp size if resizing, otherwise use actual bounds
+          const width = obj.tempWidth || bounds.width;
+          const height = obj.tempHeight || bounds.height;
+
+          // Calculate corner position in local space (relative to object center)
+          const localX = width / 2 + 2;
+          const localY = height / 2 + 2;
+
+          // Rotate the local position by the object's angle
+          const angleRad = obj.angle * Math.PI / 180;
+          const rotatedX = localX * Math.cos(angleRad) - localY * Math.sin(angleRad);
+          const rotatedY = localX * Math.sin(angleRad) + localY * Math.cos(angleRad);
+
+          // Position handle at rotated corner position
+          resizeHandle.x = obj.x + rotatedX;
+          resizeHandle.y = obj.y + rotatedY;
+
+          // Rotate handle to point towards center (object angle + 180° to point inward)
+          resizeHandle.angle = obj.angle + 180;
         }
       }
     });
@@ -1499,7 +1716,19 @@ export class CanvasManager {
     const objectId = handle.objectId;
     const object = this.objects.get(objectId);
 
-    if (!object) return;
+    if (!object) {
+      console.error('[CanvasManager] No object found for objectId:', objectId);
+      return;
+    }
+
+    // Get mouse position at grab time
+    const globalPos = event.data.global;
+    const mousePos = this.screenToCanvas(globalPos);
+
+    // Calculate initial angle from object center to mouse position
+    const dx = mousePos.x - object.x;
+    const dy = mousePos.y - object.y;
+    this.rotationGrabAngle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
 
     // Start rotating
     this.isRotating = true;
@@ -1511,44 +1740,6 @@ export class CanvasManager {
 
     // Prevent object dragging while rotating
     this.isDragging = false;
-  }
-
-  /**
-   * Handle rotation handle pointer move
-   * @param {PIXI.FederatedPointerEvent} event - PixiJS pointer event
-   */
-  onRotationHandleMove(event) {
-    if (!this.isRotating || !this.rotatingObject) return;
-
-    event.stopPropagation();
-
-    const obj = this.rotatingObject;
-    const globalPos = event.data.global;
-    const position = this.screenToCanvas(globalPos);
-
-    // Calculate rotation angle from pointer position
-    const objCenter = { x: obj.x, y: obj.y };
-    const dx = position.x - objCenter.x;
-    const dy = position.y - objCenter.y;
-    let angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
-
-    // Snap to 15-degree increments if Shift key is held
-    if (event.shiftKey) {
-      angle = Math.round(angle / 15) * 15;
-    }
-
-    // Normalize angle to 0-360 range
-    if (angle < 0) angle += 360;
-    if (angle >= 360) angle -= 360;
-
-    // Update object rotation
-    obj.angle = angle;
-
-    // Update selection box to match rotation
-    const selectionBox = this.selectionBoxes.get(obj.objectId);
-    if (selectionBox) {
-      selectionBox.angle = angle;
-    }
   }
 
   /**
@@ -1567,7 +1758,7 @@ export class CanvasManager {
     if (objectData) {
       const [objectId, pixiObj] = objectData;
 
-      // Emit update with new rotation angle
+      // Emit update with new rotation angle (stored in data field, just like AI rotation)
       this.emit('update_object', {
         object_id: objectId,
         data: {
@@ -1584,6 +1775,78 @@ export class CanvasManager {
 
     this.isRotating = false;
     this.rotatingObject = null;
+  }
+
+  /**
+   * Handle resize handle pointer down
+   * @param {PIXI.FederatedPointerEvent} event - PixiJS pointer event
+   */
+  onResizeHandleDown(event) {
+    event.stopPropagation();
+
+    const handle = event.currentTarget;
+    const objectId = handle.objectId;
+    const object = this.objects.get(objectId);
+
+    if (!object) {
+      console.error('[CanvasManager] No object found for objectId:', objectId);
+      return;
+    }
+
+    // Get mouse position at grab time
+    const globalPos = event.data.global;
+    const mousePos = this.screenToCanvas(globalPos);
+
+    // Store initial mouse position and object size
+    this.resizeStartMousePos = { x: mousePos.x, y: mousePos.y };
+    const bounds = object.getLocalBounds();
+    this.resizeStartSize = { width: bounds.width, height: bounds.height };
+
+    // Start resizing
+    this.isResizing = true;
+    this.resizingObject = object;
+
+    // Change cursor to grabbing
+    handle.cursor = 'nwse-resize';
+
+    // Prevent object dragging while resizing
+    this.isDragging = false;
+  }
+
+  /**
+   * Handle resize handle pointer up
+   * @param {PIXI.FederatedPointerEvent} event - PixiJS pointer event
+   */
+  onResizeHandleUp(event) {
+    if (!this.isResizing || !this.resizingObject) return;
+
+    event.stopPropagation();
+
+    const obj = this.resizingObject;
+
+    // Get the object's ID
+    const objectData = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+    if (objectData) {
+      const [objectId, pixiObj] = objectData;
+
+      // Emit update with new size
+      this.emit('update_object', {
+        object_id: objectId,
+        data: {
+          width: Math.round(obj.tempWidth || this.resizeStartSize.width),
+          height: Math.round(obj.tempHeight || this.resizeStartSize.height)
+        }
+      });
+    }
+
+    // Reset resize handle cursor
+    const handle = event.currentTarget;
+    if (handle) {
+      handle.cursor = 'nwse-resize';
+    }
+
+    this.isResizing = false;
+    this.resizingObject = null;
   }
 
   /**
