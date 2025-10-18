@@ -54,6 +54,14 @@ export class CanvasManager {
     this.zoomLevel = 1;
     this.spacePressed = false;
 
+    // Lasso selection state
+    this.isLassoSelecting = false;
+    this.lassoStart = { x: 0, y: 0 };
+    this.lassoRect = null; // Graphics object for lasso visualization
+
+    // Clipboard state for copy/paste
+    this.clipboard = [];
+
     // Throttle tracking
     this.lastCursorUpdate = 0;
     this.lastDragUpdate = 0;
@@ -251,6 +259,15 @@ export class CanvasManager {
       case 'text':
         pixiObject = this.createText(position, data);
         break;
+      case 'star':
+        pixiObject = this.createStar(position, data);
+        break;
+      case 'triangle':
+        pixiObject = this.createTriangle(position, data);
+        break;
+      case 'polygon':
+        pixiObject = this.createPolygon(position, data);
+        break;
       default:
         console.warn('Unknown object type:', objectData.type);
         return;
@@ -395,6 +412,136 @@ export class CanvasManager {
     }
 
     return text;
+  }
+
+  /**
+   * Create a star shape
+   * @param {Object} position - {x, y} position
+   * @param {Object} data - Shape data
+   * @returns {PIXI.Graphics}
+   */
+  createStar(position, data) {
+    const graphics = new PIXI.Graphics();
+    const points = data.points || 5; // Number of star points
+    const outerRadius = (data.width || 100) / 2;
+    const innerRadius = outerRadius * (data.innerRatio || 0.5);
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || fillColor;
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Calculate star points
+    const starPoints = [];
+    for (let i = 0; i < points * 2; i++) {
+      const angle = (i * Math.PI) / points - Math.PI / 2;
+      const radius = i % 2 === 0 ? outerRadius : innerRadius;
+      starPoints.push(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius
+      );
+    }
+
+    // Draw star using poly
+    graphics.poly(starPoints)
+      .fill({ color: fill, alpha: data.opacity || 1 })
+      .stroke({ width: strokeWidth, color: stroke });
+
+    graphics.x = position.x;
+    graphics.y = position.y;
+
+    // Apply rotation if specified
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, outerRadius * 2, outerRadius * 2);
+    } else {
+      graphics.pivot.set(0, 0);
+    }
+
+    return graphics;
+  }
+
+  /**
+   * Create a triangle shape
+   * @param {Object} position - {x, y} position
+   * @param {Object} data - Shape data
+   * @returns {PIXI.Graphics}
+   */
+  createTriangle(position, data) {
+    const graphics = new PIXI.Graphics();
+    const width = data.width || 100;
+    const height = data.height || 100;
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || fillColor;
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Draw equilateral triangle pointing up
+    const trianglePoints = [
+      0, -height / 2,           // Top
+      -width / 2, height / 2,   // Bottom left
+      width / 2, height / 2     // Bottom right
+    ];
+
+    graphics.poly(trianglePoints)
+      .fill({ color: fill, alpha: data.opacity || 1 })
+      .stroke({ width: strokeWidth, color: stroke });
+
+    graphics.x = position.x;
+    graphics.y = position.y;
+
+    // Apply rotation if specified
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, width, height);
+    } else {
+      graphics.pivot.set(0, 0);
+    }
+
+    return graphics;
+  }
+
+  /**
+   * Create a polygon shape
+   * @param {Object} position - {x, y} position
+   * @param {Object} data - Shape data
+   * @returns {PIXI.Graphics}
+   */
+  createPolygon(position, data) {
+    const graphics = new PIXI.Graphics();
+    const sides = data.sides || 6; // Default to hexagon
+    const radius = (data.width || 100) / 2;
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || fillColor;
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Calculate polygon points
+    const polygonPoints = [];
+    for (let i = 0; i < sides; i++) {
+      const angle = (i * 2 * Math.PI) / sides - Math.PI / 2;
+      polygonPoints.push(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius
+      );
+    }
+
+    // Draw polygon
+    graphics.poly(polygonPoints)
+      .fill({ color: fill, alpha: data.opacity || 1 })
+      .stroke({ width: strokeWidth, color: stroke });
+
+    graphics.x = position.x;
+    graphics.y = position.y;
+
+    // Apply rotation if specified
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, radius * 2, radius * 2);
+    } else {
+      graphics.pivot.set(0, 0);
+    }
+
+    return graphics;
   }
 
   /**
@@ -732,11 +879,15 @@ export class CanvasManager {
           this.setSelection(clickedObject);
         }
       } else {
-        // Clicking on empty space = clear selection (unless shift-clicking)
-        console.log('[CanvasManager] Empty space clicked, clearing selection');
+        // Clicking on empty space = start lasso selection or clear selection
+        console.log('[CanvasManager] Empty space clicked');
         if (!event.shiftKey) {
           this.clearSelection();
         }
+        // Start lasso selection
+        this.isLassoSelecting = true;
+        this.lassoStart = position;
+        this.createLassoRect(position);
       }
     } else if (this.currentTool === 'delete') {
       if (clickedObject) {
@@ -881,6 +1032,9 @@ export class CanvasManager {
 
       // Update selection box to match new size
       this.updateSelectionBoxes();
+    } else if (this.isLassoSelecting) {
+      // Update lasso selection rectangle
+      this.updateLassoRect(position);
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
@@ -992,7 +1146,10 @@ export class CanvasManager {
     // Only get mouse position if we need it
     const position = this.getMousePosition(event);
 
-    if (this.isCreating) {
+    if (this.isLassoSelecting) {
+      // Finalize lasso selection
+      this.finalizeLassoSelection(event);
+    } else if (this.isCreating) {
       // Finalize object creation
       this.finalizeTempObject(position);
     } else if (this.isDragging && this.selectedObjects.size > 0) {
@@ -1094,6 +1251,62 @@ export class CanvasManager {
       return;
     }
 
+    // Check for modifier keys
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey;
+
+    // Handle keyboard shortcuts with Cmd/Ctrl
+    if (cmdOrCtrl) {
+      switch (event.key.toLowerCase()) {
+        case 'g':
+          event.preventDefault();
+          if (event.shiftKey) {
+            this.ungroupSelected();
+          } else {
+            this.groupSelected();
+          }
+          return;
+        case 'd':
+          event.preventDefault();
+          this.duplicateSelected();
+          return;
+        case 'c':
+          event.preventDefault();
+          this.copySelected();
+          return;
+        case 'v':
+          event.preventDefault();
+          this.pasteFromClipboard();
+          return;
+        case 'a':
+          event.preventDefault();
+          this.selectAll();
+          return;
+        case ']':
+          event.preventDefault();
+          if (event.shiftKey) {
+            this.bringToFront();
+          }
+          return;
+        case '[':
+          event.preventDefault();
+          if (event.shiftKey) {
+            this.sendToBack();
+          }
+          return;
+      }
+    }
+
+    // Handle arrow keys for nudging
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      if (this.selectedObjects.size > 0) {
+        event.preventDefault();
+        const nudgeAmount = event.shiftKey ? 10 : 1;
+        this.nudgeSelected(event.key, nudgeAmount);
+        return;
+      }
+    }
+
     switch (event.key.toLowerCase()) {
       case 'delete':
       case 'backspace':
@@ -1114,13 +1327,17 @@ export class CanvasManager {
         this.setTool('rectangle');
         break;
       case 'c':
-        this.setTool('circle');
+        if (!cmdOrCtrl) {
+          this.setTool('circle');
+        }
         break;
       case 't':
         this.setTool('text');
         break;
       case 'd':
-        this.setTool('delete');
+        if (!cmdOrCtrl) {
+          this.setTool('delete');
+        }
         break;
       case 's':
         this.setTool('select');
@@ -1251,6 +1468,110 @@ export class CanvasManager {
 
     // Reset creating flag
     this.isCreating = false;
+  }
+
+  /**
+   * Create lasso selection rectangle for visual feedback
+   * @param {Object} position - {x, y} starting position
+   */
+  createLassoRect(position) {
+    if (this.lassoRect) {
+      this.objectContainer.removeChild(this.lassoRect);
+      this.lassoRect.destroy();
+    }
+
+    this.lassoRect = new PIXI.Graphics();
+    this.lassoRect.x = position.x;
+    this.lassoRect.y = position.y;
+    this.lassoRect.alpha = 0.3;
+    this.objectContainer.addChild(this.lassoRect);
+  }
+
+  /**
+   * Update lasso selection rectangle during drag
+   * @param {Object} currentPosition - {x, y} current position
+   */
+  updateLassoRect(currentPosition) {
+    if (!this.lassoRect || !this.isLassoSelecting) return;
+
+    const width = currentPosition.x - this.lassoStart.x;
+    const height = currentPosition.y - this.lassoStart.y;
+
+    this.lassoRect.clear();
+    
+    // Draw selection rectangle with dashed border effect
+    this.lassoRect.rect(0, 0, width, height)
+      .fill({ color: 0x3b82f6, alpha: 0.1 })
+      .stroke({ width: 1, color: 0x1e40af });
+  }
+
+  /**
+   * Finalize lasso selection and select objects within rectangle
+   * @param {MouseEvent} event - Mouse event for shift key detection
+   */
+  finalizeLassoSelection(event) {
+    if (!this.lassoRect || !this.isLassoSelecting) return;
+
+    const endPos = this.getMousePosition(event);
+    
+    // Calculate selection rectangle bounds
+    const minX = Math.min(this.lassoStart.x, endPos.x);
+    const maxX = Math.max(this.lassoStart.x, endPos.x);
+    const minY = Math.min(this.lassoStart.y, endPos.y);
+    const maxY = Math.max(this.lassoStart.y, endPos.y);
+
+    // Find objects within the lasso rectangle
+    const width = maxX - minX;
+    const height = maxY - minY;
+    
+    // Only process if lasso has reasonable size (at least 5px)
+    if (width > 5 && height > 5) {
+      // Clear previous selection unless shift is held
+      if (!event.shiftKey) {
+        this.clearSelection();
+      }
+
+      // Select all objects that intersect with the lasso rectangle
+      this.objects.forEach((obj, objectId) => {
+        const bounds = obj.getBounds();
+        
+        // Check if object intersects with lasso rectangle
+        if (this.rectanglesIntersect(
+          minX, minY, maxX, maxY,
+          bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height
+        )) {
+          if (!this.selectedObjects.has(obj)) {
+            this.selectedObjects.add(obj);
+            this.emit('lock_object', { object_id: obj.objectId });
+            this.createSelectionBox(obj);
+          }
+        }
+      });
+    }
+
+    // Remove lasso rect
+    this.objectContainer.removeChild(this.lassoRect);
+    this.lassoRect.destroy();
+    this.lassoRect = null;
+    this.isLassoSelecting = false;
+
+    console.log('[CanvasManager] Lasso selection complete, selected', this.selectedObjects.size, 'objects');
+  }
+
+  /**
+   * Check if two rectangles intersect
+   * @param {number} x1min - First rectangle min x
+   * @param {number} y1min - First rectangle min y
+   * @param {number} x1max - First rectangle max x
+   * @param {number} y1max - First rectangle max y
+   * @param {number} x2min - Second rectangle min x
+   * @param {number} y2min - Second rectangle min y
+   * @param {number} x2max - Second rectangle max x
+   * @param {number} y2max - Second rectangle max y
+   * @returns {boolean} True if rectangles intersect
+   */
+  rectanglesIntersect(x1min, y1min, x1max, y1max, x2min, y2min, x2max, y2max) {
+    return !(x1max < x2min || x2max < x1min || y1max < y2min || y2max < y1min);
   }
 
   /**
@@ -1932,6 +2253,468 @@ export class CanvasManager {
    */
   getSelectedObjectIds() {
     return Array.from(this.selectedObjects).map(obj => obj.objectId);
+  }
+
+  /**
+   * Group selected objects together
+   */
+  groupSelected() {
+    if (this.selectedObjects.size < 2) {
+      console.log('[CanvasManager] Need at least 2 objects to create a group');
+      return;
+    }
+
+    const objectIds = this.getSelectedObjectIds();
+    this.emit('create_group', { object_ids: objectIds });
+    console.log('[CanvasManager] Creating group with objects:', objectIds);
+  }
+
+  /**
+   * Ungroup selected objects
+   */
+  ungroupSelected() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected to ungroup');
+      return;
+    }
+
+    const objectIds = this.getSelectedObjectIds();
+    this.emit('ungroup', { object_ids: objectIds });
+    console.log('[CanvasManager] Ungrouping objects:', objectIds);
+  }
+
+  /**
+   * Duplicate selected objects
+   */
+  duplicateSelected() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected to duplicate');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      // Get the object's data
+      const objectEntry = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+      if (objectEntry) {
+        const [objectId, pixiObj] = objectEntry;
+        
+        // Create duplicate with offset position
+        this.emit('duplicate_object', {
+          object_id: objectId,
+          offset: { x: 20, y: 20 }
+        });
+      }
+    });
+
+    console.log('[CanvasManager] Duplicating selected objects');
+  }
+
+  /**
+   * Copy selected objects to clipboard
+   */
+  copySelected() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected to copy');
+      return;
+    }
+
+    this.clipboard = [];
+    this.selectedObjects.forEach(obj => {
+      const objectEntry = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+      if (objectEntry) {
+        const [objectId, pixiObj] = objectEntry;
+        
+        // Store object data for pasting
+        this.clipboard.push({
+          id: objectId,
+          x: pixiObj.x,
+          y: pixiObj.y,
+          angle: pixiObj.angle || 0
+        });
+      }
+    });
+
+    console.log('[CanvasManager] Copied', this.clipboard.length, 'objects to clipboard');
+  }
+
+  /**
+   * Paste objects from clipboard
+   */
+  pasteFromClipboard() {
+    if (this.clipboard.length === 0) {
+      console.log('[CanvasManager] Clipboard is empty');
+      return;
+    }
+
+    this.clipboard.forEach(clipboardItem => {
+      this.emit('duplicate_object', {
+        object_id: clipboardItem.id,
+        offset: { x: 20, y: 20 }
+      });
+    });
+
+    console.log('[CanvasManager] Pasting', this.clipboard.length, 'objects from clipboard');
+  }
+
+  /**
+   * Nudge selected objects in a direction
+   * @param {string} direction - Arrow key direction
+   * @param {number} amount - Amount to nudge in pixels
+   */
+  nudgeSelected(direction, amount) {
+    if (this.selectedObjects.size === 0) {
+      return;
+    }
+
+    const delta = { x: 0, y: 0 };
+    switch (direction) {
+      case 'ArrowUp':
+        delta.y = -amount;
+        break;
+      case 'ArrowDown':
+        delta.y = amount;
+        break;
+      case 'ArrowLeft':
+        delta.x = -amount;
+        break;
+      case 'ArrowRight':
+        delta.x = amount;
+        break;
+    }
+
+    // Update all selected objects
+    this.selectedObjects.forEach(obj => {
+      obj.x += delta.x;
+      obj.y += delta.y;
+
+      // Emit update to server
+      this.emit('update_object', {
+        object_id: obj.objectId,
+        position: { x: obj.x, y: obj.y }
+      });
+    });
+
+    // Update selection boxes
+    this.updateSelectionBoxes();
+  }
+
+  /**
+   * Select all objects on the canvas
+   */
+  selectAll() {
+    this.clearSelection();
+    
+    this.objects.forEach((pixiObj, objectId) => {
+      this.selectedObjects.add(pixiObj);
+      this.emit('lock_object', { object_id: pixiObj.objectId });
+      this.createSelectionBox(pixiObj);
+    });
+
+    console.log('[CanvasManager] Selected all', this.selectedObjects.size, 'objects');
+  }
+
+  /**
+   * Bring selected objects to front
+   */
+  bringToFront() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('bring_to_front', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Bringing', this.selectedObjects.size, 'objects to front');
+  }
+
+  /**
+   * Send selected objects to back
+   */
+  sendToBack() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('send_to_back', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Sending', this.selectedObjects.size, 'objects to back');
+  }
+
+  /**
+   * Align selected objects
+   * @param {string} alignment - 'left', 'right', 'center', 'top', 'bottom', 'middle'
+   */
+  alignObjects(alignment) {
+    if (this.selectedObjects.size < 2) {
+      console.log('[CanvasManager] Need at least 2 objects to align');
+      return;
+    }
+
+    const selectedIds = this.getSelectedObjectIds();
+    this.emit('align_objects', {
+      object_ids: selectedIds,
+      alignment: alignment
+    });
+
+    console.log('[CanvasManager] Aligning', selectedIds.length, 'objects:', alignment);
+  }
+
+  /**
+   * Distribute selected objects horizontally
+   */
+  distributeHorizontally() {
+    if (this.selectedObjects.size < 3) {
+      console.log('[CanvasManager] Need at least 3 objects to distribute');
+      return;
+    }
+
+    const selectedIds = this.getSelectedObjectIds();
+    this.emit('distribute_objects', {
+      object_ids: selectedIds,
+      direction: 'horizontal'
+    });
+
+    console.log('[CanvasManager] Distributing', selectedIds.length, 'objects horizontally');
+  }
+
+  /**
+   * Distribute selected objects vertically
+   */
+  distributeVertically() {
+    if (this.selectedObjects.size < 3) {
+      console.log('[CanvasManager] Need at least 3 objects to distribute');
+      return;
+    }
+
+    const selectedIds = this.getSelectedObjectIds();
+    this.emit('distribute_objects', {
+      object_ids: selectedIds,
+      direction: 'vertical'
+    });
+
+    console.log('[CanvasManager] Distributing', selectedIds.length, 'objects vertically');
+  }
+
+  /**
+   * Show context menu for selected objects
+   * @param {Object} position - {x, y} position for menu
+   */
+  showContextMenu(position) {
+    if (this.selectedObjects.size === 0) {
+      return;
+    }
+
+    this.emit('show_context_menu', {
+      position: position,
+      selected_count: this.selectedObjects.size
+    });
+  }
+
+  /**
+   * Export canvas to PNG
+   * @param {boolean} selectionOnly - Export only selected objects
+   */
+  async exportToPNG(selectionOnly = false) {
+    try {
+      let renderTarget;
+      
+      if (selectionOnly && this.selectedObjects.size > 0) {
+        // Calculate bounds of selected objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        this.selectedObjects.forEach(obj => {
+          const bounds = obj.getBounds();
+          minX = Math.min(minX, bounds.x);
+          minY = Math.min(minY, bounds.y);
+          maxX = Math.max(maxX, bounds.x + bounds.width);
+          maxY = Math.max(maxY, bounds.y + bounds.height);
+        });
+        
+        const width = maxX - minX;
+        const height = maxY - minY;
+        
+        // Create temporary container for selected objects
+        const tempContainer = new PIXI.Container();
+        tempContainer.x = -minX;
+        tempContainer.y = -minY;
+        
+        this.selectedObjects.forEach(obj => {
+          tempContainer.addChild(obj);
+        });
+        
+        // Create render texture
+        const renderTexture = PIXI.RenderTexture.create({
+          width: Math.ceil(width),
+          height: Math.ceil(height),
+          resolution: window.devicePixelRatio || 1
+        });
+        
+        this.app.renderer.render(tempContainer, { renderTexture });
+        
+        // Extract canvas and trigger download
+        const canvas = this.app.renderer.extract.canvas(renderTexture);
+        this.triggerDownload(canvas.toDataURL('image/png'), 'canvas-selection.png');
+        
+        // Restore objects to original container
+        this.selectedObjects.forEach(obj => {
+          this.objectContainer.addChild(obj);
+        });
+        
+        tempContainer.destroy();
+        renderTexture.destroy();
+      } else {
+        // Export entire canvas
+        // Calculate bounds of all objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        this.objects.forEach(obj => {
+          const bounds = obj.getBounds();
+          minX = Math.min(minX, bounds.x);
+          minY = Math.min(minY, bounds.y);
+          maxX = Math.max(maxX, bounds.x + bounds.width);
+          maxY = Math.max(maxY, bounds.y + bounds.height);
+        });
+        
+        const width = maxX - minX;
+        const height = maxY - minY;
+        
+        // Create render texture
+        const renderTexture = PIXI.RenderTexture.create({
+          width: Math.ceil(width) || 800,
+          height: Math.ceil(height) || 600,
+          resolution: window.devicePixelRatio || 1
+        });
+        
+        // Temporarily offset container
+        const originalX = this.objectContainer.x;
+        const originalY = this.objectContainer.y;
+        this.objectContainer.x = -minX;
+        this.objectContainer.y = -minY;
+        
+        this.app.renderer.render(this.objectContainer, { renderTexture });
+        
+        // Restore original position
+        this.objectContainer.x = originalX;
+        this.objectContainer.y = originalY;
+        
+        // Extract canvas and trigger download
+        const canvas = this.app.renderer.extract.canvas(renderTexture);
+        this.triggerDownload(canvas.toDataURL('image/png'), 'canvas-export.png');
+        
+        renderTexture.destroy();
+      }
+      
+      console.log('[CanvasManager] PNG export complete');
+    } catch (error) {
+      console.error('[CanvasManager] PNG export failed:', error);
+    }
+  }
+
+  /**
+   * Export canvas to SVG
+   * @param {boolean} selectionOnly - Export only selected objects
+   */
+  exportToSVG(selectionOnly = false) {
+    try {
+      const objectsToExport = selectionOnly && this.selectedObjects.size > 0
+        ? Array.from(this.selectedObjects)
+        : Array.from(this.objects.values());
+      
+      if (objectsToExport.length === 0) {
+        console.warn('[CanvasManager] No objects to export');
+        return;
+      }
+      
+      // Calculate bounds
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      
+      objectsToExport.forEach(obj => {
+        const bounds = obj.getBounds();
+        minX = Math.min(minX, bounds.x);
+        minY = Math.min(minY, bounds.y);
+        maxX = Math.max(maxX, bounds.x + bounds.width);
+        maxY = Math.max(maxY, bounds.y + bounds.height);
+      });
+      
+      const width = maxX - minX;
+      const height = maxY - minY;
+      
+      // Create SVG
+      let svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${minX} ${minY} ${width} ${height}">
+`;
+      
+      // Convert each object to SVG
+      objectsToExport.forEach(obj => {
+        svg += this.objectToSVG(obj);
+      });
+      
+      svg += '</svg>';
+      
+      // Trigger download
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      this.triggerDownload(url, 'canvas-export.svg');
+      URL.revokeObjectURL(url);
+      
+      console.log('[CanvasManager] SVG export complete');
+    } catch (error) {
+      console.error('[CanvasManager] SVG export failed:', error);
+    }
+  }
+
+  /**
+   * Convert a PixiJS object to SVG string
+   * @param {PIXI.DisplayObject} obj - Object to convert
+   * @returns {string} SVG string
+   */
+  objectToSVG(obj) {
+    let svg = '';
+    
+    if (obj instanceof PIXI.Graphics) {
+      // Extract bounds and color info from the graphics object
+      const bounds = obj.getBounds();
+      const fill = obj.fill?.color !== undefined 
+        ? `#${obj.fill.color.toString(16).padStart(6, '0')}`
+        : '#3b82f6';
+      const stroke = obj.stroke?.color !== undefined
+        ? `#${obj.stroke.color.toString(16).padStart(6, '0')}`
+        : fill;
+      const strokeWidth = obj.stroke?.width || 2;
+      
+      // Simple rectangle approximation for graphics objects
+      svg = `  <rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" 
+        fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" 
+        opacity="${obj.alpha}" transform="rotate(${obj.angle} ${bounds.x + bounds.width/2} ${bounds.y + bounds.height/2})" />\n`;
+    } else if (obj instanceof PIXI.Text) {
+      const bounds = obj.getBounds();
+      const fill = obj.style.fill || '#000000';
+      const fontSize = obj.style.fontSize || 16;
+      const fontFamily = obj.style.fontFamily || 'Arial';
+      
+      svg = `  <text x="${bounds.x}" y="${bounds.y + fontSize}" 
+        fill="${fill}" font-size="${fontSize}" font-family="${fontFamily}" 
+        opacity="${obj.alpha}">${obj.text}</text>\n`;
+    }
+    
+    return svg;
+  }
+
+  /**
+   * Trigger file download
+   * @param {string} dataUrl - Data URL or blob URL
+   * @param {string} filename - Filename for download
+   */
+  triggerDownload(dataUrl, filename) {
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = dataUrl;
+    link.click();
   }
 
   /**
