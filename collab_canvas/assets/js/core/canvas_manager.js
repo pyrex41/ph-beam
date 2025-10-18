@@ -347,7 +347,10 @@ export class CanvasManager {
     }
 
     let pixiObject;
-    const data = objectData.data ? JSON.parse(objectData.data) : {};
+    // Handle both parsed objects and JSON strings
+    const data = (typeof objectData.data === 'string')
+      ? JSON.parse(objectData.data)
+      : (objectData.data || {});
     const position = objectData.position || { x: 0, y: 0 };
 
     switch (objectData.type) {
