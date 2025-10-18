@@ -1,14 +1,14 @@
 /**
  * Voice Input Hook for AI Command Interface
  *
- * Provides push-to-talk microphone input using the Web Speech API.
- * Allows users to dictate AI commands using their voice with live transcription.
+ * Provides push-to-talk microphone input using Groq's Whisper API.
+ * Allows users to dictate AI commands using their voice with transcription.
  *
  * Features:
  * - Push-to-talk microphone button
- * - Live transcription into the AI input field
- * - Visual feedback for listening/transcribing states
- * - Graceful fallback if Speech API is unavailable
+ * - Audio recording using MediaRecorder API
+ * - Transcription via Groq Whisper API (backend endpoint)
+ * - Visual feedback for recording/transcribing states
  * - Permission handling for microphone access
  *
  * Usage:
@@ -18,157 +18,175 @@
 
 export default {
   mounted() {
-    // Check if browser supports speech recognition
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      console.warn("Speech Recognition API not supported in this browser");
-      this.el.style.display = 'none';
-      return;
-    }
-
-    // Initialize speech recognition
-    this.recognition = new SpeechRecognition();
-    this.recognition.continuous = false;
-    this.recognition.interimResults = true;
-    this.recognition.lang = 'en-US';
-
     // State tracking
-    this.isListening = false;
-    this.finalTranscript = '';
+    this.isRecording = false;
+    this.isTranscribing = false;
+    this.mediaRecorder = null;
+    this.audioChunks = [];
 
     // Get references to elements
     this.inputField = document.getElementById('ai-command-input');
     this.micIcon = this.el.querySelector('.mic-icon');
     this.listeningIndicator = this.el.querySelector('.listening-indicator');
 
-    // Set up event handlers
-    this.setupEventHandlers();
-
     // Handle button clicks
-    this.el.addEventListener('mousedown', this.startListening.bind(this));
-    this.el.addEventListener('mouseup', this.stopListening.bind(this));
-    this.el.addEventListener('mouseleave', this.stopListening.bind(this));
+    this.el.addEventListener('mousedown', this.startRecording.bind(this));
+    this.el.addEventListener('mouseup', this.stopRecording.bind(this));
+    this.el.addEventListener('mouseleave', this.stopRecording.bind(this));
 
     // Handle touch events for mobile
     this.el.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      this.startListening();
+      this.startRecording();
     });
     this.el.addEventListener('touchend', (e) => {
       e.preventDefault();
-      this.stopListening();
+      this.stopRecording();
     });
   },
 
-  setupEventHandlers() {
-    // Handle recognition results
-    this.recognition.onresult = (event) => {
-      let interimTranscript = '';
+  async startRecording() {
+    if (this.isRecording || this.isTranscribing) return;
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
+    try {
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-        if (event.results[i].isFinal) {
-          this.finalTranscript += transcript + ' ';
-        } else {
-          interimTranscript += transcript;
+      // Reset audio chunks
+      this.audioChunks = [];
+
+      // Create MediaRecorder
+      this.mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm'
+      });
+
+      // Collect audio data
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.audioChunks.push(event.data);
         }
+      };
+
+      // Handle recording stop
+      this.mediaRecorder.onstop = async () => {
+        // Stop all tracks to release microphone
+        stream.getTracks().forEach(track => track.stop());
+
+        // Create audio blob from chunks
+        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+
+        // Send to transcription endpoint
+        await this.transcribeAudio(audioBlob);
+      };
+
+      // Start recording
+      this.mediaRecorder.start();
+      this.isRecording = true;
+      this.updateUI();
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+
+      if (error.name === 'NotAllowedError') {
+        alert('Please grant microphone permissions to use voice input.');
+      } else {
+        alert('Failed to access microphone: ' + error.message);
+      }
+    }
+  },
+
+  stopRecording() {
+    if (!this.isRecording || !this.mediaRecorder) return;
+
+    try {
+      this.mediaRecorder.stop();
+      this.isRecording = false;
+      this.updateUI();
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+    }
+  },
+
+  async transcribeAudio(audioBlob) {
+    this.isTranscribing = true;
+    this.updateUI();
+
+    try {
+      // Create form data
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+
+      // Send to backend transcription endpoint
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Transcription failed');
       }
 
-      // Update input field with current transcription
-      if (this.inputField) {
-        const currentValue = this.finalTranscript + interimTranscript;
-        this.inputField.value = currentValue.trim();
+      const result = await response.json();
+
+      // Update input field with transcription
+      if (this.inputField && result.text) {
+        // Append to existing text if any
+        const currentValue = this.inputField.value.trim();
+        const newValue = currentValue ? `${currentValue} ${result.text}` : result.text;
+
+        this.inputField.value = newValue;
 
         // Push the value to LiveView
-        this.pushEvent("update_ai_command", { command: currentValue.trim() });
+        this.pushEvent("update_ai_command", { command: newValue });
 
         // Trigger input event for any listeners
         this.inputField.dispatchEvent(new Event('input', { bubbles: true }));
       }
-    };
-
-    // Handle recognition errors
-    this.recognition.onerror = (event) => {
-      console.error('Speech recognition error:', event.error);
-
-      if (event.error === 'not-allowed') {
-        alert('Please grant microphone permissions to use voice input.');
-      } else if (event.error === 'no-speech') {
-        // Normal - user didn't speak
-      } else {
-        console.warn('Speech recognition error:', event.error);
-      }
-
-      this.stopListening();
-    };
-
-    // Handle recognition end
-    this.recognition.onend = () => {
-      this.isListening = false;
-      this.updateUI();
-    };
-
-    // Handle recognition start
-    this.recognition.onstart = () => {
-      this.isListening = true;
-      this.updateUI();
-    };
-  },
-
-  startListening() {
-    if (this.isListening) return;
-
-    try {
-      // Reset transcript when starting new session
-      this.finalTranscript = this.inputField ? this.inputField.value + ' ' : '';
-      this.recognition.start();
     } catch (error) {
-      if (error.name === 'InvalidStateError') {
-        // Already started, ignore
-      } else {
-        console.error('Failed to start speech recognition:', error);
-      }
-    }
-  },
-
-  stopListening() {
-    if (!this.isListening) return;
-
-    try {
-      this.recognition.stop();
-    } catch (error) {
-      console.error('Failed to stop speech recognition:', error);
+      console.error('Transcription error:', error);
+      alert('Failed to transcribe audio: ' + error.message);
+    } finally {
+      this.isTranscribing = false;
+      this.updateUI();
     }
   },
 
   updateUI() {
-    if (this.isListening) {
-      // Show listening state
+    if (this.isRecording) {
+      // Show recording state
       this.el.classList.add('listening');
       this.el.classList.add('bg-red-500', 'hover:bg-red-600');
-      this.el.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+      this.el.classList.remove('bg-blue-500', 'hover:bg-blue-600', 'bg-yellow-500', 'hover:bg-yellow-600');
 
       if (this.listeningIndicator) {
         this.listeningIndicator.style.display = 'block';
       }
 
-      // Update button text/icon
+      if (this.micIcon) {
+        this.micIcon.classList.add('animate-pulse');
+      }
+    } else if (this.isTranscribing) {
+      // Show transcribing state
+      this.el.classList.add('bg-yellow-500', 'hover:bg-yellow-600');
+      this.el.classList.remove('bg-blue-500', 'hover:bg-blue-600', 'bg-red-500', 'hover:bg-red-600');
+
+      if (this.listeningIndicator) {
+        this.listeningIndicator.style.display = 'block';
+      }
+
       if (this.micIcon) {
         this.micIcon.classList.add('animate-pulse');
       }
     } else {
       // Show idle state
       this.el.classList.remove('listening');
-      this.el.classList.remove('bg-red-500', 'hover:bg-red-600');
+      this.el.classList.remove('bg-red-500', 'hover:bg-red-600', 'bg-yellow-500', 'hover:bg-yellow-600');
       this.el.classList.add('bg-blue-500', 'hover:bg-blue-600');
 
       if (this.listeningIndicator) {
         this.listeningIndicator.style.display = 'none';
       }
 
-      // Update button text/icon
       if (this.micIcon) {
         this.micIcon.classList.remove('animate-pulse');
       }
@@ -176,14 +194,16 @@ export default {
   },
 
   destroyed() {
-    // Clean up speech recognition
-    if (this.recognition) {
+    // Clean up media recorder
+    if (this.mediaRecorder) {
       try {
-        this.recognition.stop();
+        if (this.isRecording) {
+          this.mediaRecorder.stop();
+        }
       } catch (error) {
         // Ignore errors when stopping
       }
-      this.recognition = null;
+      this.mediaRecorder = null;
     }
   }
 };

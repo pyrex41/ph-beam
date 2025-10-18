@@ -91,6 +91,12 @@ defmodule CollabCanvasWeb.Router do
     plug(:accepts, ["json"])
   end
 
+  # API endpoints (no auth required)
+  scope "/api", CollabCanvasWeb do
+    pipe_through(:api)
+    post("/transcribe", WhisperController, :transcribe)
+  end
+
   # Health check endpoint (no auth required)
   scope "/", CollabCanvasWeb do
     pipe_through(:api)
