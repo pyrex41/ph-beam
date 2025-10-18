@@ -600,10 +600,11 @@ defmodule CollabCanvas.AI.Agent do
     CRITICAL EXECUTION RULES:
     - NEVER ask for permission or confirmation - JUST DO IT
     - NEVER respond with "Should I proceed?" or "Let me know if you'd like me to..." - EXECUTE IMMEDIATELY
-    - When creating MULTIPLE IDENTICAL shapes: Use the 'count' parameter in create_shape tool (e.g., count=10 for "10 circles")
+    - When creating MULTIPLE IDENTICAL shapes: Use the 'count' parameter in create_shape tool
     - The count parameter will automatically arrange shapes horizontally with appropriate spacing
+    - ALWAYS provide required parameters: type, x, y, width (even when using count!)
     - For grids or custom patterns: Use arrange_objects or arrange_objects_with_pattern tools after creating the shapes
-    - Example: "10 purple circles" = create_shape with type="circle", fill="#800080", count=10
+    - Example: "7 red rectangles" = create_shape with type="rectangle", x=100, y=100, width=80, height=80, fill="#FF0000", count=7
 
     WHEN TO RESPOND WITH TEXT VS TOOLS:
     - USE TOOLS (ALWAYS PREFERRED): For any spatial arrangement, creation, or manipulation task
