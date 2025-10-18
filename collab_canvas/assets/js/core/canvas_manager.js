@@ -16,6 +16,7 @@ export class CanvasManager {
     this.objectContainer = null;
     this.labelContainer = null; // Separate container for labels (renders on top)
     this.cursorContainer = null;
+    this.selectionContainer = null; // Container for selected objects (enables group transforms)
 
     // Object and cursor storage
     this.objects = new Map();
@@ -35,8 +36,10 @@ export class CanvasManager {
     this.currentUserId = null;
     this.selectedObjects = new Set(); // Changed from selectedObject to support multi-selection
     this.selectionBoxes = new Map(); // Map of objectId -> selectionBox graphics
+    this.selectionData = new Map(); // Map of objectId -> {originalParent, originalX, originalY, originalRotation, originalIndex}
     this.isDragging = false;
-    this.dragOffsets = new Map(); // Map of objectId -> {x, y} drag offset
+    this.dragOffsets = new Map(); // Map of objectId -> {x, y} drag offset (deprecated with selection container)
+    this.dragOffset = null; // Single drag offset for selection container {x, y}
     this.currentTool = 'select';
     this.isCreating = false;
     this.createStart = { x: 0, y: 0 };
@@ -139,6 +142,10 @@ export class CanvasManager {
     // this.objectContainer.cullable = true;
     this.objectContainer.isRenderGroup = true; // v8 render groups for batching
     this.app.stage.addChild(this.objectContainer);
+
+    // Create selection container for group transforms (child of objectContainer)
+    this.selectionContainer = new PIXI.Container();
+    this.objectContainer.addChild(this.selectionContainer);
 
     // Create label container (renders above objects, below cursors)
     this.labelContainer = new PIXI.Container();
@@ -401,10 +408,12 @@ export class CanvasManager {
     const graphics = new PIXI.Graphics();
     const width = data.width || 100;
     const height = data.height || 100;
+
     // Check for both 'fill' and 'color' fields for backwards compatibility
-    const fillColor = data.fill || data.color || '#3b82f6';
+    // Validate that the color is a valid string before using it
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = data.stroke || data.color || '#1e40af';
+    const strokeColor = this.validateColor(data.stroke || data.color) || '#1e40af';
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -441,10 +450,12 @@ export class CanvasManager {
   createCircle(position, data) {
     const graphics = new PIXI.Graphics();
     const radius = (data.width || 100) / 2;
+
     // Check for both 'fill' and 'color' fields for backwards compatibility
-    const fillColor = data.fill || data.color || '#3b82f6';
+    // Validate that the color is a valid string before using it
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = data.stroke || data.color || '#1e40af';
+    const strokeColor = this.validateColor(data.stroke || data.color) || '#1e40af';
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -523,10 +534,13 @@ export class CanvasManager {
    * @returns {PIXI.Text}
    */
   createText(position, data) {
+    // Validate color before using
+    const textColor = this.validateColor(data.color) || '#000000';
+
     const style = new PIXI.TextStyle({
       fontFamily: data.font_family || 'Arial',
       fontSize: data.font_size || 16,
-      fill: data.color || '#000000',
+      fill: textColor,
       align: data.align || 'left',
       // Task 8: Support bold and italic from update_text command
       fontWeight: data.bold ? 'bold' : 'normal',
@@ -565,9 +579,11 @@ export class CanvasManager {
     const points = data.points || 5; // Number of star points
     const outerRadius = (data.width || 100) / 2;
     const innerRadius = outerRadius * (data.innerRatio || 0.5);
-    const fillColor = data.fill || data.color || '#3b82f6';
+
+    // Validate colors
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = data.stroke || fillColor;
+    const strokeColor = this.validateColor(data.stroke) || fillColor;
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -610,9 +626,11 @@ export class CanvasManager {
     const graphics = new PIXI.Graphics();
     const width = data.width || 100;
     const height = data.height || 100;
-    const fillColor = data.fill || data.color || '#3b82f6';
+
+    // Validate colors
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = data.stroke || fillColor;
+    const strokeColor = this.validateColor(data.stroke) || fillColor;
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -650,9 +668,11 @@ export class CanvasManager {
     const graphics = new PIXI.Graphics();
     const sides = data.sides || 6; // Default to hexagon
     const radius = (data.width || 100) / 2;
-    const fillColor = data.fill || data.color || '#3b82f6';
+
+    // Validate colors
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = data.stroke || fillColor;
+    const strokeColor = this.validateColor(data.stroke) || fillColor;
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -755,7 +775,12 @@ export class CanvasManager {
 
     // Update position if changed
     if (objectData.position) {
-      if (isRemoteTransform) {
+      // Skip position updates for objects in selection container (being dragged/selected)
+      const isInSelectionContainer = pixiObject.parent === this.selectionContainer;
+
+      if (isInSelectionContainer) {
+        console.log('[CanvasManager] Skipping position update for object', objectData.id, 'in selectionContainer');
+      } else if (isRemoteTransform) {
         // Remote user is transforming - use smooth interpolation
         // ONLY set position, not size or rotation
         this.setInterpolationTarget(objectData.id, {
@@ -889,8 +914,31 @@ export class CanvasManager {
         // For complex updates or full data replacement, recreate the object
         // Note: This path is now less frequent due to partial update optimizations
         // for rotation-only (line 738) and size-only updates (line 761)
+
+        // IMPORTANT: Preserve selection state before recreating
+        const wasSelected = this.selectedObjects.has(pixiObject);
+        const wasInSelectionContainer = pixiObject.parent === this.selectionContainer;
+        const savedSelectionData = this.selectionData.get(objectData.id);
+
         this.deleteObject(objectData.id);
         this.createObject(objectData);
+
+        // Restore selection state after recreation
+        if (wasSelected && wasInSelectionContainer) {
+          const recreatedObject = this.objects.get(objectData.id);
+          if (recreatedObject) {
+            console.log('[CanvasManager] Restoring selection for recreated object', objectData.id);
+
+            // Restore selectionData if it existed
+            if (savedSelectionData) {
+              this.selectionData.set(objectData.id, savedSelectionData);
+            }
+
+            this.addToSelection(recreatedObject);
+            this.selectedObjects.add(recreatedObject);
+            // Don't create selection box - it should already exist
+          }
+        }
 
         // Update label for recreated object if labels are visible
         this.updateObjectLabels();
@@ -1317,12 +1365,21 @@ export class CanvasManager {
     if (this.currentTool === 'select') {
       if (clickedObject) {
         // This shouldn't happen if PixiJS events work, but keep as fallback
-        console.log('[CanvasManager] Object clicked via DOM event (fallback)');
+        console.log('[CanvasManager] Object clicked via DOM event (fallback), objectId:', clickedObject.objectId);
         // Shift+click = toggle selection, regular click = replace selection
         if (event.shiftKey) {
           this.toggleSelection(clickedObject);
         } else {
-          this.setSelection(clickedObject);
+          // Check if object is in selection container (not the Set - reference equality bug)
+          const isInSelection = clickedObject.parent === this.selectionContainer;
+          console.log('[CanvasManager] DOM fallback: isInSelection:', isInSelection, 'selectionContainer children:', this.selectionContainer.children.length);
+
+          if (!isInSelection) {
+            console.log('[CanvasManager] DOM fallback: calling setSelection');
+            this.setSelection(clickedObject);
+          } else {
+            console.log('[CanvasManager] DOM fallback: object already in selection, preserving multi-selection');
+          }
         }
       } else {
         // Clicking on empty space = start lasso selection or clear selection
@@ -1519,17 +1576,31 @@ export class CanvasManager {
       // Update temp object while creating
       this.updateTempObject(position);
     } else if (this.isDragging && this.selectedObjects.size > 0) {
-      // Move all selected objects together (Task 19: multi-object dragging)
-      this.selectedObjects.forEach(obj => {
-        const offset = this.dragOffsets.get(obj.objectId);
-        if (offset) {
-          const newX = position.x + offset.x;
-          const newY = position.y + offset.y;
-
-          obj.x = newX;
-          obj.y = newY;
+      // Check if actual movement occurred (more than 3 pixels threshold)
+      if (this.dragStartPos) {
+        const dx = Math.abs(position.x - this.dragStartPos.x);
+        const dy = Math.abs(position.y - this.dragStartPos.y);
+        if (dx > 3 || dy > 3) {
+          this.hasDragged = true;
         }
-      });
+      }
+
+      // Move the entire selection container (all children move together automatically)
+      if (this.dragOffset) {
+        const newX = position.x + this.dragOffset.x;
+        const newY = position.y + this.dragOffset.y;
+
+        this.selectionContainer.x = newX;
+        this.selectionContainer.y = newY;
+
+        // Log drag movement (throttled)
+        if (!this.lastDragLog || Date.now() - this.lastDragLog > 200) {
+          console.log('[CanvasManager] Dragging selectionContainer to', { x: newX, y: newY }, 'children:', this.selectionContainer.children.length);
+          this.lastDragLog = Date.now();
+        }
+      } else {
+        console.error('[CanvasManager] isDragging but no dragOffset!');
+      }
 
       // Update all selection boxes
       this.updateSelectionBoxes();
@@ -1543,9 +1614,18 @@ export class CanvasManager {
       // Broadcast positions for all selected objects during drag (throttled to avoid spam)
       if (!this.lastDragUpdate || Date.now() - this.lastDragUpdate > 50) {
         this.selectedObjects.forEach(obj => {
+          // Skip if object has been destroyed (no parent means it's not in scene graph)
+          if (!obj || !obj.parent) {
+            console.warn('[CanvasManager] Skipping destroyed object in selectedObjects during drag');
+            this.selectedObjects.delete(obj);
+            return;
+          }
+
+          // Get world position of object for server update
+          const worldPos = obj.getGlobalPosition();
           this.emit('update_object', {
             object_id: obj.objectId,
-            position: { x: obj.x, y: obj.y }
+            position: { x: worldPos.x, y: worldPos.y }
           });
         });
         this.lastDragUpdate = Date.now();
@@ -1636,17 +1716,57 @@ export class CanvasManager {
       // Finalize object creation
       this.finalizeTempObject(position);
     } else if (this.isDragging && this.selectedObjects.size > 0) {
-      // Send final update to server after dragging all selected objects
-      this.selectedObjects.forEach(obj => {
-        this.emit('update_object', {
-          object_id: obj.objectId,
-          position: {
-            x: obj.x,
-            y: obj.y
+      // Check if actual dragging occurred
+      if (this.hasDragged) {
+        console.log('[CanvasManager] Committing drag - actual movement detected');
+        // Commit drag: get world positions, reset container, update local positions
+        const updates = [];
+        this.selectedObjects.forEach(obj => {
+          // Skip if object has been destroyed
+          if (!obj || !obj.parent) {
+            console.warn('[CanvasManager] Skipping destroyed object in selectedObjects during drag commit');
+            this.selectedObjects.delete(obj);
+            return;
           }
+
+          // Capture world position before resetting container
+          const worldPos = obj.getGlobalPosition();
+          updates.push({ obj, worldPos });
         });
-      });
+
+        // Reset selection container to origin
+        this.selectionContainer.x = 0;
+        this.selectionContainer.y = 0;
+
+        // Update each object's local position to maintain world position
+        updates.forEach(({ obj, worldPos }) => {
+          // Convert world position to selectionContainer's local space (now at 0,0)
+          const localPos = this.selectionContainer.toLocal(worldPos);
+          obj.x = localPos.x;
+          obj.y = localPos.y;
+
+          // Send final position to server
+          this.emit('update_object', {
+            object_id: obj.objectId,
+            position: {
+              x: worldPos.x,
+              y: worldPos.y
+            }
+          });
+        });
+
+        // Update selection boxes to match new positions
+        this.updateSelectionBoxes();
+      } else {
+        console.log('[CanvasManager] No movement detected - treating as click, not drag');
+        // No actual movement - just a click, not a drag
+        // Don't commit anything, just clear the drag state
+      }
+
       this.isDragging = false;
+      this.hasDragged = false;
+      this.dragOffset = null;
+      this.dragStartPos = null;
     }
   }
 
@@ -2033,13 +2153,16 @@ export class CanvasManager {
       // Select all objects that intersect with the lasso rectangle
       this.objects.forEach((obj, objectId) => {
         const bounds = obj.getBounds();
-        
+
         // Check if object intersects with lasso rectangle
         if (this.rectanglesIntersect(
           minX, minY, maxX, maxY,
           bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height
         )) {
           if (!this.selectedObjects.has(obj)) {
+            // Reparent object to selection container
+            this.addToSelection(obj);
+            // Add to selection tracking
             this.selectedObjects.add(obj);
             this.emit('lock_object', { object_id: obj.objectId });
             this.createSelectionBox(obj);
@@ -2048,6 +2171,8 @@ export class CanvasManager {
       });
     }
 
+    console.log('[CanvasManager] AFTER lasso loop, selectionContainer children:', this.selectionContainer.children.length, 'children IDs:', this.selectionContainer.children.map(c => c.objectId));
+
     // Remove lasso rect
     this.objectContainer.removeChild(this.lassoRect);
     this.lassoRect.destroy();
@@ -2055,6 +2180,8 @@ export class CanvasManager {
     this.isLassoSelecting = false;
 
     console.log('[CanvasManager] Lasso selection complete, selected', this.selectedObjects.size, 'objects');
+    console.log('[CanvasManager] Selected object IDs:', Array.from(this.selectedObjects).map(o => o.objectId));
+    console.log('[CanvasManager] FINAL check - selectionContainer children:', this.selectionContainer.children.length);
   }
 
   /**
@@ -2106,6 +2233,11 @@ export class CanvasManager {
       this.emit('unlock_object', { object_id: obj.objectId });
     });
 
+    // Reparent all objects back to their original parents
+    this.selectedObjects.forEach(obj => {
+      this.removeFromSelection(obj);
+    });
+
     // Remove all selection boxes
     this.selectionBoxes.forEach((box, objectId) => {
       if (box.parent) {
@@ -2134,6 +2266,105 @@ export class CanvasManager {
     this.selectionBoxes.clear();
     this.rotationHandles.clear();
     this.resizeHandles.clear();
+
+    // Reset selection container position to origin
+    this.selectionContainer.x = 0;
+    this.selectionContainer.y = 0;
+  }
+
+  /**
+   * Add object to selection container (reparents to selectionContainer)
+   * Preserves world position by converting coordinates between containers
+   * @param {PIXI.DisplayObject} object - Object to add to selection
+   */
+  addToSelection(object) {
+    if (!object || !object.objectId) {
+      console.error('[CanvasManager] addToSelection: Invalid object', object);
+      return;
+    }
+
+    console.log('[CanvasManager] addToSelection: object', object.objectId, 'current parent:', object.parent?.constructor?.name, 'selectionContainer children before:', this.selectionContainer.children.length);
+
+    // Get world position before reparenting
+    const worldPos = object.getGlobalPosition();
+
+    // Store original parent and local state
+    this.selectionData.set(object.objectId, {
+      originalParent: object.parent,
+      originalX: object.x,
+      originalY: object.y,
+      originalRotation: object.rotation,
+      originalIndex: object.parent.getChildIndex(object)
+    });
+
+    // Remove from current parent and add to selection container
+    object.parent.removeChild(object);
+    this.selectionContainer.addChild(object);
+
+    console.log('[CanvasManager] addToSelection: object', object.objectId, 'reparented, new parent:', object.parent?.constructor?.name, 'selectionContainer children after:', this.selectionContainer.children.length);
+
+    // Convert world position to selection container's local space
+    const localPos = this.selectionContainer.toLocal(worldPos);
+    object.x = localPos.x;
+    object.y = localPos.y;
+  }
+
+  /**
+   * Remove object from selection container (reparents back to original parent)
+   * Preserves world position by converting coordinates between containers
+   * @param {PIXI.DisplayObject} object - Object to remove from selection
+   */
+  removeFromSelection(object) {
+    if (!object || !object.objectId) {
+      console.error('[CanvasManager] removeFromSelection: Invalid object', object);
+      return;
+    }
+
+    console.log('[CanvasManager] removeFromSelection called for object', object.objectId, 'parent:', object.parent?.constructor?.name, 'selectionContainer children before:', this.selectionContainer.children.length);
+
+    // If object is not in selection container, nothing to do
+    if (object.parent !== this.selectionContainer) {
+      console.log('[CanvasManager] removeFromSelection: object not in selectionContainer, skipping');
+      this.selectionData.delete(object.objectId);
+      return;
+    }
+
+    const savedData = this.selectionData.get(object.objectId);
+
+    // If no saved data, fall back to moving to objectContainer at current world position
+    if (!savedData) {
+      console.warn('[CanvasManager] removeFromSelection: No saved data for object', object.objectId, '- moving to objectContainer');
+
+      // Get world position before reparenting
+      const worldPos = object.getGlobalPosition();
+
+      // Remove from selection container and add to objectContainer
+      this.selectionContainer.removeChild(object);
+      this.objectContainer.addChild(object);
+
+      // Convert world position to objectContainer's local space
+      const localPos = this.objectContainer.toLocal(worldPos);
+      object.x = localPos.x;
+      object.y = localPos.y;
+      return;
+    }
+
+    // Get world position before reparenting
+    const worldPos = object.getGlobalPosition();
+
+    // Remove from selection container
+    this.selectionContainer.removeChild(object);
+
+    // Add back to original parent at original index
+    savedData.originalParent.addChildAt(object, savedData.originalIndex);
+
+    // Convert world position to original parent's local space
+    const localPos = savedData.originalParent.toLocal(worldPos);
+    object.x = localPos.x;
+    object.y = localPos.y;
+
+    // Clean up saved data
+    this.selectionData.delete(object.objectId);
   }
 
   /**
@@ -2142,9 +2373,13 @@ export class CanvasManager {
    */
   setSelection(object) {
     // Clear previous selection
+    console.log('[CanvasManager] setSelection: BEFORE clearSelection, selectionContainer children:', this.selectionContainer.children.length, 'children:', this.selectionContainer.children.map(c => ({ id: c.objectId, parent: c.parent?.constructor?.name })));
     this.clearSelection();
 
-    // Add to selection
+    // Reparent object to selection container
+    this.addToSelection(object);
+
+    // Add to selection tracking
     this.selectedObjects.add(object);
 
     // Lock the object for editing
@@ -2160,7 +2395,8 @@ export class CanvasManager {
    */
   toggleSelection(object) {
     if (this.selectedObjects.has(object)) {
-      // Deselect
+      // Deselect - reparent back to original container
+      this.removeFromSelection(object);
       this.selectedObjects.delete(object);
       this.emit('unlock_object', { object_id: object.objectId });
 
@@ -2194,7 +2430,8 @@ export class CanvasManager {
         this.resizeHandles.delete(object.objectId);
       }
     } else {
-      // Add to selection
+      // Add to selection - reparent to selection container
+      this.addToSelection(object);
       this.selectedObjects.add(object);
       this.emit('lock_object', { object_id: object.objectId });
       this.createSelectionBox(object);
@@ -2376,9 +2613,11 @@ export class CanvasManager {
           bounds.height + 4
         ).stroke({ width: 2, color: 0x3b82f6 });
 
-        // Update position to match object
-        box.x = obj.x;
-        box.y = obj.y;
+        // Update position to match object (convert to objectContainer space)
+        const worldPos = obj.getGlobalPosition();
+        const boxLocalPos = this.objectContainer.toLocal(worldPos);
+        box.x = boxLocalPos.x;
+        box.y = boxLocalPos.y;
 
         // Update rotation and pivot to match object (for rotated objects)
         box.angle = obj.angle;
@@ -2401,9 +2640,12 @@ export class CanvasManager {
           const rotatedX = localX * Math.cos(angleRad) - localY * Math.sin(angleRad);
           const rotatedY = localX * Math.sin(angleRad) + localY * Math.cos(angleRad);
 
-          // Position handle at rotated corner position
-          rotationHandle.x = obj.x + rotatedX;
-          rotationHandle.y = obj.y + rotatedY;
+          // Position handle at rotated corner position (convert to objectContainer space)
+          const handleWorldX = worldPos.x + rotatedX;
+          const handleWorldY = worldPos.y + rotatedY;
+          const handleLocalPos = this.objectContainer.toLocal(new PIXI.Point(handleWorldX, handleWorldY));
+          rotationHandle.x = handleLocalPos.x;
+          rotationHandle.y = handleLocalPos.y;
         }
 
         // Update resize handle position (bottom-right corner)
@@ -2424,9 +2666,12 @@ export class CanvasManager {
           const rotatedX = localX * Math.cos(angleRad) - localY * Math.sin(angleRad);
           const rotatedY = localX * Math.sin(angleRad) + localY * Math.cos(angleRad);
 
-          // Position handle at rotated corner position
-          resizeHandle.x = obj.x + rotatedX;
-          resizeHandle.y = obj.y + rotatedY;
+          // Position handle at rotated corner position (convert to objectContainer space)
+          const resizeWorldX = worldPos.x + rotatedX;
+          const resizeWorldY = worldPos.y + rotatedY;
+          const resizeLocalPos = this.objectContainer.toLocal(new PIXI.Point(resizeWorldX, resizeWorldY));
+          resizeHandle.x = resizeLocalPos.x;
+          resizeHandle.y = resizeLocalPos.y;
 
           // Rotate handle to point towards center (object angle + 180° to point inward)
           resizeHandle.angle = obj.angle + 180;
@@ -2520,7 +2765,7 @@ export class CanvasManager {
     const globalPos = event.data.global;
     const localPos = this.screenToCanvas(globalPos);
 
-    console.log('[CanvasManager] Object pointer down, isPanning:', this.isPanning, 'objectId:', object.objectId);
+    console.log('[CanvasManager] PixiJS Object pointer down, objectId:', object.objectId, 'selectedObjects.size:', this.selectedObjects.size, 'has object:', this.selectedObjects.has(object));
 
     // Check if object is locked by another user
     const pixiObject = this.objects.get(object.objectId);
@@ -2531,23 +2776,34 @@ export class CanvasManager {
     }
 
     if (this.currentTool === 'select') {
-      // If object is not selected, select it (but don't deselect others if shift was held during initial click)
-      if (!this.selectedObjects.has(object)) {
+      // Check if clicked object is a child of selectionContainer
+      // (This handles lasso selections properly since all selected objects are reparented there)
+      const isInSelection = object.parent === this.selectionContainer;
+
+      console.log('[CanvasManager] onObjectPointerDown: object', object.objectId, 'parent:', object.parent?.constructor?.name, 'isInSelection:', isInSelection, 'selectionContainer children:', this.selectionContainer.children.length, 'selectedObjects size:', this.selectedObjects.size);
+
+      if (!isInSelection) {
+        // Object is not in selection container, select it
+        console.log('[CanvasManager] onObjectPointerDown: calling setSelection for object', object.objectId);
         this.setSelection(object);
+      } else {
+        console.log('[CanvasManager] onObjectPointerDown: object already in selection, preserving multi-selection');
       }
 
-      // Prepare for dragging all selected objects
-      console.log('[CanvasManager] Setting isDragging=true');
+      // Prepare for dragging the selection container (all children move together)
       this.isDragging = true;
+      this.hasDragged = false; // Track if actual movement occurs
 
-      // Calculate drag offset for each selected object
-      this.dragOffsets.clear();
-      this.selectedObjects.forEach(obj => {
-        this.dragOffsets.set(obj.objectId, {
-          x: obj.x - localPos.x,
-          y: obj.y - localPos.y
-        });
-      });
+      // Calculate single drag offset for selection container
+      this.dragOffset = {
+        x: this.selectionContainer.x - localPos.x,
+        y: this.selectionContainer.y - localPos.y
+      };
+
+      // Store initial mouse position to detect clicks vs drags
+      this.dragStartPos = { x: localPos.x, y: localPos.y };
+
+      console.log('[CanvasManager] onObjectPointerDown: set dragOffset', this.dragOffset, 'selectionContainer pos:', { x: this.selectionContainer.x, y: this.selectionContainer.y });
     } else if (this.currentTool === 'delete') {
       // Delete object
       this.emit('delete_object', { object_id: object.objectId });
@@ -2704,6 +2960,27 @@ export class CanvasManager {
 
     this.isResizing = false;
     this.resizingObject = null;
+  }
+
+  /**
+   * Validate and sanitize color values to prevent NaN errors
+   * @param {any} color - Color value to validate (can be string, number, null, undefined, NaN, etc.)
+   * @returns {string|null} Valid hex color string or null if invalid
+   */
+  validateColor(color) {
+    // Return null if color is not a valid string
+    if (typeof color !== 'string' || !color || color === 'null' || color === 'undefined' || color === 'NaN') {
+      console.warn('[CanvasManager] Invalid color value:', color, '- using default');
+      return null;
+    }
+
+    // Check if it's a valid hex color format
+    if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      console.warn('[CanvasManager] Invalid hex color format:', color, '- using default');
+      return null;
+    }
+
+    return color;
   }
 
   /**
@@ -2924,8 +3201,11 @@ export class CanvasManager {
    */
   selectAll() {
     this.clearSelection();
-    
+
     this.objects.forEach((pixiObj, objectId) => {
+      // Reparent to selection container
+      this.addToSelection(pixiObj);
+      // Add to selection tracking
       this.selectedObjects.add(pixiObj);
       this.emit('lock_object', { object_id: pixiObj.objectId });
       this.createSelectionBox(pixiObj);
