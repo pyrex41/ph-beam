@@ -6,6 +6,9 @@
 app = 'ph-beam'
 primary_region = 'ord'
 
+[build]
+  dockerfile = 'collab_canvas/Dockerfile'
+
 [env]
   DATABASE_PATH = '/data/collab_canvas.db'
 
