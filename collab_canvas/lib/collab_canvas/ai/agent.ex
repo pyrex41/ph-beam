@@ -491,11 +491,30 @@ defmodule CollabCanvas.AI.Agent do
     # Generate human-readable display names (e.g., "Object 1", "Object 2")
     objects_with_names = generate_display_names(all_objects)
 
+    # Build detailed object context for semantic selection
+    objects_with_details = all_objects
+    |> Enum.map(fn obj ->
+      data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
+      %{
+        id: obj.id,
+        type: obj.type,
+        position: obj.position,
+        data: data
+      }
+    end)
+
     # Build context with all objects and their display names
     available_objects_str = objects_with_names
     |> Enum.map(fn {obj, display_name} ->
       data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
-      "  - #{display_name} (ID: #{obj.id}): #{obj.type} at (#{get_in(obj.position, ["x"])||0}, #{get_in(obj.position, ["y"])||0})"
+      color_info = if data["color"], do: " color: #{data["color"]}", else: ""
+      size_info = cond do
+        data["width"] && data["height"] -> " size: #{data["width"]}x#{data["height"]}"
+        data["width"] -> " width: #{data["width"]}"
+        data["text"] -> " text: \"#{String.slice(data["text"] || "", 0, 20)}#{if String.length(data["text"] || "") > 20, do: "...", else: ""}\""
+        true -> ""
+      end
+      "  - #{display_name} (ID: #{obj.id}): #{obj.type} at (#{get_in(obj.position, ["x"])||0}, #{get_in(obj.position, ["y"])||0})#{color_info}#{size_info}"
     end)
     |> Enum.join("\n")
 
@@ -520,6 +539,17 @@ defmodule CollabCanvas.AI.Agent do
 
     CANVAS OBJECTS (use these human-readable names in your responses):
     #{available_objects_str}#{selected_context}
+
+    SEMANTIC SELECTION RULES:
+    - When users ask to select objects by description (e.g., "select all red circles", "select the small objects", "select objects in the top-left corner"):
+      * Use the select_objects_by_description tool
+      * Pass the natural language description as provided by the user
+      * Include ALL canvas objects in objects_context - the AI will filter them based on the description
+      * Examples of selectable attributes: color, size (small/medium/large based on relative dimensions), shape/type, position (top/bottom/left/right/center), combined attributes
+    - The objects_context for select_objects_by_description should include the full details of ALL objects for proper filtering
+
+    OBJECT DETAILS FOR SEMANTIC SELECTION:
+    #{Jason.encode!(objects_with_details)}
 
     DISAMBIGUATION RULES:
     - When the user refers to "that square", "the circle", "that rectangle", etc. without specifying which one:
@@ -1569,6 +1599,30 @@ defmodule CollabCanvas.AI.Agent do
         }
       end
     end
+  end
+
+  # Executes a select_objects_by_description tool call to select objects by natural language description.
+  #
+  # Filters objects based on the description provided and returns matching object IDs.
+  # The AI will have already parsed the description and matched it against the objects_context.
+  defp execute_tool_call(%{name: "select_objects_by_description", input: input}, canvas_id, _current_color) do
+    description = input["description"]
+    objects_context = input["objects_context"] || []
+
+    # The AI has already done the filtering based on the description and objects_context
+    # Extract the IDs from the filtered objects
+    selected_ids = Enum.map(objects_context, fn obj ->
+      obj["id"] || obj[:id]
+    end)
+
+    Logger.info("Semantic selection: '#{description}' matched #{length(selected_ids)} objects")
+
+    # Return the selected IDs - the LiveView will handle the actual selection
+    %{
+      tool: "select_objects_by_description",
+      input: input,
+      result: {:ok, %{selected_ids: selected_ids, description: description}}
+    }
   end
 
   # Fallback handler for unknown tool calls.

@@ -167,6 +167,7 @@ defmodule CollabCanvasWeb.CanvasLive do
         |> assign(:ai_command, "")
         |> assign(:ai_loading, false)
         |> assign(:ai_task_ref, nil)
+        |> assign(:ai_interaction_history, [])
         |> assign(:show_labels, false)
         |> assign(:current_color, ColorPalettes.get_default_color(user.id))
         |> assign(:show_color_picker, false)
@@ -673,6 +674,17 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles AI command updates from JavaScript hooks (voice input, Enter key).
+
+  Used by the VoiceInput hook to update the command as speech is transcribed,
+  and by the AICommandInput hook to clear the field after Enter submission.
+  """
+  @impl true
+  def handle_event("update_ai_command", %{"command" => command}, socket) do
+    {:noreply, assign(socket, :ai_command, command)}
+  end
+
+  @doc """
   Handles AI command execution requests from the client (async, non-blocking).
 
   Spawns an async task to process the natural language command using Claude API.
@@ -727,10 +739,22 @@ defmodule CollabCanvasWeb.CanvasLive do
       # Set loading state and store task reference for timeout monitoring
       Process.send_after(self(), {:ai_timeout, task.ref}, 30_000)
 
+      # Add command to interaction history
+      new_interaction = %{
+        type: :user,
+        content: command,
+        timestamp: DateTime.utc_now()
+      }
+
+      history = [new_interaction | socket.assigns.ai_interaction_history]
+      # Keep only last 20 interactions (10 command/response pairs)
+      history = Enum.take(history, 20)
+
       {:noreply,
        socket
        |> assign(:ai_loading, true)
        |> assign(:ai_task_ref, task.ref)
+       |> assign(:ai_interaction_history, history)
        |> clear_flash()}
     end
   end
@@ -1371,10 +1395,24 @@ defmodule CollabCanvasWeb.CanvasLive do
   # - {:error, :invalid_response_format} - AI response parsing failed
   # - {:error, reason} - Other errors
   defp process_ai_result(result, socket) do
+    # Helper to add AI response to history
+    add_ai_response = fn socket, response_text ->
+      new_interaction = %{
+        type: :ai,
+        content: response_text,
+        timestamp: DateTime.utc_now()
+      }
+      history = [new_interaction | socket.assigns.ai_interaction_history]
+      # Keep only last 20 interactions
+      history = Enum.take(history, 20)
+      assign(socket, :ai_interaction_history, history)
+    end
+
     case result do
       {:ok, {:text_response, text}} ->
         # AI asked for clarification or provided text response
         socket
+        |> add_ai_response.(text)
         |> assign(:ai_command, "")
         |> put_flash(:info, text)
 
@@ -1384,11 +1422,13 @@ defmodule CollabCanvasWeb.CanvasLive do
         object_labels = generate_object_labels(socket.assigns.objects)
 
         # Push event to JavaScript to render labels
+        response = if(show, do: "✅ Object labels shown", else: "✅ Object labels hidden")
         socket
+        |> add_ai_response.(response)
         |> push_event("toggle_object_labels", %{show: show, labels: object_labels})
         |> assign(:ai_command, "")
         |> assign(:show_labels, show)
-        |> put_flash(:info, if(show, do: "Object labels shown", else: "Object labels hidden"))
+        |> put_flash(:info, response)
 
       {:ok, results} when is_list(results) and length(results) == 0 ->
         # AI returned no tool calls - it either doesn't understand or can't perform the action
@@ -1408,6 +1448,16 @@ defmodule CollabCanvasWeb.CanvasLive do
             |> assign(:ai_command, "")
             |> assign(:show_labels, show)
             |> put_flash(:info, if(show, do: "Object labels shown", else: "Object labels hidden"))
+
+          [%{tool: "select_objects_by_description", result: {:ok, %{selected_ids: selected_ids, description: description}}}] ->
+            # Handle semantic selection - select objects matching the description
+            response = "✅ Selected #{length(selected_ids)} objects matching: #{description}"
+            socket
+            |> add_ai_response.(response)
+            |> push_event("select_objects", %{object_ids: selected_ids})
+            |> assign(:selected_objects, selected_ids)
+            |> assign(:ai_command, "")
+            |> put_flash(:info, response)
 
           _ ->
             # Separate created objects from updated objects
@@ -1495,6 +1545,7 @@ defmodule CollabCanvasWeb.CanvasLive do
         end)
 
         socket_with_all
+        |> add_ai_response.(message)
         |> assign(:objects, final_objects)
         |> assign(:ai_command, "")
         |> put_flash(:info, message)
@@ -1731,24 +1782,95 @@ defmodule CollabCanvasWeb.CanvasLive do
           <p class="text-sm text-gray-500 mt-1">Describe what you want to create</p>
         </div>
 
-        <div class="flex-1 p-4 overflow-y-auto">
-          <div class="space-y-4">
-            <!-- AI Command Input -->
+        <div class="flex-1 flex flex-col">
+          <!-- AI Interaction History -->
+          <div class="flex-1 p-4 overflow-y-auto border-b border-gray-200">
+            <h3 class="text-sm font-medium text-gray-700 mb-3">AI Interaction History</h3>
+            <div class="space-y-2 flex flex-col-reverse">
+              <%= if length(@ai_interaction_history) == 0 do %>
+                <p class="text-sm text-gray-500 italic">No interactions yet. Enter a command below to get started.</p>
+              <% else %>
+                <%= for interaction <- @ai_interaction_history do %>
+                  <div class={[
+                    "p-2 rounded-lg text-sm",
+                    interaction.type == :user && "bg-blue-50 border border-blue-200",
+                    interaction.type == :ai && "bg-green-50 border border-green-200"
+                  ]}>
+                    <div class="flex items-start gap-2">
+                      <span class={[
+                        "font-semibold",
+                        interaction.type == :user && "text-blue-700",
+                        interaction.type == :ai && "text-green-700"
+                      ]}>
+                        <%= if interaction.type == :user do %>
+                          You:
+                        <% else %>
+                          AI:
+                        <% end %>
+                      </span>
+                      <span class="flex-1 text-gray-700"><%= interaction.content %></span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1">
+                      <%= Calendar.strftime(interaction.timestamp, "%H:%M:%S") %>
+                    </div>
+                  </div>
+                <% end %>
+              <% end %>
+            </div>
+          </div>
+
+          <!-- AI Command Input -->
+          <div class="p-4">
+            <div class="space-y-4">
+              <!-- AI Command Input -->
             <form phx-change="ai_command_change">
               <label class="block text-sm font-medium text-gray-700 mb-2">
                 Command
               </label>
-              <textarea
-                name="value"
-                value={@ai_command}
-                disabled={@ai_loading}
-                class={[
-                  "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none",
-                  @ai_loading && "bg-gray-50 cursor-not-allowed"
-                ]}
-                rows="4"
-                placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle'"
-              ><%= @ai_command %></textarea>
+              <div class="relative">
+                <textarea
+                  id="ai-command-input"
+                  name="value"
+                  value={@ai_command}
+                  disabled={@ai_loading}
+                  phx-hook="AICommandInput"
+                  class={[
+                    "w-full px-3 py-2 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none",
+                    @ai_loading && "bg-gray-50 cursor-not-allowed"
+                  ]}
+                  rows="4"
+                  placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle' (Enter to submit, Shift+Enter for new line)"
+                ><%= @ai_command %></textarea>
+
+                <!-- Voice Input Button (Push-to-Talk) -->
+                <button
+                  type="button"
+                  id="voice-input-button"
+                  phx-hook="VoiceInput"
+                  class="absolute right-2 top-2 p-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+                  title="Hold to speak (push-to-talk)"
+                  disabled={@ai_loading}
+                >
+                  <svg
+                    class="w-5 h-5 mic-icon"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                    />
+                  </svg>
+                  <span class="listening-indicator hidden absolute -top-1 -right-1 h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                  </span>
+                </button>
+              </div>
             </form>
 
             <button
@@ -1861,6 +1983,7 @@ defmodule CollabCanvasWeb.CanvasLive do
           </div>
         </div>
       </div>
+    </div>
 
       <!-- Color Picker Popup -->
       <%= if @show_color_picker do %>

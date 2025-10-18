@@ -3811,70 +3811,79 @@
   "copilot": {
     "tasks": [
       {
-        "id": 1,
+        "id": "1",
         "title": "Implement AI Semantic Selection Tool",
         "description": "Create a new AI tool called select_objects_by_description that allows users to select objects using natural language descriptions like 'select all small red circles' or 'select the objects in the top-left corner.' This feature provides a productivity boost by enabling complex, context-aware selections that are difficult to achieve manually.",
         "details": "Add a new tool in tools.ex named select_objects_by_description. Enhance the Agent.ex module's build_command_with_context function to include a comprehensive list of all objects and their properties (e.g., position, size, color, shape) for each AI request. The tool should interpret combined attributes and handle vague terms by reasoning over canvas context. Pseudo-code: In tools.ex, define select_objects_by_description(description, objects_list) -> filter objects based on NLP parsing of description against object properties. In Agent.ex, modify build_command_with_context to append objects_list to the prompt context.",
         "testStrategy": "Validate through the AI Command Test Suite (task 5) with a success rate >90% on test cases involving at least two combined attributes and vague terms. Manual testing to ensure selections match user intent.",
         "priority": "high",
         "dependencies": [],
-        "status": "pending",
-        "subtasks": []
+        "status": "done",
+        "subtasks": [],
+        "updatedAt": "2025-10-18T04:58:56.570Z"
       },
       {
-        "id": 2,
+        "id": "2",
         "title": "Add Voice Command Input with Push-to-Talk",
         "description": "Implement a push-to-talk microphone icon using the browser's SpeechRecognition API to stream live transcription into the AI input field, making interactions faster and more natural.",
         "details": "In the frontend JavaScript, add a new hook or modify app.js to manage microphone state and API interaction. Include UI feedback for 'listening' and 'transcribing' states. Handle microphone permissions gracefully, with fallback to text input if API is unavailable. Pseudo-code: Create a hook that initializes SpeechRecognition, starts/stops on button press, updates input field in real-time, and handles errors.",
         "testStrategy": "Test transcription latency <500ms, permission handling, and editability of transcribed text before submission. Use browser developer tools to simulate API unavailability.",
         "priority": "medium",
         "dependencies": [],
-        "status": "pending",
-        "subtasks": []
+        "status": "done",
+        "subtasks": [],
+        "updatedAt": "2025-10-18T05:05:11.730Z"
       },
       {
-        "id": 3,
+        "id": "3",
         "title": "Implement AI Interaction History Panel",
         "description": "Replace the AI input area with a persistent, scrollable chat-like panel displaying history of user commands and AI responses, providing transparency and auditability.",
         "details": "Modify the CanvasLive template and state management to store interaction history in socket assigns for the session. Display last 20+ interactions with user commands and AI responses (e.g., '✅ Created 3 objects') clearly distinguished. Dock the input field at the bottom. Pseudo-code: In LiveView assigns, maintain a list of {user: command, ai: response} tuples, render in a scrollable div with conditional styling.",
         "testStrategy": "Verify panel displays history correctly, input field is docked, and responses are distinguished. Test with multiple interactions to ensure persistence during session.",
         "priority": "medium",
         "dependencies": [],
-        "status": "pending",
-        "subtasks": []
+        "status": "done",
+        "subtasks": [],
+        "updatedAt": "2025-10-18T05:09:56.185Z"
       },
       {
-        "id": 4,
+        "id": "4",
         "title": "Configure Enter Key to Submit AI Command",
         "description": "Modify the AI command textarea to submit on Enter and add newline on Shift+Enter, improving user experience for quick interactions.",
         "details": "Add a small JavaScript enhancement in a hook attached to the form. Listen for keydown events on the textarea: if Enter (without Shift), trigger execute_ai_command event and clear the field; if Shift+Enter, insert newline. Pseudo-code: In hook, add event listener: if e.key === 'Enter' && !e.shiftKey, submit and clear; else if e.shiftKey, allow default.",
         "testStrategy": "Test that Enter submits and clears the field, Shift+Enter adds newline. Ensure no interference with other form behaviors.",
         "priority": "medium",
         "dependencies": [],
-        "status": "pending",
-        "subtasks": []
+        "status": "done",
+        "subtasks": [],
+        "updatedAt": "2025-10-18T05:05:25.233Z"
       },
       {
-        "id": 5,
+        "id": "5",
         "title": "Create AI Command Test Suite",
         "description": "Develop a dedicated test suite with 20-30 core commands and 3-5 variations each to ensure reliability of AI features, covering creation, manipulation, layout, and selection.",
         "details": "Create a new test file test/collab_canvas/ai/agent_test.exs. Tests call Agent.execute_command/3 with mock canvas_id and assert on returned results tuple for expected canvas state changes. Include variations for robustness against phrasing. Pseudo-code: For each test, setup mock canvas, call execute_command with command string, assert on result structure.",
         "testStrategy": "Run mix test to ensure all tests pass, covering success rates and regressions. Integrate with CI for ongoing validation.",
         "priority": "high",
         "dependencies": [
-          1,
-          2,
-          3,
-          4
+          "1",
+          "2",
+          "3",
+          "4"
         ],
-        "status": "pending",
-        "subtasks": []
+        "status": "done",
+        "subtasks": [],
+        "updatedAt": "2025-10-18T05:20:56.938Z"
       }
     ],
     "metadata": {
-      "created": "2025-10-18T02:12:24.639Z",
-      "updated": "2025-10-18T02:12:24.639Z",
-      "description": "Tasks for copilot context"
+      "version": "1.0.0",
+      "lastModified": "2025-10-18T05:20:56.939Z",
+      "taskCount": 5,
+      "completedCount": 5,
+      "tags": [
+        "copilot"
+      ]
     }
   }
 }
