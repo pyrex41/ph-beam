@@ -21,6 +21,8 @@ defmodule CollabCanvas.Canvases.Object do
              :component_id,
              :is_main_component,
              :instance_overrides,
+             :group_id,
+             :z_index,
              :inserted_at,
              :updated_at
            ]}
@@ -31,6 +33,8 @@ defmodule CollabCanvas.Canvases.Object do
     field(:locked_by, :string)
     field(:is_main_component, :boolean, default: false)
     field(:instance_overrides, :string)
+    field(:group_id, :binary_id)
+    field(:z_index, :float, default: 0.0)
 
     belongs_to(:canvas, Canvas)
     belongs_to(:component, Component)
@@ -52,6 +56,8 @@ defmodule CollabCanvas.Canvases.Object do
     * `:component_id` - ID of the component this object belongs to (for component instances)
     * `:is_main_component` - Boolean indicating if this is a main component object
     * `:instance_overrides` - JSON string containing instance-specific overrides
+    * `:group_id` - UUID indicating which group this object belongs to (for grouping)
+    * `:z_index` - Float value indicating the layer order (higher values are in front)
 
   ## Validations
     * Type must be present and one of the allowed types
@@ -68,10 +74,12 @@ defmodule CollabCanvas.Canvases.Object do
       :locked_by,
       :component_id,
       :is_main_component,
-      :instance_overrides
+      :instance_overrides,
+      :group_id,
+      :z_index
     ])
     |> validate_required([:type, :canvas_id])
-    |> validate_inclusion(:type, ["rectangle", "circle", "ellipse", "text", "line", "path"])
+    |> validate_inclusion(:type, ["rectangle", "circle", "ellipse", "text", "line", "path", "star", "triangle", "polygon"])
     |> validate_position()
     |> foreign_key_constraint(:canvas_id, name: "objects_canvas_id_fkey")
     |> foreign_key_constraint(:component_id, name: "objects_component_id_fkey")

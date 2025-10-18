@@ -690,6 +690,385 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles grouping of selected objects.
+
+  Groups multiple objects together by assigning them a shared group_id.
+  Grouped objects will move, resize, and rotate as a single unit.
+
+  ## Parameters
+
+  - `params` - Map containing "object_ids" list of object IDs to group
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message.
+  """
+  @impl true
+  def handle_event("create_group", %{"object_ids" => object_ids}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    case Canvases.create_group(object_ids) do
+      {:ok, group_id, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_grouped, group_id, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          # Replace updated objects in the list
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+          
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, put_flash(socket, :info, "Objects grouped successfully")}
+
+      {:error, :no_objects} ->
+        {:noreply, put_flash(socket, :error, "No objects selected to group")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Some objects not found")}
+    end
+  end
+
+  @doc """
+  Handles ungrouping of objects.
+
+  Removes group_id from objects to ungroup them.
+
+  ## Parameters
+
+  - `params` - Map containing "object_ids" list of object IDs to ungroup
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message.
+  """
+  @impl true
+  def handle_event("ungroup", %{"object_ids" => object_ids}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    # Get the first object to find its group_id
+    case Canvases.get_object(List.first(object_ids)) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+
+      object when not is_nil(object.group_id) ->
+        case Canvases.ungroup(object.group_id) do
+          {:ok, updated_objects} ->
+            # Broadcast to all connected clients
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              socket.assigns.topic,
+              {:objects_ungrouped, updated_objects}
+            )
+
+            # Update local state
+            socket = update(socket, :objects, fn current_objects ->
+              updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+              
+              Enum.map(current_objects, fn obj ->
+                Map.get(updated_map, obj.id, obj)
+              end)
+            end)
+
+            {:noreply, put_flash(socket, :info, "Objects ungrouped successfully")}
+
+          {:error, :not_found} ->
+            {:noreply, put_flash(socket, :error, "Group not found")}
+        end
+
+      _object ->
+        {:noreply, put_flash(socket, :error, "Objects are not grouped")}
+    end
+  end
+
+  @doc """
+  Handles duplication of an object.
+
+  Creates a copy of the specified object with an optional position offset.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_id" - ID of object to duplicate
+    - "offset" - Optional map with "x" and "y" offset values
+
+  ## Returns
+
+  `{:noreply, socket}` with the new object created.
+  """
+  @impl true
+  def handle_event("duplicate_object", params, socket) do
+    object_id = params["object_id"]
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+    
+    offset = params["offset"] || %{"x" => 20, "y" => 20}
+    offset_x = offset["x"] || 20
+    offset_y = offset["y"] || 20
+
+    case Canvases.get_object(object_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+
+      object ->
+        # Parse the data JSON if it's a string
+        data = if is_binary(object.data) do
+          Jason.decode!(object.data)
+        else
+          object.data
+        end
+
+        # Create new object with offset position
+        new_position = %{
+          "x" => (object.position["x"] || object.position[:x]) + offset_x,
+          "y" => (object.position["y"] || object.position[:y]) + offset_y
+        }
+
+        attrs = %{
+          "type" => object.type,
+          "position" => new_position,
+          "data" => Jason.encode!(data)
+        }
+
+        case Canvases.create_object(socket.assigns.canvas_id, object.type, attrs) do
+          {:ok, new_object} ->
+            # Broadcast to all connected clients
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              socket.assigns.topic,
+              {:object_created, new_object}
+            )
+
+            # Update local state
+            socket = update(socket, :objects, fn objects -> objects ++ [new_object] end)
+
+            {:noreply, socket}
+
+          {:error, changeset} ->
+            Logger.error("Failed to duplicate object: #{inspect(changeset)}")
+            {:noreply, put_flash(socket, :error, "Failed to duplicate object")}
+        end
+    end
+  end
+
+  @doc """
+  Handles bringing an object to the front (highest z_index).
+
+  ## Parameters
+
+  - `params` - Map containing "object_id" of object to bring forward
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list.
+  """
+  @impl true
+  def handle_event("bring_to_front", %{"object_id" => object_id}, socket) do
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    case Canvases.bring_to_front(object_id) do
+      {:ok, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_reordered, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+          
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, socket}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+    end
+  end
+
+  @doc """
+  Handles sending an object to the back (lowest z_index).
+
+  ## Parameters
+
+  - `params` - Map containing "object_id" of object to send backward
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list.
+  """
+  @impl true
+  def handle_event("send_to_back", %{"object_id" => object_id}, socket) do
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    case Canvases.send_to_back(object_id) do
+      {:ok, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_reordered, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+          
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, socket}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+    end
+  end
+
+  @doc """
+  Handles alignment of selected objects.
+
+  Uses the Layout module to calculate new positions for objects based on
+  the specified alignment type.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_ids" - List of object IDs to align
+    - "alignment" - Alignment type (left, right, center, top, bottom, middle)
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects.
+  """
+  @impl true
+  def handle_event("align_objects", %{"object_ids" => object_ids, "alignment" => alignment}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    # Fetch the objects
+    objects = Enum.map(object_ids, fn id ->
+      case Canvases.get_object(id) do
+        nil -> nil
+        obj ->
+          # Parse data if it's a string
+          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
+          %{id: obj.id, position: obj.position, data: data}
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+
+    if length(objects) < 2 do
+      {:noreply, put_flash(socket, :error, "Need at least 2 objects to align")}
+    else
+      # Calculate new positions using Layout module
+      updates = CollabCanvas.AI.Layout.align_objects(objects, alignment)
+
+      # Apply updates to database
+      Enum.each(updates, fn update ->
+        Canvases.update_object(update.id, %{position: update.position})
+      end)
+
+      # Broadcast to all clients
+      updated_objects = Enum.map(updates, fn update ->
+        Canvases.get_object(update.id)
+      end)
+
+      Phoenix.PubSub.broadcast(
+        CollabCanvas.PubSub,
+        socket.assigns.topic,
+        {:objects_updated_batch, updated_objects}
+      )
+
+      {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Handles distribution of selected objects.
+
+  Uses the Layout module to evenly space objects horizontally or vertically.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_ids" - List of object IDs to distribute
+    - "direction" - Distribution direction (horizontal or vertical)
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects.
+  """
+  @impl true
+  def handle_event("distribute_objects", %{"object_ids" => object_ids, "direction" => direction}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    # Fetch the objects
+    objects = Enum.map(object_ids, fn id ->
+      case Canvases.get_object(id) do
+        nil -> nil
+        obj ->
+          # Parse data if it's a string
+          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
+          %{id: obj.id, position: obj.position, data: data}
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+
+    if length(objects) < 3 do
+      {:noreply, put_flash(socket, :error, "Need at least 3 objects to distribute")}
+    else
+      # Calculate new positions using Layout module
+      updates = case direction do
+        "horizontal" -> CollabCanvas.AI.Layout.distribute_horizontally(objects)
+        "vertical" -> CollabCanvas.AI.Layout.distribute_vertically(objects)
+        _ -> []
+      end
+
+      # Apply updates to database
+      Enum.each(updates, fn update ->
+        Canvases.update_object(update.id, %{position: update.position})
+      end)
+
+      # Broadcast to all clients
+      updated_objects = Enum.map(updates, fn update ->
+        Canvases.get_object(update.id)
+      end)
+
+      Phoenix.PubSub.broadcast(
+        CollabCanvas.PubSub,
+        socket.assigns.topic,
+        {:objects_updated_batch, updated_objects}
+      )
+
+      {:noreply, socket}
+    end
+  end
+
+  @doc """
   Handles AI command input changes from the client.
 
   Updates the AI command text in socket assigns as the user types in the
@@ -1139,6 +1518,100 @@ defmodule CollabCanvasWeb.CanvasLive do
      socket
      |> assign(:objects, objects)
      |> push_event("object_deleted", %{object_id: object_id})}
+  end
+
+  @doc """
+  Handles objects_grouped broadcasts from PubSub (from other clients).
+
+  Updates objects in local state with their new group_id and pushes to
+  JavaScript for visual feedback (group indicators).
+
+  ## Parameters
+
+  - `group_id` - The UUID of the newly created group
+  - `updated_objects` - List of objects that were grouped together
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:objects_grouped, group_id, updated_objects}, socket) do
+    # Create a map of updated objects for efficient lookup
+    updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+    # Update local state
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        Map.get(updated_map, obj.id, obj)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_grouped", %{group_id: group_id, objects: updated_objects})}
+  end
+
+  @doc """
+  Handles objects_ungrouped broadcasts from PubSub (from other clients).
+
+  Updates objects in local state to remove their group_id and pushes to
+  JavaScript for visual feedback.
+
+  ## Parameters
+
+  - `updated_objects` - List of objects that were ungrouped
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:objects_ungrouped, updated_objects}, socket) do
+    # Create a map of updated objects for efficient lookup
+    updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+    # Update local state
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        Map.get(updated_map, obj.id, obj)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_ungrouped", %{objects: updated_objects})}
+  end
+
+  @doc """
+  Handles objects_reordered broadcasts from PubSub (from other clients).
+
+  Updates objects in local state with their new z_index values and pushes to
+  JavaScript to re-render in correct order.
+
+  ## Parameters
+
+  - `updated_objects` - List of objects with updated z_index values
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:objects_reordered, updated_objects}, socket) do
+    # Create a map of updated objects for efficient lookup
+    updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+    # Update local state
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        Map.get(updated_map, obj.id, obj)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_reordered", %{objects: updated_objects})}
   end
 
   @doc """

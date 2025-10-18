@@ -24,6 +24,10 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
      |> assign(:recent_colors, [])
      |> assign(:favorite_colors, [])
      |> assign(:default_color, "#000000")
+     |> assign(:palettes, [])
+     |> assign(:show_new_palette_form, false)
+     |> assign(:new_palette_name, "")
+     |> assign(:editing_palette_id, nil)
      |> assign(:save_timer, nil)}
   end
 
@@ -33,6 +37,7 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     preferences = ColorPalettes.get_or_create_preferences(user_id)
     recent_colors = ColorPalettes.get_recent_colors(user_id)
     favorite_colors = ColorPalettes.get_favorite_colors(user_id)
+    palettes = ColorPalettes.list_user_palettes(user_id)
 
     # Parse current color from hex to HSL if provided
     {h, s, l} = assigns[:current_color] && hex_to_hsl(assigns[:current_color]) || {0, 100, 50}
@@ -46,6 +51,7 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
      |> assign(:hex_color, assigns[:current_color] || preferences.default_color)
      |> assign(:recent_colors, recent_colors)
      |> assign(:favorite_colors, favorite_colors)
+     |> assign(:palettes, palettes)
      |> assign(:default_color, preferences.default_color)}
   end
 
@@ -201,6 +207,86 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
   end
 
   @impl true
+  def handle_event("toggle_new_palette_form", _params, socket) do
+    {:noreply, assign(socket, :show_new_palette_form, !socket.assigns.show_new_palette_form)}
+  end
+
+  @impl true
+  def handle_event("create_palette", %{"name" => name}, socket) do
+    case ColorPalettes.create_palette(socket.assigns.user_id, name) do
+      {:ok, _palette} ->
+        palettes = ColorPalettes.list_user_palettes(socket.assigns.user_id)
+        {:noreply, socket |> assign(:palettes, palettes) |> assign(:show_new_palette_form, false) |> assign(:new_palette_name, "")}
+
+      {:error, _} ->
+        send(self(), {:show_error, "Failed to create palette"})
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("add_color_to_palette", %{"palette-id" => palette_id}, socket) do
+    case ColorPalettes.add_color_to_palette(palette_id, socket.assigns.hex_color) do
+      {:ok, _} ->
+        palettes = ColorPalettes.list_user_palettes(socket.assigns.user_id)
+        {:noreply, assign(socket, :palettes, palettes)}
+
+      {:error, _} ->
+        send(self(), {:show_error, "Failed to add color to palette"})
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("delete_palette", %{"palette-id" => palette_id}, socket) do
+    case ColorPalettes.delete_palette(palette_id) do
+      {:ok, _} ->
+        palettes = ColorPalettes.list_user_palettes(socket.assigns.user_id)
+        {:noreply, assign(socket, :palettes, palettes)}
+
+      {:error, _} ->
+        send(self(), {:show_error, "Failed to delete palette"})
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("remove_color_from_palette", %{"color-id" => color_id}, socket) do
+    case ColorPalettes.remove_color_from_palette(color_id) do
+      {:ok, _} ->
+        palettes = ColorPalettes.list_user_palettes(socket.assigns.user_id)
+        {:noreply, assign(socket, :palettes, palettes)}
+
+      {:error, _} ->
+        send(self(), {:show_error, "Failed to remove color"})
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("start_edit_palette", %{"palette-id" => palette_id}, socket) do
+    {:noreply, assign(socket, :editing_palette_id, palette_id)}
+  end
+
+  @impl true
+  def handle_event("cancel_edit_palette", _params, socket) do
+    {:noreply, assign(socket, :editing_palette_id, nil)}
+  end
+
+  @impl true
+  def handle_event("rename_palette", %{"palette-id" => palette_id, "name" => name}, socket) do
+    case ColorPalettes.update_palette(palette_id, name) do
+      {:ok, _} ->
+        palettes = ColorPalettes.list_user_palettes(socket.assigns.user_id)
+        {:noreply, socket |> assign(:palettes, palettes) |> assign(:editing_palette_id, nil)}
+
+      {:error, _} ->
+        send(self(), {:show_error, "Failed to rename palette"})
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
   def handle_info({:save_default_color, color}, socket) do
     # Save to database after debounce delay
     ColorPalettes.set_default_color(socket.assigns.user_id, color)
@@ -315,7 +401,7 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
 
       <!-- Favorite Colors -->
       <%= if length(@favorite_colors) > 0 do %>
-        <div class="mb-2">
+        <div class="mb-4">
           <div class="text-xs font-medium text-gray-600 mb-2">Favorite Colors</div>
           <div class="flex flex-wrap gap-2">
             <%= for color <- @favorite_colors do %>
@@ -342,6 +428,153 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
           </div>
         </div>
       <% end %>
+
+      <!-- Color Palettes -->
+      <div class="border-t border-gray-200 pt-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-xs font-medium text-gray-600">Color Palettes</div>
+          <button
+            phx-click="toggle_new_palette_form"
+            phx-target={@myself}
+            class="text-xs px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition"
+          >
+            + New
+          </button>
+        </div>
+
+        <!-- New Palette Form -->
+        <%= if @show_new_palette_form do %>
+          <div class="mb-3 p-2 bg-gray-50 rounded border border-gray-200">
+            <form phx-submit="create_palette" phx-target={@myself}>
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  name="name"
+                  value=""
+                  placeholder="Palette name"
+                  class="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  required
+                />
+                <button
+                  type="submit"
+                  class="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                  Create
+                </button>
+                <button
+                  type="button"
+                  phx-click="toggle_new_palette_form"
+                  phx-target={@myself}
+                  class="px-2 py-1 text-xs bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        <% end %>
+
+        <!-- Palettes List -->
+        <%= if length(@palettes) == 0 && !@show_new_palette_form do %>
+          <div class="text-xs text-gray-400 italic py-2">No palettes yet. Create one to get started!</div>
+        <% end %>
+
+        <%= for palette <- @palettes do %>
+          <div class="mb-3 p-2 bg-gray-50 rounded border border-gray-200">
+            <!-- Palette Header -->
+            <div class="flex items-center justify-between mb-2">
+              <%= if @editing_palette_id == palette.id do %>
+                <form phx-submit="rename_palette" phx-target={@myself} class="flex-1 flex gap-1">
+                  <input type="hidden" name="palette-id" value={palette.id} />
+                  <input
+                    type="text"
+                    name="name"
+                    value={palette.name}
+                    class="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="cancel_edit_palette"
+                    phx-target={@myself}
+                    class="px-2 py-1 text-xs bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                  >
+                    Cancel
+                  </button>
+                </form>
+              <% else %>
+                <div class="text-xs font-medium text-gray-700"><%= palette.name %></div>
+                <div class="flex gap-1">
+                  <button
+                    phx-click="add_color_to_palette"
+                    phx-value-palette-id={palette.id}
+                    phx-target={@myself}
+                    class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+                    title="Add current color to this palette"
+                  >
+                    +
+                  </button>
+                  <button
+                    phx-click="start_edit_palette"
+                    phx-value-palette-id={palette.id}
+                    phx-target={@myself}
+                    class="px-2 py-1 text-xs bg-gray-300 text-gray-700 rounded hover:bg-gray-400 transition"
+                    title="Rename palette"
+                  >
+                    ✎
+                  </button>
+                  <button
+                    phx-click="delete_palette"
+                    phx-value-palette-id={palette.id}
+                    phx-target={@myself}
+                    class="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition"
+                    title="Delete palette"
+                    data-confirm="Are you sure you want to delete this palette?"
+                  >
+                    🗑
+                  </button>
+                </div>
+              <% end %>
+            </div>
+
+            <!-- Palette Colors -->
+            <%= if length(palette.colors) > 0 do %>
+              <div class="flex flex-wrap gap-1">
+                <%= for color <- Enum.sort_by(palette.colors, & &1.position) do %>
+                  <div class="relative group">
+                    <button
+                      phx-click="select_color"
+                      phx-value-color={color.color_hex}
+                      phx-target={@myself}
+                      class="w-6 h-6 rounded border border-gray-300 hover:border-blue-500 transition cursor-pointer"
+                      style={"background-color: #{color.color_hex}"}
+                      title={color.color_hex}
+                    >
+                    </button>
+                    <button
+                      phx-click="remove_color_from_palette"
+                      phx-value-color-id={color.id}
+                      phx-target={@myself}
+                      class="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center"
+                      style="font-size: 8px; line-height: 1;"
+                    >
+                      ×
+                    </button>
+                  </div>
+                <% end %>
+              </div>
+            <% else %>
+              <div class="text-xs text-gray-400 italic">Empty palette</div>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
     </div>
     """
   end
