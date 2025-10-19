@@ -14,6 +14,11 @@ primary_region = 'ord'
   DATABASE_PATH = '/data/collab_canvas.db'
   AI_PROVIDER = 'groq'
 
+[mounts]
+  source = "collab_canvas_data"
+  destination = "/data"
+  initial_size = "1gb"
+
 [http_service]
   internal_port = 8080
   force_https = true
