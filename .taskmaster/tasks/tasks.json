@@ -1470,7 +1470,8 @@
         "master"
       ],
       "created": "2025-10-14T18:12:14.527Z",
-      "description": "Tasks for master context"
+      "description": "Tasks for master context",
+      "updated": "2025-10-14T18:12:14.527Z"
     }
   },
   "cleanup": {
@@ -2755,7 +2756,8 @@
         "frontend-perf"
       ],
       "created": "2025-10-15T21:23:10.179Z",
-      "description": "Tasks for frontend-perf context"
+      "description": "Tasks for frontend-perf context",
+      "updated": "2025-10-15T21:23:10.179Z"
     }
   },
   "intel": {
@@ -3455,7 +3457,8 @@
         "intel"
       ],
       "created": "2025-10-18T02:26:41.358Z",
-      "description": "Tasks for intel context"
+      "description": "Tasks for intel context",
+      "updated": "2025-10-18T02:26:41.358Z"
     }
   },
   "core": {
@@ -3811,7 +3814,7 @@
   "copilot": {
     "tasks": [
       {
-        "id": "1",
+        "id": 1,
         "title": "Implement AI Semantic Selection Tool",
         "description": "Create a new AI tool called select_objects_by_description that allows users to select objects using natural language descriptions like 'select all small red circles' or 'select the objects in the top-left corner.' This feature provides a productivity boost by enabling complex, context-aware selections that are difficult to achieve manually.",
         "details": "Add a new tool in tools.ex named select_objects_by_description. Enhance the Agent.ex module's build_command_with_context function to include a comprehensive list of all objects and their properties (e.g., position, size, color, shape) for each AI request. The tool should interpret combined attributes and handle vague terms by reasoning over canvas context. Pseudo-code: In tools.ex, define select_objects_by_description(description, objects_list) -> filter objects based on NLP parsing of description against object properties. In Agent.ex, modify build_command_with_context to append objects_list to the prompt context.",
@@ -3823,7 +3826,7 @@
         "updatedAt": "2025-10-18T04:58:56.570Z"
       },
       {
-        "id": "2",
+        "id": 2,
         "title": "Add Voice Command Input with Push-to-Talk",
         "description": "Implement a push-to-talk microphone icon using the browser's SpeechRecognition API to stream live transcription into the AI input field, making interactions faster and more natural.",
         "details": "In the frontend JavaScript, add a new hook or modify app.js to manage microphone state and API interaction. Include UI feedback for 'listening' and 'transcribing' states. Handle microphone permissions gracefully, with fallback to text input if API is unavailable. Pseudo-code: Create a hook that initializes SpeechRecognition, starts/stops on button press, updates input field in real-time, and handles errors.",
@@ -3835,7 +3838,7 @@
         "updatedAt": "2025-10-18T05:05:11.730Z"
       },
       {
-        "id": "3",
+        "id": 3,
         "title": "Implement AI Interaction History Panel",
         "description": "Replace the AI input area with a persistent, scrollable chat-like panel displaying history of user commands and AI responses, providing transparency and auditability.",
         "details": "Modify the CanvasLive template and state management to store interaction history in socket assigns for the session. Display last 20+ interactions with user commands and AI responses (e.g., '✅ Created 3 objects') clearly distinguished. Dock the input field at the bottom. Pseudo-code: In LiveView assigns, maintain a list of {user: command, ai: response} tuples, render in a scrollable div with conditional styling.",
@@ -3847,7 +3850,7 @@
         "updatedAt": "2025-10-18T05:09:56.185Z"
       },
       {
-        "id": "4",
+        "id": 4,
         "title": "Configure Enter Key to Submit AI Command",
         "description": "Modify the AI command textarea to submit on Enter and add newline on Shift+Enter, improving user experience for quick interactions.",
         "details": "Add a small JavaScript enhancement in a hook attached to the form. Listen for keydown events on the textarea: if Enter (without Shift), trigger execute_ai_command event and clear the field; if Shift+Enter, insert newline. Pseudo-code: In hook, add event listener: if e.key === 'Enter' && !e.shiftKey, submit and clear; else if e.shiftKey, allow default.",
@@ -3859,7 +3862,7 @@
         "updatedAt": "2025-10-18T05:05:25.233Z"
       },
       {
-        "id": "5",
+        "id": 5,
         "title": "Create AI Command Test Suite",
         "description": "Develop a dedicated test suite with 20-30 core commands and 3-5 variations each to ensure reliability of AI features, covering creation, manipulation, layout, and selection.",
         "details": "Create a new test file test/collab_canvas/ai/agent_test.exs. Tests call Agent.execute_command/3 with mock canvas_id and assert on returned results tuple for expected canvas state changes. Include variations for robustness against phrasing. Pseudo-code: For each test, setup mock canvas, call execute_command with command string, assert on result structure.",
@@ -3883,7 +3886,428 @@
       "completedCount": 5,
       "tags": [
         "copilot"
-      ]
+      ],
+      "created": "2025-10-19T02:21:34.122Z",
+      "description": "Tasks for copilot context",
+      "updated": "2025-10-19T02:21:34.122Z"
+    }
+  },
+  "design": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Implement Object Proximity Detection",
+        "description": "While a user is dragging an object, the system must detect proximity to the edges (top, bottom, left, right) and centers (horizontal, vertical) of other nearby static objects.",
+        "details": "In assets/js/core/canvas_manager.js, modify the onDragMove handler for an object. Iterate through all other objects to calculate potential alignment guides: target.x, target.x + target.width/2, target.y, target.y + target.height/2, etc. Define a threshold (e.g., 5px). Use PixiJS to check distances and identify when the dragged object's edges or centers are within the threshold of these guides.",
+        "testStrategy": "Unit test the proximity detection function with mock objects at various positions. Manually test dragging objects near others to verify detection triggers correctly without false positives.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Render Visual Alignment Guides",
+        "description": "When alignment is detected within a given threshold (e.g., 5px), a visual guide line must be rendered on the canvas connecting the aligned parts.",
+        "details": "In the onDragMove handler, upon detecting proximity, create a PixiJS.Graphics object to draw red lines (e.g., horizontal or vertical) connecting the aligned parts. Ensure the guide is temporary and removed when dragging ends or alignment is lost. Position the lines dynamically based on calculated guides.",
+        "testStrategy": "Visual inspection during drag operations: verify red lines appear when objects align and disappear when not. Use automated tests to check Graphics rendering in a test canvas environment.",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Implement Snapping to Alignment Guides",
+        "description": "The position of the object being dragged should be automatically adjusted ('snapped') to the detected alignment guide.",
+        "details": "In onDragMove, after detecting alignment, adjust the dragged object's position to snap to the guide (e.g., set x or y to the guide's position). Ensure snapping only occurs when within threshold and prioritize the closest guide if multiple. Update the object's transform in PixiJS.",
+        "testStrategy": "Manual testing: drag objects and confirm they snap precisely to edges/centers. Measure pixel accuracy with tools like browser dev tools. Unit tests for position adjustment logic.",
+        "priority": "high",
+        "dependencies": [
+          1,
+          2
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "Handle Snapping on Drag End",
+        "description": "The backend receives the final snapped position on onDragEnd, ensuring no backend involvement during drag.",
+        "details": "In onDragEnd handler, send the final position (after snapping) to the backend via existing update_object event. Ensure no intermediate positions are sent during drag. Clean up any temporary guides.",
+        "testStrategy": "Integration test: simulate drag and drop, verify backend receives only the final snapped position. Check network logs for event frequency.",
+        "priority": "high",
+        "dependencies": [
+          3
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 5,
+        "title": "Add Grid Toggle UI Button",
+        "description": "The UI must provide a button to toggle the visibility of a background grid.",
+        "details": "In the CanvasLive template, add a new button (e.g., using Phoenix LiveView) labeled 'Toggle Grid'. Bind it to a handle_event that toggles a grid visibility state. Ensure the button is accessible in the canvas UI.",
+        "testStrategy": "UI test: click the button and verify grid appears/disappears. Accessibility test for button interaction.",
+        "priority": "medium",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 6,
+        "title": "Render Background Grid",
+        "description": "When the grid is active, render a visual grid on the canvas.",
+        "details": "In canvas_manager.js, create a PixiJS TilingSprite or Graphics object for the grid. Set grid size (e.g., 20px). Make it visible only when toggle is active. Position it as a background layer.",
+        "testStrategy": "Visual test: toggle grid on/off and confirm rendering. Performance test for large canvases to ensure no lag.",
+        "priority": "medium",
+        "dependencies": [
+          5
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 7,
+        "title": "Implement Grid Snapping Logic",
+        "description": "When the grid is active, any object being dragged must snap its top-left corner to the nearest grid intersection point.",
+        "details": "In onDragMove, if grid snapping is enabled, calculate new position: x = Math.round(pos.x / gridSize) * gridSize; y = Math.round(pos.y / gridSize) * gridSize. Apply to the object's top-left corner. Ensure this works for both creation and dragging.",
+        "testStrategy": "Manual test: drag objects with grid on and verify they snap to intersections. Unit test the rounding logic with various positions.",
+        "priority": "medium",
+        "dependencies": [
+          6
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 8,
+        "title": "Add Distribute Buttons to UI",
+        "description": "When two or more objects are selected, new UI buttons for 'Distribute Horizontally' and 'Distribute Vertically' must become active.",
+        "details": "In CanvasLive template, add buttons that appear conditionally when multiple objects are selected. Use LiveView's show/hide based on selection state. Bind to handle_event functions.",
+        "testStrategy": "UI test: select multiple objects and verify buttons appear; deselect and verify they hide. Click test for event triggering.",
+        "priority": "medium",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "Implement Distribute Horizontally Handler",
+        "description": "Clicking the 'Distribute Horizontally' button will trigger an event that repositions the selected objects to have equal spacing between them.",
+        "details": "In CanvasLive, add handle_event('distribute_horizontally', ...) that calls the existing distribute_horizontally/2 function from lib/collab_canvas/ai/layout.ex. Pass selected object IDs, compute new positions, and broadcast updates.",
+        "testStrategy": "Integration test: select objects, click button, verify positions update correctly with equal horizontal spacing. Check backend logs for broadcast.",
+        "priority": "medium",
+        "dependencies": [
+          8
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 10,
+        "title": "Implement Distribute Vertically Handler",
+        "description": "Clicking the 'Distribute Vertically' button will trigger an event that repositions the selected objects to have equal spacing between them.",
+        "details": "In CanvasLive, add handle_event('distribute_vertically', ...) that calls the existing distribute_vertically/2 function from lib/collab_canvas/ai/layout.ex. Pass selected object IDs, compute new positions, and broadcast updates.",
+        "testStrategy": "Integration test: select objects, click button, verify positions update correctly with equal vertical spacing. Check backend logs for broadcast.",
+        "priority": "medium",
+        "dependencies": [
+          8
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 11,
+        "title": "Integrate Snapping with Grid and Object Alignment",
+        "description": "Ensure that when both grid and object snapping are active, prioritize or combine them appropriately.",
+        "details": "In onDragMove, check for both grid and object snapping conditions. If both are possible, snap to the closest or prioritize object snapping. Update logic to handle combined scenarios.",
+        "testStrategy": "Manual test: enable both, drag near objects and grid, verify snapping behavior. Edge case tests for conflicts.",
+        "priority": "high",
+        "dependencies": [
+          3,
+          7
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "Optimize Performance for Snapping Calculations",
+        "description": "Ensure snapping logic runs efficiently without lag during drag operations.",
+        "details": "Optimize iteration in onDragMove: use spatial partitioning or limit checks to nearby objects only. Profile performance and refactor if needed, e.g., cache object positions.",
+        "testStrategy": "Performance test: drag with many objects, measure FPS. Load test with 100+ objects.",
+        "priority": "medium",
+        "dependencies": [
+          1,
+          2,
+          3
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 13,
+        "title": "Add Configuration for Snapping Thresholds",
+        "description": "Allow configurable thresholds for snapping (e.g., 5px) to make it user-adjustable.",
+        "details": "Add a settings panel or config in canvas_manager.js for threshold values. Store in local state or user preferences. Update detection logic to use the config.",
+        "testStrategy": "UI test: change threshold and verify snapping sensitivity. Unit test with different values.",
+        "priority": "low",
+        "dependencies": [
+          1
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 14,
+        "title": "Implement Undo/Redo for Snapping Actions",
+        "description": "Ensure that snapped positions can be undone/redone.",
+        "details": "Integrate with existing undo system: on snap, record the action. Allow undo to revert to pre-snap position.",
+        "testStrategy": "Manual test: snap an object, undo, verify position reverts. Test redo functionality.",
+        "priority": "medium",
+        "dependencies": [
+          4
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 15,
+        "title": "Conduct End-to-End Testing of All Features",
+        "description": "Test the complete workflow of snapping, grid, and distribution in a real user scenario.",
+        "details": "Create a test scenario: create objects, drag with snapping, toggle grid, distribute. Verify against success metrics like task completion time and nudging reduction.",
+        "testStrategy": "User acceptance test: simulate designer workflow, measure time and events. Automated e2e tests using tools like Selenium.",
+        "priority": "high",
+        "dependencies": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "status": "pending",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2025-10-19T02:40:14.733Z",
+      "updated": "2025-10-19T02:40:14.733Z",
+      "description": "Tasks for design context"
+    }
+  },
+  "agent": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Set up ETS cache for LLM responses",
+        "description": "Implement an ETS table managed by the Application supervisor to cache tool call responses from the LLM for identical commands with a 5-minute TTL.",
+        "details": "In the application supervisor, add a child spec for an ETS table named :ai_cache, with options for set, public, and named_table. Implement a GenServer or module to handle cache operations: put/2, get/1, and automatic expiration after 5 minutes using timers or a cleanup process. Use command string as key and tool_calls as value.",
+        "testStrategy": "Unit tests for cache put/get operations, integration tests to verify TTL expiration, and performance tests to ensure caching reduces API calls by >20% in simulated sessions.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Enhance tool definitions with few-shot examples",
+        "description": "Update the description fields in lib/collab_canvas/ai/tools.ex to include few-shot examples to guide the LLM toward generating more consistent and valid parameters.",
+        "details": "For each tool in tools.ex, append example usages to the description, e.g., for create_shape: 'Example: User says \"make a red square\", you call create_shape(type: \"rectangle\", fill: \"#FF0000\", width: 100, height: 100)'. Ensure examples cover common user inputs and correct parameter formats.",
+        "testStrategy": "Manual review of tool descriptions, integration tests with mocked LLM to verify improved parameter consistency, and measure AI Command Success Rate increase to >95% in test scenarios.",
+        "priority": "medium",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Implement create_objects_batch in canvases.ex",
+        "description": "Add a create_objects_batch function in lib/collab_canvas/canvases.ex that uses Ecto.Multi for batched database operations in a single transaction.",
+        "details": "Define create_objects_batch(canvas_id, list_of_attrs) where list_of_attrs is a list of maps for object attributes. Use Ecto.Multi to insert multiple objects atomically. Ensure it returns the created objects or errors. Integrate with existing canvas schema and validations.",
+        "testStrategy": "Unit tests for batch insertion with valid/invalid attrs, database transaction tests for atomicity, and performance benchmarks for bulk creation (e.g., 10 objects in <2s).",
+        "priority": "high",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "Update PubSub for batched broadcasts",
+        "description": "Modify the PubSub system to support a single broadcast containing all created/updated objects from batched operations.",
+        "details": "In the canvases context, after batch creation, broadcast a new event like \"objects_created\" with the list of objects. Ensure the broadcast payload is optimized to reduce network chatter. Update any existing broadcast logic to use this for batch ops.",
+        "testStrategy": "Integration tests with Phoenix PubSub to verify single broadcast for batch ops, load tests to ensure reduced network usage, and end-to-end tests with CanvasLive handling the event.",
+        "priority": "medium",
+        "dependencies": [
+          3
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 5,
+        "title": "Update CanvasLive to handle batched events",
+        "description": "Modify CanvasLive to process the new batched PubSub event for multiple objects.",
+        "details": "In the LiveView, add a handle_info clause for the \"objects_created\" event. Update the socket assigns to include all new objects at once, triggering a single re-render. Ensure it handles the list of objects efficiently without individual updates.",
+        "testStrategy": "Unit tests for handle_info, integration tests with batched broadcasts, and UI tests to verify all objects appear instantly on the canvas.",
+        "priority": "medium",
+        "dependencies": [
+          4
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 6,
+        "title": "Implement short-circuit command matching",
+        "description": "Create a short_circuit_command/2 private function in lib/collab_canvas/ai/agent.ex to bypass LLM for simple, deterministic commands.",
+        "details": "Define a list or map of simple commands like \"delete selected\", \"show labels\", \"group\". Use pattern matching on the command string. If matched, construct the appropriate tool_calls directly (e.g., for \"group\", call group_objects with selected IDs). Return {:ok, tool_calls} or :next.",
+        "testStrategy": "Unit tests for pattern matching various commands, integration tests to verify bypass of LLM and direct execution, and latency tests for <300ms completion.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 7,
+        "title": "Integrate short-circuiting into execute_command",
+        "description": "Update the execute_command function in agent.ex to call short_circuit_command at the beginning.",
+        "details": "At the start of execute_command/2, call short_circuit_command(command, context). If it returns {:ok, tool_calls}, proceed to execute them directly. Otherwise, continue with LLM flow. Ensure context includes necessary data like selected objects.",
+        "testStrategy": "Integration tests for full command execution flow, including short-circuited and LLM paths, and performance tests for sub-second latency on simple commands.",
+        "priority": "high",
+        "dependencies": [
+          6
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 8,
+        "title": "Refactor process_tool_calls for batching create_* calls",
+        "description": "Update process_tool_calls in agent.ex to group all create_* calls and execute them using the new batch function.",
+        "details": "In process_tool_calls, identify create_* tool calls (e.g., create_shape). Group their attributes into a list and call create_objects_batch. For non-create calls, execute individually. Ensure batched calls are handled atomically.",
+        "testStrategy": "Unit tests for grouping logic, integration tests with batch function, and performance tests for bulk generation (10 objects in <2s).",
+        "priority": "high",
+        "dependencies": [
+          3
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "Add parallel processing for independent tool calls",
+        "description": "Use Task.async_stream in agent.ex to parallelize independent network-bound or CPU-bound tasks.",
+        "details": "In process_tool_calls, after grouping, use Task.async_stream to execute independent tool calls concurrently. Define dependencies if any (e.g., create before modify). Collect results and handle errors gracefully.",
+        "testStrategy": "Unit tests for async execution, concurrency tests to verify parallelism, and error handling tests for failed tasks.",
+        "priority": "medium",
+        "dependencies": [
+          8
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 10,
+        "title": "Integrate caching into LLM flow",
+        "description": "Modify the agent to check ETS cache before making LLM API calls.",
+        "details": "Before calling the LLM, check :ai_cache for the command. If hit, return cached tool_calls. If miss, proceed with API call and cache the result. Ensure cache key is normalized command string.",
+        "testStrategy": "Integration tests for cache hits/misses, API call reduction tests (>20% in sessions), and cache invalidation tests.",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 11,
+        "title": "Update agent for batched PubSub integration",
+        "description": "Ensure the agent triggers the correct PubSub event after batch operations.",
+        "details": "After successful batch creation, broadcast the \"objects_created\" event via the canvases context. Integrate this into the tool execution flow.",
+        "testStrategy": "Integration tests with PubSub broadcasts, end-to-end tests for canvas updates, and performance tests for reduced network chatter.",
+        "priority": "medium",
+        "dependencies": [
+          4,
+          8
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "Add error handling for inconsistent LLM outputs",
+        "description": "Enhance resilience in agent.ex for failed or nonsensical API responses.",
+        "details": "Wrap LLM calls in try-catch, validate tool_calls for required fields, and fallback to error messages or retries. Use enhanced tool examples to reduce inconsistencies.",
+        "testStrategy": "Unit tests for validation logic, integration tests with mocked invalid responses, and success rate tests (>95%).",
+        "priority": "medium",
+        "dependencies": [
+          2
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 13,
+        "title": "Performance optimization for agent startup",
+        "description": "Optimize agent initialization to reduce latency in command processing.",
+        "details": "Preload tool definitions and cache on agent start. Ensure ETS is ready. Profile and optimize any bottlenecks in execute_command flow.",
+        "testStrategy": "Benchmark tests for agent startup time, latency tests for first commands, and profiling reports.",
+        "priority": "low",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 14,
+        "title": "End-to-end integration testing",
+        "description": "Create comprehensive tests for the entire AI agent flow including short-circuiting, caching, batching, and parallel processing.",
+        "details": "Write Elixir tests simulating user commands, verifying latency, success rates, and canvas updates. Use ExUnit with async and database sandboxes.",
+        "testStrategy": "Run full test suite, measure P95 latency <300ms for simple commands, bulk speed <2s, success rate >95%, and API reduction >20%.",
+        "priority": "high",
+        "dependencies": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 15,
+        "title": "Documentation and code review",
+        "description": "Document all changes in agent.ex, canvases.ex, tools.ex, and CanvasLive. Conduct code review for best practices.",
+        "details": "Update module docs, add inline comments for new functions. Ensure adherence to Elixir standards and performance best practices.",
+        "testStrategy": "Peer review, automated linting (Credo), and manual verification of docs.",
+        "priority": "low",
+        "dependencies": [
+          14
+        ],
+        "status": "pending",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2025-10-19T02:53:04.912Z",
+      "updated": "2025-10-19T02:53:04.912Z",
+      "description": "Tasks for agent context"
     }
   }
 }

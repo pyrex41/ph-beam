@@ -1769,8 +1769,17 @@ export class CanvasManager {
         // Update selection boxes to match new positions
         this.updateSelectionBoxes();
 
-        // No need to send batch update here - the final throttled update
-        // during drag already contains the correct positions
+        // IMPORTANT: Always send final batch update on mouseup
+        // The throttled update during drag may be stale if < 50ms has elapsed
+        // This ensures the server has the exact final positions
+        const finalBatchUpdates = updates.map(({ obj, localPos }) => ({
+          object_id: obj.objectId,
+          position: { x: localPos.x, y: localPos.y }
+        }));
+
+        if (finalBatchUpdates.length > 0) {
+          this.emit('update_objects_batch', { updates: finalBatchUpdates });
+        }
       } else {
         console.log('[CanvasManager] No movement detected - treating as click, not drag');
         // No actual movement - just a click, not a drag
@@ -2177,25 +2186,30 @@ export class CanvasManager {
 
       this.objects.forEach((obj, objectId) => {
         // Safety check: ensure object has required properties
-        if (!obj || !obj.getBounds || !obj.objectId) {
-          console.warn('[CanvasManager] Skipping malformed object:', objectId, 'has getBounds:', !!obj?.getBounds, 'has objectId:', !!obj?.objectId);
+        if (!obj || !obj.objectId) {
+          console.warn('[CanvasManager] Skipping malformed object:', objectId);
           return;
         }
 
-        const bounds = obj.getBounds();
+        // IMPORTANT: Use getLocalBounds() instead of getBounds()
+        // getBounds() returns global screen coordinates (includes zoom/pan transformations)
+        // getLocalBounds() returns bounds relative to parent (objectContainer)
+        // This matches the lasso rectangle coordinate space
+        const localBounds = obj.getLocalBounds();
+
+        // Object position is already in objectContainer space (same as lasso)
+        const objMinX = obj.x + localBounds.x;
+        const objMaxX = obj.x + localBounds.x + localBounds.width;
+        const objMinY = obj.y + localBounds.y;
+        const objMaxY = obj.y + localBounds.y + localBounds.height;
+
         const intersects = this.rectanglesIntersect(
           minX, minY, maxX, maxY,
-          bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height
+          objMinX, objMinY, objMaxX, objMaxY
         );
-
-        // Log all objects being checked for debugging
-        if (bounds.width < 1 || bounds.height < 1) {
-          console.warn('[CanvasManager] Object', objectId, 'has invalid bounds:', bounds);
-        }
 
         // Check if object intersects with lasso rectangle
         if (intersects) {
-          console.log('[CanvasManager] Object', objectId, 'intersects! Bounds:', bounds);
           if (!this.selectedObjects.has(obj)) {
             // Reparent object to selection container
             this.addToSelection(obj);

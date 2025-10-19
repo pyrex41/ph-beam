@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git diff --name-only --diff-filter=U)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
