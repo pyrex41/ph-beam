@@ -51,7 +51,7 @@ COPY lib lib
 
 # Install npm dependencies before copying all assets
 COPY assets/package.json assets/package-lock.json ./assets/
-RUN cd assets && npm ci --prefer-offline --no-audit --progress=false
+RUN cd assets && npm install --prefer-offline --no-audit --progress=false --include=optional
 
 COPY assets assets
 
