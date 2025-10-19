@@ -1,0 +1,47 @@
+diff --git a/collab_canvas/lib/collab_canvas/ai/agent.ex b/collab_canvas/lib/collab_canvas/ai/agent.ex
+index original..modified 100644
+--- a/collab_canvas/lib/collab_canvas/ai/agent.ex
++++ b/collab_canvas/lib/collab_canvas/ai/agent.ex
+@@ -397,11 +397,37 @@ defmodule CollabCanvas.AI.Agent do
+       [%{tool: "unknown", input: %{...}, result: {:error, :unknown_tool}}]
+   """
+   def process_tool_calls(tool_calls, canvas_id, current_color \\ "#000000") do
+-    Enum.map(tool_calls, fn tool_call ->
+-      # Normalize tool call input (coerce string IDs to integers)
+-      normalized_call = normalize_tool_input(tool_call)
+-      execute_tool_call(normalized_call, canvas_id, current_color)
+-    end)
++    # Normalize all tool calls (coerce string IDs to integers)
++    normalized_calls = Enum.map(tool_calls, &normalize_tool_input/1)
++
++    # Separate create_* calls from other tool calls
++    {create_calls, other_calls} = Enum.split_with(normalized_calls, &is_create_tool?/1)
++
++    # Track start time for performance logging
++    start_time = System.monotonic_time(:millisecond)
++
++    # Process batched creates first (if any)
++    batch_results = if length(create_calls) > 0 do
++      execute_batched_creates(create_calls, canvas_id, current_color)
++    else
++      []
++    end
++
++    # Log batch performance
++    if length(create_calls) > 0 do
++      end_time = System.monotonic_time(:millisecond)
++      duration_ms = end_time - start_time
++      Logger.info("Batch created #{length(create_calls)} objects in #{duration_ms}ms")
++
++      # Warn if performance target not met (should be <2s for 10 objects)
++      if length(create_calls) >= 10 and duration_ms > 2000 do
++        Logger.warning("Batch create exceeded 2s target: #{duration_ms}ms for #{length(create_calls)} objects")
++      end
++    end
++
++    # Process non-create calls individually
++    other_results = Enum.map(other_calls, fn tool_call -> execute_tool_call(tool_call, canvas_id, current_color) end)
++    combine_results_in_order(tool_calls, batch_results, other_results)
+   end
+
+   # Normalizes tool call inputs by coercing string IDs to integers

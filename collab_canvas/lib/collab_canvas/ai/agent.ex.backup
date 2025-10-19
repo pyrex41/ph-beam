@@ -82,7 +82,6 @@ defmodule CollabCanvas.AI.Agent do
   alias CollabCanvas.AI.ToolRegistry
   alias CollabCanvas.AI.ComponentBuilder
   alias CollabCanvas.AI.Layout
-  alias CollabCanvas.AI.BatchProcessor
 
   @claude_api_url "https://api.anthropic.com/v1/messages"
   @claude_model "claude-3-5-sonnet-20241022"
@@ -399,41 +398,11 @@ defmodule CollabCanvas.AI.Agent do
       [%{tool: "unknown", input: %{...}, result: {:error, :unknown_tool}}]
   """
   def process_tool_calls(tool_calls, canvas_id, current_color \\ "#000000") do
-    # Normalize all tool calls (coerce string IDs to integers)
-    normalized_calls = Enum.map(tool_calls, &normalize_tool_input/1)
-
-    # Separate create_* calls from other tool calls
-    {create_calls, other_calls} = Enum.split_with(normalized_calls, &BatchProcessor.is_create_tool?/1)
-
-    # Track start time for performance logging
-    start_time = System.monotonic_time(:millisecond)
-
-    # Process batched creates first (if any)
-    batch_results = if length(create_calls) > 0 do
-      BatchProcessor.execute_batched_creates(create_calls, canvas_id, current_color, &normalize_color/1)
-    else
-      []
-    end
-
-    # Log batch performance
-    if length(create_calls) > 0 do
-      end_time = System.monotonic_time(:millisecond)
-      duration_ms = end_time - start_time
-      Logger.info("Batch created #{length(create_calls)} objects in #{duration_ms}ms")
-
-      # Warn if performance target not met (should be <2s for 10 objects)
-      if length(create_calls) >= 10 and duration_ms > 2000 do
-        Logger.warning("Batch create exceeded 2s target: #{duration_ms}ms for #{length(create_calls)} objects")
-      end
-    end
-
-    # Process non-create calls individually
-    other_results = Enum.map(other_calls, fn tool_call ->
-      execute_tool_call(tool_call, canvas_id, current_color)
+    Enum.map(tool_calls, fn tool_call ->
+      # Normalize tool call input (coerce string IDs to integers)
+      normalized_call = normalize_tool_input(tool_call)
+      execute_tool_call(normalized_call, canvas_id, current_color)
     end)
-
-    # Combine results in original order
-    BatchProcessor.combine_results_in_order(tool_calls, batch_results, other_results)
   end
 
   # Normalizes tool call inputs by coercing string IDs to integers
@@ -1859,5 +1828,104 @@ defmodule CollabCanvas.AI.Agent do
         Logger.warning("Unknown color name: #{name}, defaulting to black")
         "#000000"
     end
+  end
+
+  # ============================================================================
+  # Error Handling and Validation Functions (Task #12)
+  # ============================================================================
+
+  @doc """
+  Validates tool call structure from LLM response.
+
+  Ensures tool calls have required fields: id, name, and input.
+  Returns {:ok, validated_tool} or {:error, {:missing_fields, list}}.
+  """
+  def validate_tool_call_structure(%{"id" => id, "name" => name, "input" => input})
+      when is_binary(id) and is_binary(name) and is_map(input) do
+    {:ok, %{id: id, name: name, input: input}}
+  end
+
+  def validate_tool_call_structure(tool_call) when is_map(tool_call) do
+    missing_fields =
+      ["id", "name", "input"]
+      |> Enum.reject(fn field ->
+        Map.has_key?(tool_call, field) and
+          not is_nil(Map.get(tool_call, field))
+      end)
+
+    {:error, {:missing_fields, missing_fields}}
+  end
+
+  def validate_tool_call_structure(_), do: {:error, {:invalid_type, "Tool call must be a map"}}
+
+  @doc """
+  Validates OpenAI format tool call and parses JSON arguments.
+  """
+  def validate_openai_tool_call(%{"id" => id, "function" => %{"name" => name, "arguments" => args}})
+      when is_binary(id) and is_binary(name) and is_binary(args) do
+    case Jason.decode(args) do
+      {:ok, input} when is_map(input) ->
+        {:ok, %{id: id, name: name, input: input}}
+
+      {:error, reason} ->
+        {:error, {:json_decode_failed, reason}}
+
+      _ ->
+        {:error, {:invalid_arguments, "Arguments must decode to a JSON object"}}
+    end
+  end
+
+  def validate_openai_tool_call(_) do
+    {:error, {:invalid_structure, "Missing required fields: id, function.name, function.arguments"}}
+  end
+
+  @doc """
+  Formats errors for user-friendly display.
+
+  Converts technical error reasons into actionable messages for users.
+  """
+  def format_error_for_user(:missing_api_key, _command) do
+    "AI service is not configured. Please contact support."
+  end
+
+  def format_error_for_user(:invalid_api_key, _command) do
+    "AI service configuration is invalid. Please contact support."
+  end
+
+  def format_error_for_user({:api_error, status, _body}, _command) when status in 401..403 do
+    "AI service authentication failed. Please contact support."
+  end
+
+  def format_error_for_user({:api_error, 429, _body}, _command) do
+    "AI service is rate limited. Please try again in a moment."
+  end
+
+  def format_error_for_user({:api_error, status, _body}, _command) when status >= 500 do
+    "AI service is temporarily unavailable. Please try again later."
+  end
+
+  def format_error_for_user({:api_error, _status, _body}, command) do
+    "AI service error for command: \"#{command}\". Please try rephrasing."
+  end
+
+  def format_error_for_user({:request_failed, _reason}, _command) do
+    "Unable to connect to AI service. Please check your connection."
+  end
+
+  def format_error_for_user({:invalid_response_format, _details}, command) do
+    "AI service returned invalid response for: \"#{command}\". Please try again."
+  end
+
+  def format_error_for_user({:validation_failed, errors}, _command) do
+    error_list = Enum.map_join(errors, "; ", fn {tool, reason} -> "#{tool}: #{reason}" end)
+    "AI generated invalid actions: #{error_list}"
+  end
+
+  def format_error_for_user({:json_decode_failed, _reason}, _command) do
+    "AI returned malformed data. Please try again."
+  end
+
+  def format_error_for_user(_reason, command) do
+    "Unable to execute: \"#{command}\". Please try again or rephrase."
   end
 end
