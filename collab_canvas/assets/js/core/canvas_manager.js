@@ -1164,21 +1164,25 @@ export class CanvasManager {
 
   /**
    * Perform undo operation
+   * Triggers server-side undo via LiveView
    */
   async performUndo() {
-    const success = await this.historyManager.undo();
-    if (success) {
-      console.log('[CanvasManager] Undo performed');
+    console.log('[CanvasManager] Performing undo');
+    // Push event to LiveView to handle server-side undo
+    if (this.liveSocket) {
+      this.liveSocket.pushEvent('undo', {});
     }
   }
 
   /**
    * Perform redo operation
+   * Triggers server-side redo via LiveView
    */
   async performRedo() {
-    const success = await this.historyManager.redo();
-    if (success) {
-      console.log('[CanvasManager] Redo performed');
+    console.log('[CanvasManager] Performing redo');
+    // Push event to LiveView to handle server-side redo
+    if (this.liveSocket) {
+      this.liveSocket.pushEvent('redo', {});
     }
   }
 
@@ -1782,6 +1786,12 @@ export class CanvasManager {
 
         if (finalBatchUpdates.length > 0) {
           this.emit('update_objects_batch', { updates: finalBatchUpdates });
+
+          // Notify server: end of operation (create undo history entry)
+          const objectIds = finalBatchUpdates.map(u => u.object_id);
+          if (this.liveSocket && objectIds.length > 0) {
+            this.liveSocket.pushEvent('end_operation', { object_ids: objectIds });
+          }
         }
       } else {
         console.log('[CanvasManager] No movement detected - treating as click, not drag');
@@ -2924,6 +2934,12 @@ export class CanvasManager {
 
       // Store initial mouse position to detect clicks vs drags
       this.dragStartPos = { x: localPos.x, y: localPos.y };
+
+      // Notify server: start of operation (capture initial states)
+      const selectedObjectIds = Array.from(this.selectedObjects).map(obj => obj.objectId);
+      if (this.liveSocket && selectedObjectIds.length > 0) {
+        this.liveSocket.pushEvent('start_operation', { object_ids: selectedObjectIds });
+      }
 
       console.log('[CanvasManager] onObjectPointerDown: set dragOffset', this.dragOffset, 'selectionContainer pos:', { x: this.selectionContainer.x, y: this.selectionContainer.y });
     } else if (this.currentTool === 'delete') {
