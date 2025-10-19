@@ -50,8 +50,8 @@ COPY collab_canvas/priv priv
 COPY collab_canvas/lib lib
 
 # Install npm dependencies before copying all assets
-COPY collab_canvas/assets/package.json collab_canvas/assets/package-lock.json ./assets/
-RUN cd assets && npm install --prefer-offline --no-audit --progress=false --include=optional
+COPY collab_canvas/assets/package.json ./assets/
+RUN cd assets && npm install --no-audit --progress=false
 
 COPY collab_canvas/assets assets
 
