@@ -91,6 +91,10 @@ defmodule CollabCanvas.Canvases do
   alias CollabCanvas.Canvases.Object
   alias CollabCanvas.Canvases.CanvasUserViewport
 
+  # Lock timeout duration in minutes
+  # After this period of inactivity, locks automatically expire
+  @lock_timeout_minutes 10
+
   @doc """
   Creates a new canvas for a user.
 
@@ -326,7 +330,7 @@ defmodule CollabCanvas.Canvases do
   def list_objects(canvas_id) do
     Object
     |> where([o], o.canvas_id == ^canvas_id)
-    |> order_by([o], asc: o.inserted_at)
+    |> order_by([o], asc: o.z_index)
     |> Repo.all()
   end
 
@@ -356,6 +360,9 @@ defmodule CollabCanvas.Canvases do
   @doc """
   Locks an object for editing by a specific user.
 
+  Locks automatically expire after #{@lock_timeout_minutes} minutes of inactivity.
+  Expired locks are treated as unlocked and can be acquired by any user.
+
   ## Parameters
     * `id` - The object ID
     * `user_id` - The user ID locking the object
@@ -363,14 +370,14 @@ defmodule CollabCanvas.Canvases do
   ## Returns
     * `{:ok, object}` on success
     * `{:error, :not_found}` if object doesn't exist
-    * `{:error, :already_locked}` if object is already locked by another user
+    * `{:error, :already_locked}` if object is already locked by another user and lock hasn't expired
 
   ## Examples
 
       iex> lock_object(1, "user_123")
       {:ok, %Object{}}
 
-      iex> lock_object(1, "user_456")  # Already locked by user_123
+      iex> lock_object(1, "user_456")  # Already locked by user_123 (lock not expired)
       {:error, :already_locked}
 
   """
@@ -382,17 +389,19 @@ defmodule CollabCanvas.Canvases do
       object ->
         cond do
           object.locked_by == user_id ->
-            # Already locked by this user, return success
-            {:ok, object}
+            # Already locked by this user, refresh the lock timestamp
+            object
+            |> Object.changeset(%{locked_at: DateTime.utc_now()})
+            |> Repo.update()
 
-          object.locked_by != nil and object.locked_by != user_id ->
-            # Locked by another user
+          object.locked_by != nil and object.locked_by != user_id and not lock_expired?(object) ->
+            # Locked by another user and lock hasn't expired
             {:error, :already_locked}
 
           true ->
-            # Not locked or lock expired, acquire lock
+            # Not locked, or lock expired - acquire lock with current timestamp
             object
-            |> Object.changeset(%{locked_by: user_id})
+            |> Object.changeset(%{locked_by: user_id, locked_at: DateTime.utc_now()})
             |> Repo.update()
         end
     end
@@ -431,9 +440,9 @@ defmodule CollabCanvas.Canvases do
             {:error, :not_locked_by_user}
 
           true ->
-            # Unlock the object
+            # Unlock the object and clear timestamp
             object
-            |> Object.changeset(%{locked_by: nil})
+            |> Object.changeset(%{locked_by: nil, locked_at: nil})
             |> Repo.update()
         end
     end
@@ -633,7 +642,7 @@ defmodule CollabCanvas.Canvases do
   def get_group_objects(group_id) do
     Object
     |> where([o], o.group_id == ^group_id)
-    |> order_by([o], asc: o.inserted_at)
+    |> order_by([o], asc: o.z_index)
     |> Repo.all()
   end
 
@@ -761,6 +770,163 @@ defmodule CollabCanvas.Canvases do
     else
       true -> {:error, :not_found}
       error -> error
+    end
+  end
+
+  @doc """
+  Moves an object (or group) forward one layer by swapping z_index with the next object.
+
+  ## Parameters
+    * `id` - The object ID
+
+  ## Returns
+    * `{:ok, objects}` on success (list of affected objects)
+    * `{:error, :not_found}` if object doesn't exist
+    * `{:error, :already_at_front}` if object is already at the front
+
+  ## Examples
+
+      iex> move_forward(1)
+      {:ok, [%Object{z_index: 5.5}]}
+
+  """
+  def move_forward(id) do
+    with {:ok, object} <- {:ok, Repo.get(Object, id)},
+         false <- is_nil(object) do
+      # Get all objects on canvas ordered by z_index
+      canvas_objects = Object
+      |> where([o], o.canvas_id == ^object.canvas_id)
+      |> order_by([o], asc: o.z_index)
+      |> Repo.all()
+
+      # Find objects above this one
+      objects_above = Enum.filter(canvas_objects, fn obj -> obj.z_index > object.z_index end)
+
+      if Enum.empty?(objects_above) do
+        {:error, :already_at_front}
+      else
+        # Get the next object above
+        next_object = List.first(objects_above)
+
+        # Swap z_index values
+        current_z = object.z_index
+        next_z = next_object.z_index
+
+        # Update both objects (and their groups if they exist)
+        ids_to_update_current = if object.group_id do
+          Object
+          |> where([o], o.group_id == ^object.group_id)
+          |> select([o], o.id)
+          |> Repo.all()
+        else
+          [id]
+        end
+
+        Object
+        |> where([o], o.id in ^ids_to_update_current)
+        |> Repo.update_all(set: [z_index: next_z, updated_at: DateTime.utc_now()])
+
+        Object
+        |> where([o], o.id == ^next_object.id)
+        |> Repo.update_all(set: [z_index: current_z, updated_at: DateTime.utc_now()])
+
+        # Return all affected objects
+        updated_objects = Object
+        |> where([o], o.id in ^(ids_to_update_current ++ [next_object.id]))
+        |> Repo.all()
+
+        {:ok, updated_objects}
+      end
+    else
+      true -> {:error, :not_found}
+      error -> error
+    end
+  end
+
+  @doc """
+  Moves an object (or group) backward one layer by swapping z_index with the previous object.
+
+  ## Parameters
+    * `id` - The object ID
+
+  ## Returns
+    * `{:ok, objects}` on success (list of affected objects)
+    * `{:error, :not_found}` if object doesn't exist
+    * `{:error, :already_at_back}` if object is already at the back
+
+  ## Examples
+
+      iex> move_backward(1)
+      {:ok, [%Object{z_index: 2.5}]}
+
+  """
+  def move_backward(id) do
+    with {:ok, object} <- {:ok, Repo.get(Object, id)},
+         false <- is_nil(object) do
+      # Get all objects on canvas ordered by z_index
+      canvas_objects = Object
+      |> where([o], o.canvas_id == ^object.canvas_id)
+      |> order_by([o], asc: o.z_index)
+      |> Repo.all()
+
+      # Find objects below this one
+      objects_below = Enum.filter(canvas_objects, fn obj -> obj.z_index < object.z_index end)
+
+      if Enum.empty?(objects_below) do
+        {:error, :already_at_back}
+      else
+        # Get the object directly below
+        prev_object = List.last(objects_below)
+
+        # Swap z_index values
+        current_z = object.z_index
+        prev_z = prev_object.z_index
+
+        # Update both objects (and their groups if they exist)
+        ids_to_update_current = if object.group_id do
+          Object
+          |> where([o], o.group_id == ^object.group_id)
+          |> select([o], o.id)
+          |> Repo.all()
+        else
+          [id]
+        end
+
+        Object
+        |> where([o], o.id in ^ids_to_update_current)
+        |> Repo.update_all(set: [z_index: prev_z, updated_at: DateTime.utc_now()])
+
+        Object
+        |> where([o], o.id == ^prev_object.id)
+        |> Repo.update_all(set: [z_index: current_z, updated_at: DateTime.utc_now()])
+
+        # Return all affected objects
+        updated_objects = Object
+        |> where([o], o.id in ^(ids_to_update_current ++ [prev_object.id]))
+        |> Repo.all()
+
+        {:ok, updated_objects}
+      end
+    else
+      true -> {:error, :not_found}
+      error -> error
+    end
+  end
+
+  # Private helper to check if a lock has expired
+  # Locks expire after @lock_timeout_minutes of inactivity
+  defp lock_expired?(object) do
+    case object.locked_at do
+      nil ->
+        # No timestamp means lock is from before timeout system - treat as expired
+        true
+
+      locked_at ->
+        # Check if lock is older than timeout duration
+        timeout_seconds = @lock_timeout_minutes * 60
+        now = DateTime.utc_now()
+        elapsed_seconds = DateTime.diff(now, locked_at, :second)
+        elapsed_seconds > timeout_seconds
     end
   end
 

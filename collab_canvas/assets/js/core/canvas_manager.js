@@ -275,6 +275,12 @@ export class CanvasManager {
     window.addEventListener('mouseup', this.boundHandlers.handleMouseUp);
     canvas.addEventListener('wheel', this.boundHandlers.handleWheel);
 
+    // Prevent default browser context menu on canvas
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      console.log('[CanvasManager] Browser context menu prevented');
+    });
+
     // Touch events for mobile
     canvas.addEventListener('touchstart', this.boundHandlers.handleTouchStart);
     canvas.addEventListener('touchmove', this.boundHandlers.handleTouchMove);
@@ -380,6 +386,7 @@ export class CanvasManager {
     // Store object reference and lock information
     pixiObject.objectId = objectData.id;
     pixiObject.lockedBy = objectData.locked_by;
+    pixiObject.zIndex = objectData.z_index || 0.0; // Store z_index for layer ordering
     pixiObject.objectType = objectData.type; // Store type for resize redrawing
     pixiObject.objectData = data; // Store original data for resize redrawing
     pixiObject.eventMode = 'static'; // Replaces interactive = true
@@ -391,6 +398,7 @@ export class CanvasManager {
     pixiObject.on('pointerdown', this.onObjectPointerDown.bind(this));
     pixiObject.on('pointermove', this.onObjectPointerMove.bind(this));
     pixiObject.on('pointerup', this.onObjectPointerUp.bind(this));
+    pixiObject.on('rightdown', this.onObjectRightClick.bind(this));
 
     this.objects.set(objectData.id, pixiObject);
     this.objectContainer.addChild(pixiObject);
@@ -746,7 +754,7 @@ export class CanvasManager {
    * Update an existing object
    * @param {Object} objectData - Object data from server
    */
-  updateObject(objectData) {
+  updateObject(objectData, options = {}) {
     const pixiObject = this.objects.get(objectData.id);
     if (!pixiObject) {
       // Object doesn't exist, create it
@@ -1616,6 +1624,8 @@ export class CanvasManager {
 
       // Broadcast positions for all selected objects during drag (throttled to avoid spam)
       if (!this.lastDragUpdate || Date.now() - this.lastDragUpdate > 50) {
+        const batchUpdates = [];
+
         this.selectedObjects.forEach(obj => {
           // Skip if object has been destroyed (no parent means it's not in scene graph)
           if (!obj || !obj.parent) {
@@ -1624,13 +1634,20 @@ export class CanvasManager {
             return;
           }
 
-          // Get world position of object for server update
+          // Get world position then convert to objectContainer's local space
+          // This ensures coordinates are consistent across all clients
           const worldPos = obj.getGlobalPosition();
-          this.emit('update_object', {
+          const localPos = this.objectContainer.toLocal(worldPos);
+          batchUpdates.push({
             object_id: obj.objectId,
-            position: { x: worldPos.x, y: worldPos.y }
+            position: { x: localPos.x, y: localPos.y }
           });
         });
+
+        // Send single batch update for all objects
+        if (batchUpdates.length > 0) {
+          this.emit('update_objects_batch', { updates: batchUpdates });
+        }
         this.lastDragUpdate = Date.now();
       }
     }
@@ -1732,9 +1749,10 @@ export class CanvasManager {
             return;
           }
 
-          // Capture world position before resetting container
+          // Get world position then convert to objectContainer's local space
           const worldPos = obj.getGlobalPosition();
-          updates.push({ obj, worldPos });
+          const localPos = this.objectContainer.toLocal(worldPos);
+          updates.push({ obj, localPos });
         });
 
         // Reset selection container to origin
@@ -1742,24 +1760,17 @@ export class CanvasManager {
         this.selectionContainer.y = 0;
 
         // Update each object's local position to maintain world position
-        updates.forEach(({ obj, worldPos }) => {
-          // Convert world position to selectionContainer's local space (now at 0,0)
-          const localPos = this.selectionContainer.toLocal(worldPos);
+        updates.forEach(({ obj, localPos }) => {
+          // Set position in objectContainer's local space (consistent with server coordinates)
           obj.x = localPos.x;
           obj.y = localPos.y;
-
-          // Send final position to server
-          this.emit('update_object', {
-            object_id: obj.objectId,
-            position: {
-              x: worldPos.x,
-              y: worldPos.y
-            }
-          });
         });
 
         // Update selection boxes to match new positions
         this.updateSelectionBoxes();
+
+        // No need to send batch update here - the final throttled update
+        // during drag already contains the correct positions
       } else {
         console.log('[CanvasManager] No movement detected - treating as click, not drag');
         // No actual movement - just a click, not a drag
@@ -1907,13 +1918,21 @@ export class CanvasManager {
         case ']':
           event.preventDefault();
           if (event.shiftKey) {
+            // Cmd/Ctrl + Shift + ] = Bring to Front
             this.bringToFront();
+          } else {
+            // Cmd/Ctrl + ] = Move Forward
+            this.moveForward();
           }
           return;
         case '[':
           event.preventDefault();
           if (event.shiftKey) {
+            // Cmd/Ctrl + Shift + [ = Send to Back
             this.sendToBack();
+          } else {
+            // Cmd/Ctrl + [ = Move Backward
+            this.moveBackward();
           }
           return;
       }
@@ -2358,8 +2377,8 @@ export class CanvasManager {
     // Remove from selection container
     this.selectionContainer.removeChild(object);
 
-    // Add back to original parent at original index
-    savedData.originalParent.addChildAt(object, savedData.originalIndex);
+    // Add back to original parent (at end, not at originalIndex which may be stale)
+    savedData.originalParent.addChild(object);
 
     // Convert world position to original parent's local space
     const localPos = savedData.originalParent.toLocal(worldPos);
@@ -2368,6 +2387,10 @@ export class CanvasManager {
 
     // Clean up saved data
     this.selectionData.delete(object.objectId);
+
+    // Reorder all objects by z_index to prevent layer flicker
+    // This ensures objects render in correct stacking order
+    this.reorderObjects();
   }
 
   /**
@@ -2439,6 +2462,24 @@ export class CanvasManager {
       this.emit('lock_object', { object_id: object.objectId });
       this.createSelectionBox(object);
     }
+  }
+
+  /**
+   * Select an object by its ID (from layers panel)
+   * @param {number} objectId - ID of the object to select
+   */
+  selectObjectById(objectId) {
+    // Find the object in the objects map
+    const object = this.objects.get(objectId);
+
+    if (!object) {
+      console.warn('[CanvasManager] selectObjectById: Object not found:', objectId);
+      return;
+    }
+
+    // Clear current selection and select this object
+    this.clearSelection();
+    this.setSelection(object);
   }
 
   /**
@@ -2761,6 +2802,11 @@ export class CanvasManager {
    * Object interaction handlers
    */
   onObjectPointerDown(event) {
+    // Ignore right-clicks (button 2) - those are handled by rightdown event
+    if (event.data.button === 2) {
+      return;
+    }
+
     // Prevent event bubbling
     event.stopPropagation();
 
@@ -2819,6 +2865,89 @@ export class CanvasManager {
 
   onObjectPointerUp(event) {
     // Handled by global mouse up handler
+  }
+
+  onObjectRightClick(event) {
+    event.stopPropagation();
+    const object = event.currentTarget;
+
+    console.log('[CanvasManager] Right-click on object:', object.objectId);
+
+    // Get the screen position for the context menu
+    const globalPos = event.data.global;
+    const canvasRect = this.app.canvas.getBoundingClientRect();
+    const screenX = globalPos.x + canvasRect.left;
+    const screenY = globalPos.y + canvasRect.top;
+
+    // Show context menu
+    this.showObjectContextMenu(screenX, screenY, object.objectId);
+  }
+
+  showObjectContextMenu(x, y, objectId) {
+    // Remove any existing context menu
+    this.hideContextMenu();
+
+    // Create context menu
+    const menu = document.createElement('div');
+    menu.id = 'object-context-menu';
+    menu.className = 'fixed bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    // Menu items
+    const menuItems = [
+      { label: 'Bring to Front', icon: '⬆⬆', event: 'bring_to_front' },
+      { label: 'Move Forward', icon: '⬆', event: 'move_forward' },
+      { label: 'Move Backward', icon: '⬇', event: 'move_backward' },
+      { label: 'Send to Back', icon: '⬇⬇', event: 'send_to_back' },
+    ];
+
+    menuItems.forEach((item) => {
+      const menuItem = document.createElement('button');
+      menuItem.className = 'w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2';
+      menuItem.innerHTML = `
+        <span class="text-gray-500">${item.icon}</span>
+        <span>${item.label}</span>
+      `;
+      menuItem.addEventListener('click', () => {
+        // Clear selection before layer operation so we can see the result
+        this.clearSelection();
+
+        this.emit(item.event, { object_id: objectId });
+        this.hideContextMenu();
+      });
+      menu.appendChild(menuItem);
+    });
+
+    document.body.appendChild(menu);
+
+    // Adjust position if menu goes off-screen
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      menu.style.left = `${window.innerWidth - rect.width - 10}px`;
+    }
+    if (rect.bottom > window.innerHeight) {
+      menu.style.top = `${window.innerHeight - rect.height - 10}px`;
+    }
+
+    // Close context menu when clicking elsewhere
+    const clickHandler = (e) => {
+      if (menu && !menu.contains(e.target)) {
+        this.hideContextMenu();
+        document.removeEventListener('click', clickHandler);
+      }
+    };
+    // Use setTimeout to avoid immediate closure from the same click
+    setTimeout(() => {
+      document.addEventListener('click', clickHandler);
+    }, 0);
+  }
+
+  hideContextMenu() {
+    const menu = document.getElementById('object-context-menu');
+    if (menu) {
+      menu.remove();
+    }
   }
 
   /**
@@ -3218,6 +3347,37 @@ export class CanvasManager {
   }
 
   /**
+   * Reorder objects in the objectContainer based on their z_index values
+   * @param {Array} objectsData - Array of object data with z_index (optional, uses all objects if not provided)
+   */
+  reorderObjects(objectsData) {
+    // Get all objects to reorder
+    const objectsToSort = objectsData ? objectsData.map(data => {
+      const pixiObj = this.objects.get(data.id);
+      if (pixiObj) {
+        // Update stored z_index
+        pixiObj.zIndex = data.z_index || 0.0;
+      }
+      return pixiObj;
+    }).filter(Boolean) : Array.from(this.objects.values());
+
+    // Sort by z_index (lower values = back, higher values = front)
+    objectsToSort.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
+
+    // Reorder children in objectContainer to match z_index order
+    objectsToSort.forEach((pixiObj) => {
+      // Only reorder objects that are in the objectContainer (not in selectionContainer)
+      if (pixiObj.parent === this.objectContainer) {
+        // Remove and re-add at end to move to proper z-order
+        this.objectContainer.removeChild(pixiObj);
+        this.objectContainer.addChild(pixiObj);
+      }
+    });
+
+    console.log('[CanvasManager] Reordered', objectsToSort.length, 'objects by z_index');
+  }
+
+  /**
    * Bring selected objects to front
    */
   bringToFront() {
@@ -3247,6 +3407,38 @@ export class CanvasManager {
     });
 
     console.log('[CanvasManager] Sending', this.selectedObjects.size, 'objects to back');
+  }
+
+  /**
+   * Move selected objects forward one layer
+   */
+  moveForward() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('move_forward', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Moving', this.selectedObjects.size, 'objects forward');
+  }
+
+  /**
+   * Move selected objects backward one layer
+   */
+  moveBackward() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('move_backward', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Moving', this.selectedObjects.size, 'objects backward');
   }
 
   /**

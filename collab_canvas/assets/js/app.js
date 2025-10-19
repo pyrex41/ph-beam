@@ -33,6 +33,8 @@ import { ColorPickerHook } from "./hooks/color_picker"
 import VoiceInput from "./hooks/voice_input"
 // Import AI Command Input hook for Enter key handling
 import AICommandInput from "./hooks/ai_command_input"
+// Import Layer Context Menu hook for layer panel right-click menu
+import LayerContextMenu from "./hooks/layer_context_menu"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 
@@ -56,7 +58,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
     ComponentDraggable: ComponentDraggable,
     ColorPicker: ColorPickerHook,
     VoiceInput: VoiceInput,
-    AICommandInput: AICommandInput
+    AICommandInput: AICommandInput,
+    LayerContextMenu: LayerContextMenu
   },
 })
 

@@ -164,6 +164,7 @@ defmodule CollabCanvasWeb.CanvasLive do
         |> assign(:topic, topic)
         |> assign(:presences, %{})
         |> assign(:selected_tool, "select")
+        |> assign(:selected_object_ids, MapSet.new())
         |> assign(:ai_command, "")
         |> assign(:ai_loading, false)
         |> assign(:ai_task_ref, nil)
@@ -596,7 +597,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     case result do
       {:ok, updated_objects} ->
-        # Broadcast to all connected clients
+        # Broadcast to all connected clients (including this one via handle_info)
         Phoenix.PubSub.broadcast(
           CollabCanvas.PubSub,
           socket.assigns.topic,
@@ -614,11 +615,9 @@ defmodule CollabCanvasWeb.CanvasLive do
             end
           end)
 
-        # Push batch update to JavaScript
-        {:noreply,
-         socket
-         |> assign(:objects, objects)
-         |> push_event("objects_updated_batch", %{objects: updated_objects})}
+        # Don't push_event to originating client - they already have correct positions
+        # They will receive the update via PubSub broadcast in handle_info
+        {:noreply, assign(socket, :objects, objects)}
 
       {:error, {error_type, object_id}} ->
         message = case error_type do
@@ -951,6 +950,92 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles moving an object forward one layer.
+
+  ## Parameters
+
+  - `params` - Map containing "object_id" of object to move forward
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list.
+  """
+  @impl true
+  def handle_event("move_forward", %{"object_id" => object_id}, socket) do
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    case Canvases.move_forward(object_id) do
+      {:ok, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_reordered, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, socket}
+
+      {:error, :already_at_front} ->
+        {:noreply, socket}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+    end
+  end
+
+  @doc """
+  Handles moving an object backward one layer.
+
+  ## Parameters
+
+  - `params` - Map containing "object_id" of object to move backward
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list.
+  """
+  @impl true
+  def handle_event("move_backward", %{"object_id" => object_id}, socket) do
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    case Canvases.move_backward(object_id) do
+      {:ok, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_reordered, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, socket}
+
+      {:error, :already_at_back} ->
+        {:noreply, socket}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+    end
+  end
+
+  @doc """
   Handles alignment of selected objects.
 
   Uses the Layout module to calculate new positions for objects based on
@@ -1143,40 +1228,71 @@ defmodule CollabCanvasWeb.CanvasLive do
     command = params["command"]
     selected_ids = Map.get(params, "selected_ids", [])
 
-    # Prevent duplicate AI commands while one is in progress
-    if socket.assigns.ai_loading do
-      {:noreply, put_flash(socket, :warning, "AI command already in progress, please wait...")}
-    else
-      canvas_id = socket.assigns.canvas_id
+    cond do
+      # Check if this is a help command
+      is_help_command?(command) ->
+        # Handle help command directly without calling AI API
+        help_response = format_available_tools()
 
-      # Start async task with timeout (Task.async automatically links to current process)
-      current_color = socket.assigns.current_color
-      Logger.info("CanvasLive: Passing current_color to AI: #{current_color}")
-      task =
-        Task.async(fn ->
-          Agent.execute_command(command, canvas_id, selected_ids, current_color: current_color)
-        end)
+        # Add command and response to interaction history
+        user_interaction = %{
+          type: :user,
+          content: command,
+          timestamp: DateTime.utc_now()
+        }
 
-      # Set loading state and store task reference for timeout monitoring
-      Process.send_after(self(), {:ai_timeout, task.ref}, 30_000)
+        ai_interaction = %{
+          type: :ai,
+          content: help_response,
+          timestamp: DateTime.utc_now()
+        }
 
-      # Add command to interaction history
-      new_interaction = %{
-        type: :user,
-        content: command,
-        timestamp: DateTime.utc_now()
-      }
+        history = [ai_interaction, user_interaction | socket.assigns.ai_interaction_history]
+        # Keep only last 20 interactions
+        history = Enum.take(history, 20)
 
-      history = [new_interaction | socket.assigns.ai_interaction_history]
-      # Keep only last 20 interactions (10 command/response pairs)
-      history = Enum.take(history, 20)
+        {:noreply,
+         socket
+         |> assign(:ai_interaction_history, history)
+         |> assign(:ai_command, "")
+         |> put_flash(:info, "Showing available AI commands")}
 
-      {:noreply,
-       socket
-       |> assign(:ai_loading, true)
-       |> assign(:ai_task_ref, task.ref)
-       |> assign(:ai_interaction_history, history)
-       |> clear_flash()}
+      # Prevent duplicate AI commands while one is in progress
+      socket.assigns.ai_loading ->
+        {:noreply, put_flash(socket, :warning, "AI command already in progress, please wait...")}
+
+      # Execute normal AI command
+      true ->
+        canvas_id = socket.assigns.canvas_id
+
+        # Start async task with timeout (Task.async automatically links to current process)
+        current_color = socket.assigns.current_color
+        Logger.info("CanvasLive: Passing current_color to AI: #{current_color}")
+        task =
+          Task.async(fn ->
+            Agent.execute_command(command, canvas_id, selected_ids, current_color: current_color)
+          end)
+
+        # Set loading state and store task reference for timeout monitoring
+        Process.send_after(self(), {:ai_timeout, task.ref}, 30_000)
+
+        # Add command to interaction history
+        new_interaction = %{
+          type: :user,
+          content: command,
+          timestamp: DateTime.utc_now()
+        }
+
+        history = [new_interaction | socket.assigns.ai_interaction_history]
+        # Keep only last 20 interactions (10 command/response pairs)
+        history = Enum.take(history, 20)
+
+        {:noreply,
+         socket
+         |> assign(:ai_loading, true)
+         |> assign(:ai_task_ref, task.ref)
+         |> assign(:ai_interaction_history, history)
+         |> clear_flash()}
     end
   end
 
@@ -1209,6 +1325,20 @@ defmodule CollabCanvasWeb.CanvasLive do
      socket
      |> assign(:selected_tool, tool)
      |> push_event("tool_selected", %{tool: tool})}
+  end
+
+  @doc """
+  Handles layer selection from the layers panel.
+
+  Selects an object when clicked in the layers panel, pushing a select event
+  to the JavaScript canvas manager.
+  """
+  def handle_event("select_layer", %{"object-id" => object_id_str}, socket) do
+    object_id = String.to_integer(object_id_str)
+
+    {:noreply,
+     socket
+     |> push_event("select_object_from_layer", %{object_id: object_id})}
   end
 
   @doc """
@@ -1902,6 +2032,205 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc false
+  # Checks if a command is requesting help or a list of available tools.
+  # Returns true for commands like "help", "show tools", "list tools", etc.
+  defp is_help_command?(command) do
+    normalized = command |> String.downcase() |> String.trim()
+
+    help_patterns = [
+      "help",
+      "show tools",
+      "list tools",
+      "what can you do",
+      "what tools",
+      "available tools",
+      "show commands",
+      "list commands",
+      "available commands",
+      "what commands"
+    ]
+
+    Enum.any?(help_patterns, fn pattern ->
+      String.contains?(normalized, pattern)
+    end)
+  end
+
+  @doc false
+  # Generates a formatted message showing all available AI tools with descriptions.
+  defp format_available_tools do
+    tools = CollabCanvas.AI.Tools.get_tool_definitions()
+
+    tool_categories = %{
+      creation: ["create_shape", "create_text", "create_component"],
+      manipulation: ["move_shape", "move_object", "resize_shape", "resize_object", "rotate_object"],
+      styling: ["change_style", "update_text"],
+      organization: ["arrange_objects", "distribute_objects", "group_objects"],
+      deletion: ["delete_object", "clear_canvas"]
+    }
+
+    output = """
+    **Available AI Commands**
+
+    I can help you create and manipulate shapes on the canvas. Here are my capabilities:
+
+    **🎨 Creating Objects**
+    """
+
+    creation_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.creation end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> "\n" <> creation_tools
+
+    output = output <> "\n\n**🔧 Manipulating Objects**\n"
+
+    manipulation_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.manipulation end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> manipulation_tools
+
+    output = output <> "\n\n**🎭 Styling**\n"
+
+    styling_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.styling end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> styling_tools
+
+    output = output <> "\n\n**📐 Organizing Objects**\n"
+
+    organization_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.organization end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> organization_tools
+
+    output = output <> "\n\n**🗑️ Deleting Objects**\n"
+
+    deletion_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.deletion end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> deletion_tools
+
+    output <> """
+
+
+    **Example Commands:**
+    - "Create a blue rectangle at x:100 y:200"
+    - "Add 3 red circles in a row"
+    - "Arrange selected objects in a grid"
+    - "Create a login form with email and password fields"
+    - "Move the selected shape 50 pixels right"
+    """
+  end
+
+  # Helper to format tool names for display
+  defp format_tool_name(name) do
+    name
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  @doc false
+  # Generates a clarifying question based on the error type to help the user
+  # understand what went wrong and how to fix their command.
+  defp generate_clarifying_question(error_type, command, _details \\ nil) do
+    case error_type do
+      :missing_api_key ->
+        """
+        I couldn't process your command because the AI service isn't configured yet.
+        Please ask your administrator to set up the AI API key.
+        """
+
+      :canvas_not_found ->
+        """
+        I couldn't find the canvas to work with. This usually happens if the canvas
+        was deleted. Try refreshing the page or navigating back to the dashboard.
+        """
+
+      :invalid_response_format ->
+        """
+        I received a response from the AI but couldn't understand it. This might be
+        a temporary issue. Could you try again? If the problem persists, try rephrasing
+        your command with more specific details.
+        """
+
+      {:api_error, status, body} ->
+        # Try to extract helpful information from API error
+        error_message = case body do
+          %{"error" => %{"message" => msg}} when is_binary(msg) -> msg
+          %{"error" => msg} when is_binary(msg) -> msg
+          _ -> "API error (status #{status})"
+        end
+
+        cond do
+          # Handle common validation errors
+          String.contains?(error_message, "Invalid") or String.contains?(error_message, "validation") ->
+            """
+            Your command "#{command}" couldn't be processed because of a validation error:
+            #{error_message}
+
+            Try being more specific. For example:
+            - Instead of "create a shape", try "create a blue rectangle at x:100 y:100"
+            - Specify positions (x and y coordinates)
+            - Specify dimensions (width and height for rectangles)
+            - Use specific colors (red, blue, #FF0000, etc.)
+            """
+
+          # Handle rate limiting
+          String.contains?(error_message, "rate") or status == 429 ->
+            """
+            The AI service is currently rate limited. Please wait a moment and try again.
+            """
+
+          # Handle overloaded errors
+          String.contains?(error_message, "overloaded") or status == 529 ->
+            """
+            The AI service is currently overloaded. Please try again in a few seconds.
+            """
+
+          # Generic error with suggestion
+          true ->
+            """
+            I encountered an error processing "#{command}":
+            #{error_message}
+
+            Try rephrasing your command with more details. For example:
+            - "create 3 blue circles in a row at x:100 y:100"
+            - "arrange all rectangles in a grid with 20px spacing"
+            - "create a login form with username and password fields"
+            """
+        end
+
+      {:request_failed, _reason} ->
+        """
+        I couldn't connect to the AI service. This might be a network issue.
+        Please check your internet connection and try again.
+        """
+
+      _other ->
+        """
+        Something unexpected went wrong with your command "#{command}".
+
+        Try being more specific with:
+        - Object types (circle, rectangle, text, etc.)
+        - Positions (x and y coordinates)
+        - Colors and sizes
+        - Arrangement patterns (grid, row, column, circle)
+
+        Example: "create 5 red squares in a grid"
+        """
+    end
+  end
+
+  @doc false
   # Private helper to process AI agent results and update socket state.
   # Handles all possible result types from Agent.execute_command/2:
   # - {:ok, results} - Successfully created objects
@@ -2078,14 +2407,16 @@ defmodule CollabCanvasWeb.CanvasLive do
         end
 
       {:error, :canvas_not_found} ->
-        put_flash(socket, :error, "Canvas not found")
+        clarifying_question = generate_clarifying_question(:canvas_not_found, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "Canvas not found")
 
       {:error, :missing_api_key} ->
-        put_flash(
-          socket,
-          :error,
-          "AI API key not configured. Please set CLAUDE_API_KEY environment variable."
-        )
+        clarifying_question = generate_clarifying_question(:missing_api_key, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "AI API key not configured. Please set CLAUDE_API_KEY environment variable.")
 
       {:error, {:api_error, status, body}} ->
         Logger.error("AI API error: #{status} - #{inspect(body)}")
@@ -2097,18 +2428,30 @@ defmodule CollabCanvasWeb.CanvasLive do
             _ -> "AI API error (#{status})"
           end
 
-        put_flash(socket, :error, error_msg)
+        clarifying_question = generate_clarifying_question({:api_error, status, body}, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, error_msg)
 
       {:error, {:request_failed, reason}} ->
         Logger.error("AI request failed: #{inspect(reason)}")
-        put_flash(socket, :error, "AI request failed: #{inspect(reason)}")
+        clarifying_question = generate_clarifying_question({:request_failed, reason}, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "AI request failed: #{inspect(reason)}")
 
       {:error, :invalid_response_format} ->
-        put_flash(socket, :error, "AI returned invalid response format")
+        clarifying_question = generate_clarifying_question(:invalid_response_format, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "AI returned invalid response format")
 
       {:error, reason} ->
         Logger.error("AI command failed: #{inspect(reason)}")
-        put_flash(socket, :error, "AI command failed: #{inspect(reason)}")
+        clarifying_question = generate_clarifying_question(reason, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "AI command failed: #{inspect(reason)}")
     end
   end
 
@@ -2276,6 +2619,172 @@ defmodule CollabCanvasWeb.CanvasLive do
           <% end %>
         </div>
       </div>
+
+      <!-- Layers Panel -->
+      <div class="w-64 bg-white border-r border-gray-200 flex flex-col">
+        <div class="p-3 border-b border-gray-200">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-sm font-semibold text-gray-800">Layers</h2>
+            <span class="text-xs text-gray-500"><%= length(@objects) %> total</span>
+          </div>
+          <!-- Search/Filter Input -->
+          <input
+            type="text"
+            placeholder="Search layers..."
+            class="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            phx-keyup="filter_layers"
+            phx-debounce="300"
+          />
+        </div>
+
+        <!-- Layer List -->
+        <div class="flex-1 overflow-y-auto p-2">
+          <%= if length(@objects) == 0 do %>
+            <p class="text-xs text-gray-500 text-center mt-4">No objects yet</p>
+          <% else %>
+            <%
+              # Sort all objects by z-index (descending = front to back)
+              sorted_objects = @objects
+                |> Enum.sort_by(& &1.z_index, :desc)
+
+              # Add position numbers (1 = front-most)
+              objects_with_position = sorted_objects
+                |> Enum.with_index(1)
+                |> Enum.map(fn {obj, pos} -> {obj, pos} end)
+
+              # Get selected object IDs
+              selected_ids = @selected_object_ids
+
+              # Determine which objects to show
+              # If there's a selected object, show context around it (10 before, 10 after)
+              # Otherwise show top 50
+              objects_to_display = if MapSet.size(selected_ids) > 0 do
+                # Find first selected object's position
+                selected_pos = objects_with_position
+                  |> Enum.find_index(fn {obj, _pos} -> MapSet.member?(selected_ids, obj.id) end)
+
+                if selected_pos do
+                  # Show 10 objects before and after selected object
+                  start_idx = max(0, selected_pos - 10)
+                  end_idx = min(length(objects_with_position) - 1, selected_pos + 10)
+                  Enum.slice(objects_with_position, start_idx..end_idx)
+                else
+                  Enum.take(objects_with_position, 50)
+                end
+              else
+                Enum.take(objects_with_position, 50)
+              end
+
+              total_count = length(objects_with_position)
+              showing_count = length(objects_to_display)
+              hidden_count = total_count - showing_count
+            %>
+
+            <!-- Layer stacking info -->
+            <div class="mb-2 px-1">
+              <div class="text-[10px] text-gray-500">
+                Showing <%= showing_count %> of <%= total_count %> layers
+                <%= if hidden_count > 0 do %>
+                  <span class="text-gray-400">(+<%= hidden_count %> hidden)</span>
+                <% end %>
+              </div>
+            </div>
+
+            <!-- All Objects by Layer Order -->
+            <%= for {object, position} <- objects_to_display do %>
+              <%
+                decoded_data = Jason.decode!(object.data)
+                is_selected = MapSet.member?(selected_ids, object.id)
+              %>
+              <div
+                id={"layer-item-#{object.id}"}
+                phx-click="select_layer"
+                phx-value-object-id={object.id}
+                class={[
+                  "layer-item group relative px-2 py-2 mb-1 rounded-md cursor-pointer transition-colors",
+                  "hover:bg-gray-100 flex items-center gap-2",
+                  if(is_selected, do: "bg-blue-50 border border-blue-300", else: "border border-transparent")
+                ]}
+                data-layer-id={object.id}
+              >
+                <!-- Layer Position Number -->
+                <div class="flex-shrink-0 w-8 text-right">
+                  <span class={[
+                    "text-[10px] font-mono font-semibold",
+                    if(is_selected, do: "text-blue-600", else: "text-gray-400")
+                  ]}>
+                    #<%= position %>
+                  </span>
+                </div>
+
+                <!-- Object Type Icon -->
+                <div class="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                  <%= case object.type do %>
+                    <% "rectangle" -> %>
+                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <rect x="4" y="6" width="16" height="12" stroke-width="2" rx="2" />
+                      </svg>
+                    <% "circle" -> %>
+                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="8" stroke-width="2" />
+                      </svg>
+                    <% "text" -> %>
+                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+                      </svg>
+                    <% _ -> %>
+                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <rect x="3" y="3" width="18" height="18" stroke-width="2" rx="2" />
+                      </svg>
+                  <% end %>
+                </div>
+
+                <!-- Object Info -->
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-medium text-gray-800 truncate">
+                    <%= String.capitalize(object.type) %>
+                    <%= if object.type == "text" && decoded_data["text"] do %>
+                      - "<%= String.slice(decoded_data["text"], 0..15) %><%= if String.length(decoded_data["text"]) > 15, do: "..." %>"
+                    <% end %>
+                  </div>
+                  <div class="text-[10px] text-gray-500">
+                    <%= if position == 1 do %>
+                      <span class="text-green-600 font-semibold">Front</span>
+                    <% else %>
+                      <%= if position == total_count do %>
+                        <span class="text-orange-600 font-semibold">Back</span>
+                      <% else %>
+                        z: <%= Float.round(object.z_index, 1) %>
+                      <% end %>
+                    <% end %>
+                  </div>
+                </div>
+
+                <!-- Lock Indicator -->
+                <%= if object.locked_by do %>
+                  <div class="flex-shrink-0">
+                    <svg class="w-3 h-3 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+
+        <!-- Layer Controls Help -->
+        <div class="border-t border-gray-200 p-3">
+          <div class="text-[10px] text-gray-500 space-y-1">
+            <div>Right-click for options</div>
+            <div>⌘ ] / Ctrl ] = Forward</div>
+            <div>⌘ [ / Ctrl [ = Backward</div>
+            <div>⌘ Shift ] = To Front</div>
+            <div>⌘ Shift [ = To Back</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Main Canvas Area -->
       <div class="flex-1 flex flex-col">
         <!-- Top Bar -->

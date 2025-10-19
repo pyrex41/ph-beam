@@ -18,6 +18,7 @@ defmodule CollabCanvas.Canvases.Object do
              :position,
              :canvas_id,
              :locked_by,
+             :locked_at,
              :component_id,
              :is_main_component,
              :instance_overrides,
@@ -31,6 +32,7 @@ defmodule CollabCanvas.Canvases.Object do
     field(:data, :string)
     field(:position, :map)
     field(:locked_by, :string)
+    field(:locked_at, :utc_datetime)
     field(:is_main_component, :boolean, default: false)
     field(:instance_overrides, :string)
     field(:group_id, :binary_id)
@@ -72,6 +74,7 @@ defmodule CollabCanvas.Canvases.Object do
       :position,
       :canvas_id,
       :locked_by,
+      :locked_at,
       :component_id,
       :is_main_component,
       :instance_overrides,
