@@ -99,6 +99,24 @@ export default {
       this.safePushEvent('move_backward', data);
     });
 
+    // Undo/Redo events
+    this.canvasManager.on('undo', (data) => {
+      this.safePushEvent('undo', data);
+    });
+
+    this.canvasManager.on('redo', (data) => {
+      this.safePushEvent('redo', data);
+    });
+
+    // Operation batching events
+    this.canvasManager.on('start_operation', (data) => {
+      this.safePushEvent('start_operation', data);
+    });
+
+    this.canvasManager.on('end_operation', (data) => {
+      this.safePushEvent('end_operation', data);
+    });
+
     // Setup drag-and-drop for component instantiation
     this.setupComponentDragAndDrop();
 
@@ -313,6 +331,7 @@ export default {
 
     // Handle reset view command (fit all objects on screen)
     this.handleEvent('reset_view', () => {
+      console.log('[Hook] reset_view event received from server');
       this.canvasManager.resetView();
     });
 

@@ -1168,10 +1168,8 @@ export class CanvasManager {
    */
   async performUndo() {
     console.log('[CanvasManager] Performing undo');
-    // Push event to LiveView to handle server-side undo
-    if (this.liveSocket) {
-      this.liveSocket.pushEvent('undo', {});
-    }
+    // Emit event to hook which will push to LiveView
+    this.emit('undo', {});
   }
 
   /**
@@ -1180,10 +1178,8 @@ export class CanvasManager {
    */
   async performRedo() {
     console.log('[CanvasManager] Performing redo');
-    // Push event to LiveView to handle server-side redo
-    if (this.liveSocket) {
-      this.liveSocket.pushEvent('redo', {});
-    }
+    // Emit event to hook which will push to LiveView
+    this.emit('redo', {});
   }
 
   /**
@@ -1690,6 +1686,9 @@ export class CanvasManager {
             rotation: Math.round(obj.angle) // Round to nearest degree
           }
         });
+
+        // Notify server: end of operation (create undo history entry)
+        this.emit('end_operation', { object_ids: [objectId] });
       }
 
       // Reset rotation handle cursor
@@ -1789,8 +1788,8 @@ export class CanvasManager {
 
           // Notify server: end of operation (create undo history entry)
           const objectIds = finalBatchUpdates.map(u => u.object_id);
-          if (this.liveSocket && objectIds.length > 0) {
-            this.liveSocket.pushEvent('end_operation', { object_ids: objectIds });
+          if (objectIds.length > 0) {
+            this.emit('end_operation', { object_ids: objectIds });
           }
         }
       } else {
@@ -2937,8 +2936,8 @@ export class CanvasManager {
 
       // Notify server: start of operation (capture initial states)
       const selectedObjectIds = Array.from(this.selectedObjects).map(obj => obj.objectId);
-      if (this.liveSocket && selectedObjectIds.length > 0) {
-        this.liveSocket.pushEvent('start_operation', { object_ids: selectedObjectIds });
+      if (selectedObjectIds.length > 0) {
+        this.emit('start_operation', { object_ids: selectedObjectIds });
       }
 
       console.log('[CanvasManager] onObjectPointerDown: set dragOffset', this.dragOffset, 'selectionContainer pos:', { x: this.selectionContainer.x, y: this.selectionContainer.y });
@@ -3074,6 +3073,9 @@ export class CanvasManager {
 
     // Prevent object dragging while rotating
     this.isDragging = false;
+
+    // Notify server: start of operation (capture initial state)
+    this.emit('start_operation', { object_ids: [objectId] });
   }
 
   /**
@@ -3099,6 +3101,9 @@ export class CanvasManager {
           rotation: Math.round(obj.angle) // Round to nearest degree
         }
       });
+
+      // Notify server: end of operation (create undo history entry)
+      this.emit('end_operation', { object_ids: [objectId] });
     }
 
     // Reset rotation handle cursor
@@ -4146,10 +4151,13 @@ export class CanvasManager {
    * Calculates bounding box of all objects and adjusts viewport to show them all
    */
   resetView() {
+    console.log('[CanvasManager] resetView() called');
     // Get all objects
     const objects = Array.from(this.objects.values());
+    console.log('[CanvasManager] Number of objects:', objects.length);
 
     if (objects.length === 0) {
+      console.log('[CanvasManager] No objects - resetting to default view');
       // No objects - reset to default view
       this.zoomLevel = 1;
       this.viewOffset = { x: 0, y: 0 };
@@ -4177,12 +4185,40 @@ export class CanvasManager {
     let maxY = -Infinity;
 
     objects.forEach(obj => {
-      const bounds = obj.pixiSprite.getBounds();
+      // Objects in this.objects are PixiJS containers/sprites directly
+      if (!obj || typeof obj.getBounds !== 'function') {
+        console.warn('[CanvasManager] Skipping object without valid getBounds method:', obj);
+        return;
+      }
+
+      const bounds = obj.getBounds();
       minX = Math.min(minX, bounds.x);
       minY = Math.min(minY, bounds.y);
       maxX = Math.max(maxX, bounds.x + bounds.width);
       maxY = Math.max(maxY, bounds.y + bounds.height);
     });
+
+    // Check if we found any valid objects with bounds
+    if (minX === Infinity || maxX === -Infinity) {
+      console.warn('[CanvasManager] No valid objects with bounds found - resetting to default view');
+      this.zoomLevel = 1;
+      this.viewOffset = { x: 0, y: 0 };
+
+      this.objectContainer.scale.set(1, 1);
+      this.objectContainer.x = 0;
+      this.objectContainer.y = 0;
+
+      this.labelContainer.scale.set(1, 1);
+      this.labelContainer.x = 0;
+      this.labelContainer.y = 0;
+
+      this.cursorContainer.scale.set(1, 1);
+      this.cursorContainer.x = 0;
+      this.cursorContainer.y = 0;
+
+      this.emit('viewport_changed');
+      return;
+    }
 
     // Add padding (50px on each side)
     const padding = 50;
@@ -4194,12 +4230,22 @@ export class CanvasManager {
     // Calculate required zoom to fit all objects
     const boundsWidth = maxX - minX;
     const boundsHeight = maxY - minY;
-    const canvasWidth = this.canvasEl.clientWidth;
-    const canvasHeight = this.canvasEl.clientHeight;
+    const canvasWidth = this.app.screen.width;
+    const canvasHeight = this.app.screen.height;
 
     const zoomX = canvasWidth / boundsWidth;
     const zoomY = canvasHeight / boundsHeight;
     const newZoom = Math.min(zoomX, zoomY, 1); // Max zoom of 1x (100%)
+
+    console.log('[CanvasManager] Calculated zoom:', {
+      boundsWidth,
+      boundsHeight,
+      canvasWidth,
+      canvasHeight,
+      zoomX,
+      zoomY,
+      newZoom
+    });
 
     // Calculate center position
     const centerX = (minX + maxX) / 2;
@@ -4208,6 +4254,14 @@ export class CanvasManager {
     // Calculate offset to center the bounding box
     const offsetX = (canvasWidth / 2) - (centerX * newZoom);
     const offsetY = (canvasHeight / 2) - (centerY * newZoom);
+
+    console.log('[CanvasManager] Applying viewport:', {
+      zoom: newZoom,
+      offsetX,
+      offsetY,
+      centerX,
+      centerY
+    });
 
     // Apply zoom and offset
     this.zoomLevel = newZoom;
@@ -4225,6 +4279,7 @@ export class CanvasManager {
     this.cursorContainer.x = offsetX;
     this.cursorContainer.y = offsetY;
 
+    console.log('[CanvasManager] resetView() complete - emitting viewport_changed');
     this.emit('viewport_changed');
   }
 }

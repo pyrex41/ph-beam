@@ -5,5 +5,10 @@
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "enabledMcpjsonServers": [
+    "task-master-ai",
+    "browsermcp"
+  ],
+  "enableAllProjectMcpServers": true
 }

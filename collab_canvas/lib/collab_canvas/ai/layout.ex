@@ -354,6 +354,7 @@ defmodule CollabCanvas.AI.Layout do
   # Private helper functions
 
   # Distributes objects horizontally with even spacing between them
+  # Auto-aligns objects to the average Y position (center-aligned vertically)
   defp distribute_horizontally_even(sorted_objects) do
     first = List.first(sorted_objects)
     last = List.last(sorted_objects)
@@ -376,10 +377,19 @@ defmodule CollabCanvas.AI.Layout do
     gap_count = length(sorted_objects) - 1
     spacing = if gap_count > 0, do: total_gap_space / gap_count, else: 0
 
+    # Calculate average Y position for vertical alignment
+    avg_y =
+      sorted_objects
+      |> Enum.map(&get_position_y/1)
+      |> Enum.sum()
+      |> Kernel./(length(sorted_objects))
+      |> round()
+
     # Position objects with calculated spacing
     {result, _} =
       Enum.reduce(sorted_objects, {[], first_x}, fn obj, {acc, current_x} ->
-        new_position = %{x: round(current_x), y: get_position_y(obj)}
+        # Use average Y for proper row alignment instead of preserving original Y
+        new_position = %{x: round(current_x), y: avg_y}
         update = %{id: obj.id, position: new_position}
         next_x = current_x + get_object_width(obj) + spacing
 
@@ -390,13 +400,23 @@ defmodule CollabCanvas.AI.Layout do
   end
 
   # Distributes objects horizontally with fixed spacing
+  # Auto-aligns objects to the average Y position (center-aligned vertically)
   defp distribute_horizontally_fixed(sorted_objects, spacing) do
     first = List.first(sorted_objects)
     start_x = get_position_x(first)
 
+    # Calculate average Y position for vertical alignment
+    avg_y =
+      sorted_objects
+      |> Enum.map(&get_position_y/1)
+      |> Enum.sum()
+      |> Kernel./(length(sorted_objects))
+      |> round()
+
     {result, _} =
       Enum.reduce(sorted_objects, {[], start_x}, fn obj, {acc, current_x} ->
-        new_position = %{x: round(current_x), y: get_position_y(obj)}
+        # Use average Y for proper row alignment instead of preserving original Y
+        new_position = %{x: round(current_x), y: avg_y}
         update = %{id: obj.id, position: new_position}
         next_x = current_x + get_object_width(obj) + spacing
 
@@ -407,6 +427,7 @@ defmodule CollabCanvas.AI.Layout do
   end
 
   # Distributes objects vertically with even spacing between them
+  # Auto-aligns objects to the average X position (center-aligned horizontally)
   defp distribute_vertically_even(sorted_objects) do
     first = List.first(sorted_objects)
     last = List.last(sorted_objects)
@@ -429,10 +450,19 @@ defmodule CollabCanvas.AI.Layout do
     gap_count = length(sorted_objects) - 1
     spacing = if gap_count > 0, do: total_gap_space / gap_count, else: 0
 
+    # Calculate average X position for horizontal alignment
+    avg_x =
+      sorted_objects
+      |> Enum.map(&get_position_x/1)
+      |> Enum.sum()
+      |> Kernel./(length(sorted_objects))
+      |> round()
+
     # Position objects with calculated spacing
     {result, _} =
       Enum.reduce(sorted_objects, {[], first_y}, fn obj, {acc, current_y} ->
-        new_position = %{x: get_position_x(obj), y: round(current_y)}
+        # Use average X for proper column alignment instead of preserving original X
+        new_position = %{x: avg_x, y: round(current_y)}
         update = %{id: obj.id, position: new_position}
         next_y = current_y + get_object_height(obj) + spacing
 
@@ -443,13 +473,23 @@ defmodule CollabCanvas.AI.Layout do
   end
 
   # Distributes objects vertically with fixed spacing
+  # Auto-aligns objects to the average X position (center-aligned horizontally)
   defp distribute_vertically_fixed(sorted_objects, spacing) do
     first = List.first(sorted_objects)
     start_y = get_position_y(first)
 
+    # Calculate average X position for horizontal alignment
+    avg_x =
+      sorted_objects
+      |> Enum.map(&get_position_x/1)
+      |> Enum.sum()
+      |> Kernel./(length(sorted_objects))
+      |> round()
+
     {result, _} =
       Enum.reduce(sorted_objects, {[], start_y}, fn obj, {acc, current_y} ->
-        new_position = %{x: get_position_x(obj), y: round(current_y)}
+        # Use average X for proper column alignment instead of preserving original X
+        new_position = %{x: avg_x, y: round(current_y)}
         update = %{id: obj.id, position: new_position}
         next_y = current_y + get_object_height(obj) + spacing
 

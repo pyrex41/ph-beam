@@ -577,7 +577,7 @@ IMPORTANT: For relative commands like 'put X behind Y', you typically want to:
       %{
         name: "arrange_objects",
         description:
-          "Arranges selected objects in standard layout patterns. Use this for CIRCULAR, horizontal, vertical, grid, and stack layouts. For circular layouts, objects are distributed evenly around a circle at a specified radius. For custom patterns like diagonal lines, waves, or arcs, use arrange_objects_with_pattern instead.\n\nEXAMPLES:\nUser: 'arrange all objects in 3 rows' → arrange_objects(object_ids: [1,2,3,4,5,6,7,8,9], layout_type: 'grid', rows: 3)\nUser: 'arrange horizontally with 50px spacing' → arrange_objects(object_ids: [1,2,3], layout_type: 'horizontal', spacing: 50)\nUser: 'arrange in a 4 column grid' → arrange_objects(object_ids: [1,2,3,4,5,6,7,8], layout_type: 'grid', columns: 4)\n\nCIRCULAR LAYOUT GUIDANCE:\nUser: 'arrange in a circle' → arrange_objects(object_ids: [1,2,3,4,5], layout_type: 'circular', radius: 200)\nUser: 'arrange in a small/tight circle' → use radius: 100-150\nUser: 'arrange in a large circle' → use radius: 300-500\nUser: 'arrange in a huge circle' → use radius: 600-800\nDEFAULT radius is 200px (medium circle). ALWAYS adjust radius based on: 'small', 'large', 'huge', 'tight', 'wide' keywords in command.",
+          "Arranges selected objects in standard layout patterns. Use this for CIRCULAR, horizontal, vertical, grid, and stack layouts. For circular layouts, objects are distributed evenly around a circle at a specified radius. For custom patterns like diagonal lines, waves, or arcs, use arrange_objects_with_pattern instead.\n\nIMPORTANT LIMITATIONS:\n- CANNOT group or sort by color - only by position/size/id\n- If user requests 'grouped by color', IGNORE that requirement and just arrange in the pattern\n- For circular layouts, ALWAYS use this tool with layout_type='circular', NEVER use arrange_objects_with_pattern\n\nEXAMPLES:\nUser: 'arrange all objects in 3 rows' → arrange_objects(object_ids: [1,2,3,4,5,6,7,8,9], layout_type: 'grid', rows: 3)\nUser: 'arrange horizontally with 50px spacing' → arrange_objects(object_ids: [1,2,3], layout_type: 'horizontal', spacing: 50)\nUser: 'arrange in a 4 column grid' → arrange_objects(object_ids: [1,2,3,4,5,6,7,8], layout_type: 'grid', columns: 4)\n\nCIRCULAR LAYOUT GUIDANCE:\nUser: 'arrange in a circle' → arrange_objects(object_ids: [1,2,3,4,5], layout_type: 'circular', radius: 200)\nUser: 'arrange in a circle grouped by color' → arrange_objects(object_ids: [1,2,3,4,5], layout_type: 'circular', radius: 200) [ignore 'grouped by color']\nUser: 'arrange in a small/tight circle' → use radius: 100-150\nUser: 'arrange in a large circle' → use radius: 300-500\nUser: 'arrange in a huge circle' → use radius: 600-800\nDEFAULT radius is 200px (medium circle). ALWAYS adjust radius based on: 'small', 'large', 'huge', 'tight', 'wide' keywords in command.",
         input_schema: %{
           type: "object",
           properties: %{
@@ -636,7 +636,7 @@ IMPORTANT: For relative commands like 'put X behind Y', you typically want to:
       %{
         name: "arrange_objects_with_pattern",
         description:
-          "Arrange objects using flexible programmatic patterns like diagonal lines, waves, and arcs. CRITICAL EXCLUSIONS: For CIRCULAR layouts use arrange_objects with layout_type='circular'. For STAR patterns use arrange_in_star tool. This tool is ONLY for: 'triangular', 'pyramid', 'zigzag', 'wave', 'arc', 'diagonal line', etc. Supports line, diagonal, wave, and arc patterns with customizable parameters. For complex shapes like triangles or pyramids, use 'line' or 'diagonal' patterns with appropriate start positions and spacing, or make multiple calls to build up the shape row by row.",
+          "Arrange objects using flexible programmatic patterns like diagonal lines, waves, and arcs. CRITICAL EXCLUSIONS: For CIRCULAR layouts use arrange_objects with layout_type='circular' - NEVER use this tool for circles. For STAR patterns use arrange_in_star tool. This tool is ONLY for: 'triangular', 'pyramid', 'zigzag', 'wave', 'arc', 'diagonal line', etc. Supports line, diagonal, wave, and arc patterns with customizable parameters. For complex shapes like triangles or pyramids, use 'line' or 'diagonal' patterns with appropriate start positions and spacing, or make multiple calls to build up the shape row by row.\n\nIMPORTANT: This tool does NOT support sort_by='color' - if user requests grouping by color, IGNORE that requirement.",
         input_schema: %{
           type: "object",
           properties: %{
@@ -686,8 +686,8 @@ IMPORTANT: For relative commands like 'put X behind Y', you typically want to:
             },
             sort_by: %{
               type: "string",
-              enum: ["none", "x", "y", "size", "id"],
-              description: "How to sort objects before arranging",
+              enum: ["none", "x", "y", "size", "id", "color", "type", "shape"],
+              description: "How to sort/group objects before arranging. 'color' groups by fill color, 'type' groups by object type (rectangle, circle, text), 'shape' is alias for 'type'",
               default: "none"
             }
           },
