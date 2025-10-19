@@ -51,7 +51,7 @@ COPY lib lib
 
 # Install npm dependencies before copying all assets
 COPY assets/package.json assets/package-lock.json ./assets/
-RUN cd assets && npm ci --include=optional
+RUN cd assets && npm ci --include=optional && npm rebuild
 
 COPY assets assets
 
