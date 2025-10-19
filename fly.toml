@@ -13,6 +13,8 @@ primary_region = 'ord'
 [env]
   DATABASE_PATH = '/data/collab_canvas.db'
   AI_PROVIDER = 'groq'
+  PORT = '8080'
+  PHX_HOST = 'ph-beam.fly.dev'
 
 [mounts]
   source = "ph"
