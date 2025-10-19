@@ -2564,6 +2564,12 @@ export class CanvasManager {
     this.objectContainer.addChild(selectionBox);
     this.selectionBoxes.set(object.objectId, selectionBox);
 
+    // Only create rotation and resize handles for single-object selection
+    // Multi-selection should only support drag/move operations
+    if (this.selectedObjects.size > 1) {
+      return; // Skip handle creation for multi-selection
+    }
+
     // Create rotation handle at top-right corner
     const rotationHandle = new PIXI.Graphics();
 
@@ -2696,10 +2702,14 @@ export class CanvasManager {
         box.angle = obj.angle;
         box.pivot.set(obj.pivot.x, obj.pivot.y);
 
+        // Hide rotation and resize handles for multi-selection
+        // Multi-selection only supports drag/move operations
+        const isMultiSelection = this.selectedObjects.size > 1;
+
         // Update rotation handle position (top-right corner)
         const rotationHandle = this.rotationHandles.get(objectId);
         if (rotationHandle) {
-          rotationHandle.visible = true; // Ensure visible for local objects
+          rotationHandle.visible = !isMultiSelection; // Hide for multi-selection
           // Use temp size if resizing, otherwise use actual bounds
           const width = obj.tempWidth || bounds.width;
           const height = obj.tempHeight || bounds.height;
@@ -2724,7 +2734,7 @@ export class CanvasManager {
         // Update resize handle position (bottom-right corner)
         const resizeHandle = this.resizeHandles.get(objectId);
         if (resizeHandle) {
-          resizeHandle.visible = true; // Ensure visible for local objects
+          resizeHandle.visible = !isMultiSelection; // Hide for multi-selection
 
           // Use temp size if resizing, otherwise use actual bounds
           const width = obj.tempWidth || bounds.width;
