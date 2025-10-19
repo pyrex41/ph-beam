@@ -29,15 +29,37 @@ import CanvasManager from "./hooks/canvas_manager"
 import ComponentDraggable from "./hooks/component_draggable"
 // Import Color Picker hook
 import { ColorPickerHook } from "./hooks/color_picker"
+// Import Voice Input hook for AI commands
+import VoiceInput from "./hooks/voice_input"
+// Import AI Command Input hook for Enter key handling
+import AICommandInput from "./hooks/ai_command_input"
+// Import Layer Context Menu hook for layer panel right-click menu
+import LayerContextMenu from "./hooks/layer_context_menu"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
+
+// Custom logger to filter out noisy cursor_move events from all LiveView logs
+const customLogger = (kind, msg, data) => {
+  // Filter out cursor_move events from all log types
+  const msgStr = typeof msg === 'string' ? msg : JSON.stringify(msg);
+  if (msgStr.includes('cursor_move')) {
+    return; // Silently ignore cursor_move logs
+  }
+  // Log everything else
+  console.log(`[LiveView ${kind}]`, msg, data);
+}
+
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
+  logger: customLogger,
   hooks: {
     CanvasRenderer: CanvasManager,
     ComponentDraggable: ComponentDraggable,
-    ColorPicker: ColorPickerHook
+    ColorPicker: ColorPickerHook,
+    VoiceInput: VoiceInput,
+    AICommandInput: AICommandInput,
+    LayerContextMenu: LayerContextMenu
   },
 })
 
@@ -49,8 +71,11 @@ window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 // connect if there are any LiveViews on the page
 liveSocket.connect()
 
+// Disable debug mode to prevent cursor_move spam
+liveSocket.disableDebug()
+
 // expose liveSocket on window for web console debug logs and latency simulation:
-// >> liveSocket.enableDebug()
+// >> liveSocket.enableDebug()  // Note: This will include cursor_move logs
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
@@ -68,7 +93,7 @@ if (process.env.NODE_ENV === "development") {
   window.addEventListener("phx:live_reload:attached", ({detail: reloader}) => {
     // Enable server log streaming to client.
     // Disable with reloader.disableServerLogs()
-    reloader.enableServerLogs()
+    // reloader.enableServerLogs()  // Disabled to reduce console noise
 
     // Open configured PLUG_EDITOR at file:line of the clicked element's HEEx component
     //

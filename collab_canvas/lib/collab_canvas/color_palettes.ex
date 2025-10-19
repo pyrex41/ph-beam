@@ -8,6 +8,8 @@ defmodule CollabCanvas.ColorPalettes do
   import Ecto.Query, warn: false
   alias CollabCanvas.Repo
   alias CollabCanvas.ColorPalettes.UserColorPreference
+  alias CollabCanvas.ColorPalettes.Palette
+  alias CollabCanvas.ColorPalettes.PaletteColor
 
   @doc """
   Gets user color preferences for a specific user.
@@ -297,5 +299,215 @@ defmodule CollabCanvas.ColorPalettes do
   def get_default_color(user_id) do
     preferences = get_or_create_preferences(user_id)
     preferences.default_color
+  end
+
+  # Palette Management Functions
+
+  @doc """
+  Creates a new color palette for a user.
+
+  ## Parameters
+    * `user_id` - The ID of the user
+    * `name` - Name for the palette
+    * `colors` - List of hex color strings (optional)
+
+  ## Returns
+    * `{:ok, %Palette{}}` on success
+    * `{:error, %Ecto.Changeset{}}` on validation failure
+
+  ## Examples
+
+      iex> create_palette(1, "My Palette", ["#FF0000", "#00FF00"])
+      {:ok, %Palette{}}
+
+  """
+  def create_palette(user_id, name, colors \\ []) do
+    Repo.transaction(fn ->
+      # Create palette
+      {:ok, palette} =
+        %Palette{}
+        |> Palette.changeset(%{name: name, user_id: user_id})
+        |> Repo.insert()
+
+      # Add colors if provided
+      if length(colors) > 0 do
+        Enum.with_index(colors)
+        |> Enum.each(fn {color, index} ->
+          add_color_to_palette(palette.id, color, index)
+        end)
+      end
+
+      # Reload palette with colors
+      Repo.preload(palette, :colors, force: true)
+    end)
+  end
+
+  @doc """
+  Adds a color to an existing palette.
+
+  ## Parameters
+    * `palette_id` - The ID of the palette
+    * `color_hex` - Hex color string
+    * `position` - Position in palette (optional, defaults to end)
+
+  ## Returns
+    * `{:ok, %PaletteColor{}}` on success
+    * `{:error, %Ecto.Changeset{}}` on validation failure
+
+  ## Examples
+
+      iex> add_color_to_palette(palette_id, "#FF0000", 0)
+      {:ok, %PaletteColor{}}
+
+  """
+  def add_color_to_palette(palette_id, color_hex, position \\ nil) do
+    # If position not provided, get next position
+    position =
+      if is_nil(position) do
+        query =
+          from pc in PaletteColor,
+            where: pc.palette_id == ^palette_id,
+            select: max(pc.position)
+
+        (Repo.one(query) || -1) + 1
+      else
+        position
+      end
+
+    %PaletteColor{}
+    |> PaletteColor.changeset(%{
+      palette_id: palette_id,
+      color_hex: color_hex,
+      position: position
+    })
+    |> Repo.insert()
+  end
+
+  @doc """
+  Lists all palettes for a user.
+
+  ## Parameters
+    * `user_id` - The ID of the user
+
+  ## Returns
+    * List of palette structs with colors preloaded
+
+  ## Examples
+
+      iex> list_user_palettes(1)
+      [%Palette{}, %Palette{}]
+
+  """
+  def list_user_palettes(user_id) do
+    Palette
+    |> where([p], p.user_id == ^user_id)
+    |> order_by([p], desc: p.updated_at)
+    |> preload(:colors)
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a single palette with colors.
+
+  ## Parameters
+    * `palette_id` - The ID of the palette
+
+  ## Returns
+    * `%Palette{}` if found
+    * `nil` if not found
+
+  ## Examples
+
+      iex> get_palette(palette_id)
+      %Palette{colors: [%PaletteColor{}, ...]}
+
+  """
+  def get_palette(palette_id) do
+    Palette
+    |> where([p], p.id == ^palette_id)
+    |> preload(:colors)
+    |> Repo.one()
+  end
+
+  @doc """
+  Updates a palette's name.
+
+  ## Parameters
+    * `palette_id` - The ID of the palette
+    * `name` - New name for the palette
+
+  ## Returns
+    * `{:ok, %Palette{}}` on success
+    * `{:error, :not_found}` if palette doesn't exist
+    * `{:error, %Ecto.Changeset{}}` on validation failure
+
+  ## Examples
+
+      iex> update_palette(palette_id, "New Name")
+      {:ok, %Palette{}}
+
+  """
+  def update_palette(palette_id, name) do
+    case Repo.get(Palette, palette_id) do
+      nil ->
+        {:error, :not_found}
+
+      palette ->
+        palette
+        |> Palette.changeset(%{name: name})
+        |> Repo.update()
+    end
+  end
+
+  @doc """
+  Deletes a palette and all its colors.
+
+  ## Parameters
+    * `palette_id` - The ID of the palette
+
+  ## Returns
+    * `{:ok, %Palette{}}` on success
+    * `{:error, :not_found}` if palette doesn't exist
+
+  ## Examples
+
+      iex> delete_palette(palette_id)
+      {:ok, %Palette{}}
+
+  """
+  def delete_palette(palette_id) do
+    case Repo.get(Palette, palette_id) do
+      nil ->
+        {:error, :not_found}
+
+      palette ->
+        Repo.delete(palette)
+    end
+  end
+
+  @doc """
+  Removes a color from a palette.
+
+  ## Parameters
+    * `color_id` - The ID of the palette color
+
+  ## Returns
+    * `{:ok, %PaletteColor{}}` on success
+    * `{:error, :not_found}` if color doesn't exist
+
+  ## Examples
+
+      iex> remove_color_from_palette(color_id)
+      {:ok, %PaletteColor{}}
+
+  """
+  def remove_color_from_palette(color_id) do
+    case Repo.get(PaletteColor, color_id) do
+      nil ->
+        {:error, :not_found}
+
+      color ->
+        Repo.delete(color)
+    end
   end
 end

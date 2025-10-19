@@ -492,11 +492,30 @@ defmodule CollabCanvas.AI.Agent do
     # Generate human-readable display names (e.g., "Object 1", "Object 2")
     objects_with_names = generate_display_names(all_objects)
 
+    # Build detailed object context for semantic selection
+    objects_with_details = all_objects
+    |> Enum.map(fn obj ->
+      data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
+      %{
+        id: obj.id,
+        type: obj.type,
+        position: obj.position,
+        data: data
+      }
+    end)
+
     # Build context with all objects and their display names
     available_objects_str = objects_with_names
     |> Enum.map(fn {obj, display_name} ->
       data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
-      "  - #{display_name} (ID: #{obj.id}): #{obj.type} at (#{get_in(obj.position, ["x"])||0}, #{get_in(obj.position, ["y"])||0})"
+      color_info = if data["color"], do: " color: #{data["color"]}", else: ""
+      size_info = cond do
+        data["width"] && data["height"] -> " size: #{data["width"]}x#{data["height"]}"
+        data["width"] -> " width: #{data["width"]}"
+        data["text"] -> " text: \"#{String.slice(data["text"] || "", 0, 20)}#{if String.length(data["text"] || "") > 20, do: "...", else: ""}\""
+        true -> ""
+      end
+      "  - #{display_name} (ID: #{obj.id}): #{obj.type} at (#{get_in(obj.position, ["x"])||0}, #{get_in(obj.position, ["y"])||0})#{color_info}#{size_info}"
     end)
     |> Enum.join("\n")
 
@@ -521,6 +540,17 @@ defmodule CollabCanvas.AI.Agent do
 
     CANVAS OBJECTS (use these human-readable names in your responses):
     #{available_objects_str}#{selected_context}
+
+    SEMANTIC SELECTION RULES:
+    - When users ask to select objects by description (e.g., "select all red circles", "select the small objects", "select objects in the top-left corner"):
+      * Use the select_objects_by_description tool
+      * Pass the natural language description as provided by the user
+      * Include ALL canvas objects in objects_context - the AI will filter them based on the description
+      * Examples of selectable attributes: color, size (small/medium/large based on relative dimensions), shape/type, position (top/bottom/left/right/center), combined attributes
+    - The objects_context for select_objects_by_description should include the full details of ALL objects for proper filtering
+
+    OBJECT DETAILS FOR SEMANTIC SELECTION:
+    #{Jason.encode!(objects_with_details)}
 
     DISAMBIGUATION RULES:
     - When the user refers to "that square", "the circle", "that rectangle", etc. without specifying which one:
@@ -571,13 +601,15 @@ defmodule CollabCanvas.AI.Agent do
     CRITICAL EXECUTION RULES:
     - NEVER ask for permission or confirmation - JUST DO IT
     - NEVER respond with "Should I proceed?" or "Let me know if you'd like me to..." - EXECUTE IMMEDIATELY
-    - When creating shapes/objects: Calculate positions and CALL create_shape/create_text tools multiple times
-    - For grids/patterns: Make MULTIPLE tool calls in sequence with calculated x,y positions for each object
-    - Example: "10x10 grid of circles" = make 100 create_shape tool calls with calculated positions (0,0), (50,0), (100,0)... etc.
+    - When creating MULTIPLE IDENTICAL shapes: Use the 'count' parameter in create_shape tool
+    - The count parameter will automatically arrange shapes horizontally with appropriate spacing
+    - ALWAYS provide required parameters: type, x, y, width (even when using count!)
+    - For grids or custom patterns: Use arrange_objects or arrange_objects_with_pattern tools after creating the shapes
+    - Example: "7 red rectangles" = create_shape with type="rectangle", x=100, y=100, width=80, height=80, fill="#FF0000", count=7
 
     WHEN TO RESPOND WITH TEXT VS TOOLS:
     - USE TOOLS (ALWAYS PREFERRED): For any spatial arrangement, creation, or manipulation task
-    - MAKE MULTIPLE TOOL CALLS: When creating patterns or grids, calculate positions and call create_shape for each object
+    - USE create_shape with 'count' parameter: For creating multiple identical shapes (much better than multiple tool calls)
     - USE TEXT ONLY WHEN: Truly impossible with available tools (e.g., "delete the database") or genuinely ambiguous (e.g., "that one" with no context)
     - You CAN show visual labels using show_object_labels tool when users ask to see IDs or names
 
@@ -769,29 +801,75 @@ defmodule CollabCanvas.AI.Agent do
     # Convert color names to hex if needed
     final_color = normalize_color(ai_color || current_color)
 
-    Logger.info("create_shape: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
+    # Get count parameter (default to 1)
+    count = Map.get(input, "count", 1)
 
-    data = %{
-      width: input["width"],
-      height: input["height"],
-      color: final_color
-    }
+    Logger.info("create_shape: count=#{count}, current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
 
-    attrs = %{
-      position: %{
-        x: input["x"],
-        y: input["y"]
-      },
-      data: Jason.encode!(data)
-    }
+    # If creating multiple shapes
+    if count > 1 do
+      # Calculate spacing (default to 1.5x width if not specified)
+      base_width = input["width"] || 50
+      default_spacing = base_width * 1.5
+      spacing = Map.get(input, "spacing", default_spacing)
 
-    result = Canvases.create_object(canvas_id, input["type"], attrs)
+      # Create all shapes
+      results = Enum.map(0..(count - 1), fn index ->
+        data = %{
+          width: input["width"],
+          height: input["height"],
+          color: final_color
+        }
 
-    %{
-      tool: "create_shape",
-      input: input,
-      result: result
-    }
+        # Calculate position for this shape
+        x_offset = index * (base_width + spacing)
+        attrs = %{
+          position: %{
+            x: input["x"] + x_offset,
+            y: input["y"]
+          },
+          data: Jason.encode!(data)
+        }
+
+        Canvases.create_object(canvas_id, input["type"], attrs)
+      end)
+
+      # Return summary of all created objects
+      successful = Enum.count(results, fn
+        {:ok, _} -> true
+        _ -> false
+      end)
+
+      %{
+        tool: "create_shape",
+        input: input,
+        result: {:ok, %{count: successful, total: count}},
+        created_objects: results
+      }
+    else
+      # Single shape creation (original behavior)
+      data = %{
+        width: input["width"],
+        height: input["height"],
+        color: final_color
+      }
+
+      attrs = %{
+        position: %{
+          x: input["x"],
+          y: input["y"]
+        },
+        data: Jason.encode!(data)
+      }
+
+      result = Canvases.create_object(canvas_id, input["type"], attrs)
+
+      %{
+        tool: "create_shape",
+        input: input,
+        result: result
+      }
+    end
   end
 
   # Executes a create_text tool call to add a text object to the canvas.
@@ -1609,7 +1687,31 @@ defmodule CollabCanvas.AI.Agent do
     end
   end
 
-  # Fallback handler for unknown tool calls (legacy).
+  # Executes a select_objects_by_description tool call to select objects by natural language description.
+  #
+  # Filters objects based on the description provided and returns matching object IDs.
+  # The AI will have already parsed the description and matched it against the objects_context.
+  defp execute_tool_call(%{name: "select_objects_by_description", input: input}, canvas_id, _current_color) do
+    description = input["description"]
+    objects_context = input["objects_context"] || []
+
+    # The AI has already done the filtering based on the description and objects_context
+    # Extract the IDs from the filtered objects
+    selected_ids = Enum.map(objects_context, fn obj ->
+      obj["id"] || obj[:id]
+    end)
+
+    Logger.info("Semantic selection: '#{description}' matched #{length(selected_ids)} objects")
+
+    # Return the selected IDs - the LiveView will handle the actual selection
+    %{
+      tool: "select_objects_by_description",
+      input: input,
+      result: {:ok, %{selected_ids: selected_ids, description: description}}
+    }
+  end
+
+  # Fallback handler for unknown tool calls.
   #
   # Logs a warning and returns an error result for any unrecognized tool.
   defp execute_tool_call_legacy(tool_call, _canvas_id, _current_color) do

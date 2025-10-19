@@ -164,9 +164,11 @@ defmodule CollabCanvasWeb.CanvasLive do
         |> assign(:topic, topic)
         |> assign(:presences, %{})
         |> assign(:selected_tool, "select")
+        |> assign(:selected_object_ids, MapSet.new())
         |> assign(:ai_command, "")
         |> assign(:ai_loading, false)
         |> assign(:ai_task_ref, nil)
+        |> assign(:ai_interaction_history, [])
         |> assign(:show_labels, false)
         |> assign(:current_color, ColorPalettes.get_default_color(user.id))
         |> assign(:show_color_picker, false)
@@ -301,11 +303,20 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     case Canvases.lock_object(object_id, user_id) do
       {:ok, locked_object} ->
-        # Broadcast to all connected clients
+        # Get user presence info for the locked object display
+        presences = Presence.list(socket.assigns.topic)
+        user_presence = Map.get(presences, user_id, %{})
+        user_meta = user_presence[:metas] |> List.first() || %{}
+        
+        # Broadcast to all connected clients with user info
         Phoenix.PubSub.broadcast(
           CollabCanvas.PubSub,
           socket.assigns.topic,
-          {:object_locked, locked_object}
+          {:object_locked, locked_object, %{
+            name: user_meta[:name] || "Unknown",
+            color: user_meta[:color] || "#000000",
+            avatar: user_meta[:avatar] || nil
+          }}
         )
 
         # Update local state
@@ -317,7 +328,14 @@ defmodule CollabCanvasWeb.CanvasLive do
         {:noreply,
          socket
          |> assign(:objects, objects)
-         |> push_event("object_locked", %{object: locked_object})}
+         |> push_event("object_locked", %{
+           object: locked_object,
+           user_info: %{
+             name: user_meta[:name] || "Unknown",
+             color: user_meta[:color] || "#000000",
+             avatar: user_meta[:avatar] || nil
+           }
+         })}
 
       {:error, :already_locked} ->
         {:noreply, put_flash(socket, :error, "Object is currently being edited by another user")}
@@ -447,20 +465,38 @@ defmodule CollabCanvasWeb.CanvasLive do
 
       _ ->
         # Object is unlocked or locked by current user, proceed with update
-        # If data is provided, merge it with existing data (don't replace entirely)
+        # Get the existing object to merge partial data updates
+        existing_object = Canvases.get_object(object_id)
+
+        # Log warning if object not found during partial update (aids debugging)
+        if is_nil(existing_object) do
+          require Logger
+          Logger.warning("Object #{object_id} not found during partial update for user #{socket.assigns.current_user.id}")
+        end
+
+        # Extract update attributes and handle partial data updates
         data =
           case params["data"] do
-            new_data when is_map(new_data) and new_data != %{} ->
-              # Get existing object and merge data
-              case Canvases.get_object(object_id) do
-                nil -> Jason.encode!(new_data)
-                object ->
-                  existing_data = if object.data, do: Jason.decode!(object.data), else: %{}
-                  merged_data = Map.merge(existing_data, new_data)
-                  Jason.encode!(merged_data)
-              end
-            data when is_binary(data) -> data
-            nil -> nil
+            # Partial data update (map) - merge with existing data
+            data when is_map(data) and data != %{} ->
+              existing_data =
+                if existing_object && existing_object.data do
+                  Jason.decode!(existing_object.data)
+                else
+                  %{}
+                end
+
+              # Merge partial update with existing data
+              merged_data = Map.merge(existing_data, data)
+              Jason.encode!(merged_data)
+
+            # Full data replacement (string)
+            data when is_binary(data) ->
+              data
+
+            # No data update
+            nil ->
+              nil
           end
 
         attrs =
@@ -561,7 +597,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     case result do
       {:ok, updated_objects} ->
-        # Broadcast to all connected clients
+        # Broadcast to all connected clients (including this one via handle_info)
         Phoenix.PubSub.broadcast(
           CollabCanvas.PubSub,
           socket.assigns.topic,
@@ -579,11 +615,9 @@ defmodule CollabCanvasWeb.CanvasLive do
             end
           end)
 
-        # Push batch update to JavaScript
-        {:noreply,
-         socket
-         |> assign(:objects, objects)
-         |> push_event("objects_updated_batch", %{objects: updated_objects})}
+        # Don't push_event to originating client - they already have correct positions
+        # They will receive the update via PubSub broadcast in handle_info
+        {:noreply, assign(socket, :objects, objects)}
 
       {:error, {error_type, object_id}} ->
         message = case error_type do
@@ -662,6 +696,471 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles grouping of selected objects.
+
+  Groups multiple objects together by assigning them a shared group_id.
+  Grouped objects will move, resize, and rotate as a single unit.
+
+  ## Parameters
+
+  - `params` - Map containing "object_ids" list of object IDs to group
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message.
+  """
+  @impl true
+  def handle_event("create_group", %{"object_ids" => object_ids}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    case Canvases.create_group(object_ids) do
+      {:ok, group_id, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_grouped, group_id, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          # Replace updated objects in the list
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+          
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, put_flash(socket, :info, "Objects grouped successfully")}
+
+      {:error, :no_objects} ->
+        {:noreply, put_flash(socket, :error, "No objects selected to group")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Some objects not found")}
+    end
+  end
+
+  @doc """
+  Handles ungrouping of objects.
+
+  Removes group_id from objects to ungroup them.
+
+  ## Parameters
+
+  - `params` - Map containing "object_ids" list of object IDs to ungroup
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list or error flash message.
+  """
+  @impl true
+  def handle_event("ungroup", %{"object_ids" => object_ids}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    # Get the first object to find its group_id
+    case Canvases.get_object(List.first(object_ids)) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+
+      object when not is_nil(object.group_id) ->
+        case Canvases.ungroup(object.group_id) do
+          {:ok, updated_objects} ->
+            # Broadcast to all connected clients
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              socket.assigns.topic,
+              {:objects_ungrouped, updated_objects}
+            )
+
+            # Update local state
+            socket = update(socket, :objects, fn current_objects ->
+              updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+              
+              Enum.map(current_objects, fn obj ->
+                Map.get(updated_map, obj.id, obj)
+              end)
+            end)
+
+            {:noreply, put_flash(socket, :info, "Objects ungrouped successfully")}
+
+          {:error, :not_found} ->
+            {:noreply, put_flash(socket, :error, "Group not found")}
+        end
+
+      _object ->
+        {:noreply, put_flash(socket, :error, "Objects are not grouped")}
+    end
+  end
+
+  @doc """
+  Handles duplication of an object.
+
+  Creates a copy of the specified object with an optional position offset.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_id" - ID of object to duplicate
+    - "offset" - Optional map with "x" and "y" offset values
+
+  ## Returns
+
+  `{:noreply, socket}` with the new object created.
+  """
+  @impl true
+  def handle_event("duplicate_object", params, socket) do
+    object_id = params["object_id"]
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+    
+    offset = params["offset"] || %{"x" => 20, "y" => 20}
+    offset_x = offset["x"] || 20
+    offset_y = offset["y"] || 20
+
+    case Canvases.get_object(object_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+
+      object ->
+        # Parse the data JSON if it's a string
+        data = if is_binary(object.data) do
+          Jason.decode!(object.data)
+        else
+          object.data
+        end
+
+        # Create new object with offset position
+        new_position = %{
+          "x" => (object.position["x"] || object.position[:x]) + offset_x,
+          "y" => (object.position["y"] || object.position[:y]) + offset_y
+        }
+
+        attrs = %{
+          "type" => object.type,
+          "position" => new_position,
+          "data" => Jason.encode!(data)
+        }
+
+        case Canvases.create_object(socket.assigns.canvas_id, object.type, attrs) do
+          {:ok, new_object} ->
+            # Broadcast to all connected clients
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              socket.assigns.topic,
+              {:object_created, new_object}
+            )
+
+            # Update local state
+            socket = update(socket, :objects, fn objects -> objects ++ [new_object] end)
+
+            {:noreply, socket}
+
+          {:error, changeset} ->
+            Logger.error("Failed to duplicate object: #{inspect(changeset)}")
+            {:noreply, put_flash(socket, :error, "Failed to duplicate object")}
+        end
+    end
+  end
+
+  @doc """
+  Handles bringing an object to the front (highest z_index).
+
+  ## Parameters
+
+  - `params` - Map containing "object_id" of object to bring forward
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list.
+  """
+  @impl true
+  def handle_event("bring_to_front", %{"object_id" => object_id}, socket) do
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    case Canvases.bring_to_front(object_id) do
+      {:ok, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_reordered, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+          
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, socket}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+    end
+  end
+
+  @doc """
+  Handles sending an object to the back (lowest z_index).
+
+  ## Parameters
+
+  - `params` - Map containing "object_id" of object to send backward
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list.
+  """
+  @impl true
+  def handle_event("send_to_back", %{"object_id" => object_id}, socket) do
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    case Canvases.send_to_back(object_id) do
+      {:ok, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_reordered, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+          
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, socket}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+    end
+  end
+
+  @doc """
+  Handles moving an object forward one layer.
+
+  ## Parameters
+
+  - `params` - Map containing "object_id" of object to move forward
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list.
+  """
+  @impl true
+  def handle_event("move_forward", %{"object_id" => object_id}, socket) do
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    case Canvases.move_forward(object_id) do
+      {:ok, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_reordered, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, socket}
+
+      {:error, :already_at_front} ->
+        {:noreply, socket}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+    end
+  end
+
+  @doc """
+  Handles moving an object backward one layer.
+
+  ## Parameters
+
+  - `params` - Map containing "object_id" of object to move backward
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list.
+  """
+  @impl true
+  def handle_event("move_backward", %{"object_id" => object_id}, socket) do
+    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+
+    case Canvases.move_backward(object_id) do
+      {:ok, updated_objects} ->
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_reordered, updated_objects}
+        )
+
+        # Update local state
+        socket = update(socket, :objects, fn current_objects ->
+          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+          Enum.map(current_objects, fn obj ->
+            Map.get(updated_map, obj.id, obj)
+          end)
+        end)
+
+        {:noreply, socket}
+
+      {:error, :already_at_back} ->
+        {:noreply, socket}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Object not found")}
+    end
+  end
+
+  @doc """
+  Handles alignment of selected objects.
+
+  Uses the Layout module to calculate new positions for objects based on
+  the specified alignment type.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_ids" - List of object IDs to align
+    - "alignment" - Alignment type (left, right, center, top, bottom, middle)
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects.
+  """
+  @impl true
+  def handle_event("align_objects", %{"object_ids" => object_ids, "alignment" => alignment}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    # Fetch the objects
+    objects = Enum.map(object_ids, fn id ->
+      case Canvases.get_object(id) do
+        nil -> nil
+        obj ->
+          # Parse data if it's a string
+          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
+          %{id: obj.id, position: obj.position, data: data}
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+
+    if length(objects) < 2 do
+      {:noreply, put_flash(socket, :error, "Need at least 2 objects to align")}
+    else
+      # Calculate new positions using Layout module
+      updates = CollabCanvas.AI.Layout.align_objects(objects, alignment)
+
+      # Apply updates to database
+      Enum.each(updates, fn update ->
+        Canvases.update_object(update.id, %{position: update.position})
+      end)
+
+      # Broadcast to all clients
+      updated_objects = Enum.map(updates, fn update ->
+        Canvases.get_object(update.id)
+      end)
+
+      Phoenix.PubSub.broadcast(
+        CollabCanvas.PubSub,
+        socket.assigns.topic,
+        {:objects_updated_batch, updated_objects}
+      )
+
+      {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Handles distribution of selected objects.
+
+  Uses the Layout module to evenly space objects horizontally or vertically.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_ids" - List of object IDs to distribute
+    - "direction" - Distribution direction (horizontal or vertical)
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects.
+  """
+  @impl true
+  def handle_event("distribute_objects", %{"object_ids" => object_ids, "direction" => direction}, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id -> 
+      if is_binary(id), do: String.to_integer(id), else: id 
+    end)
+
+    # Fetch the objects
+    objects = Enum.map(object_ids, fn id ->
+      case Canvases.get_object(id) do
+        nil -> nil
+        obj ->
+          # Parse data if it's a string
+          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
+          %{id: obj.id, position: obj.position, data: data}
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+
+    if length(objects) < 3 do
+      {:noreply, put_flash(socket, :error, "Need at least 3 objects to distribute")}
+    else
+      # Calculate new positions using Layout module
+      updates = case direction do
+        "horizontal" -> CollabCanvas.AI.Layout.distribute_horizontally(objects)
+        "vertical" -> CollabCanvas.AI.Layout.distribute_vertically(objects)
+        _ -> []
+      end
+
+      # Apply updates to database
+      Enum.each(updates, fn update ->
+        Canvases.update_object(update.id, %{position: update.position})
+      end)
+
+      # Broadcast to all clients
+      updated_objects = Enum.map(updates, fn update ->
+        Canvases.get_object(update.id)
+      end)
+
+      Phoenix.PubSub.broadcast(
+        CollabCanvas.PubSub,
+        socket.assigns.topic,
+        {:objects_updated_batch, updated_objects}
+      )
+
+      {:noreply, socket}
+    end
+  end
+
+  @doc """
   Handles AI command input changes from the client.
 
   Updates the AI command text in socket assigns as the user types in the
@@ -677,6 +1176,17 @@ defmodule CollabCanvasWeb.CanvasLive do
   """
   @impl true
   def handle_event("ai_command_change", %{"value" => command}, socket) do
+    {:noreply, assign(socket, :ai_command, command)}
+  end
+
+  @doc """
+  Handles AI command updates from JavaScript hooks (voice input, Enter key).
+
+  Used by the VoiceInput hook to update the command as speech is transcribed,
+  and by the AICommandInput hook to clear the field after Enter submission.
+  """
+  @impl true
+  def handle_event("update_ai_command", %{"command" => command}, socket) do
     {:noreply, assign(socket, :ai_command, command)}
   end
 
@@ -718,28 +1228,71 @@ defmodule CollabCanvasWeb.CanvasLive do
     command = params["command"]
     selected_ids = Map.get(params, "selected_ids", [])
 
-    # Prevent duplicate AI commands while one is in progress
-    if socket.assigns.ai_loading do
-      {:noreply, put_flash(socket, :warning, "AI command already in progress, please wait...")}
-    else
-      canvas_id = socket.assigns.canvas_id
+    cond do
+      # Check if this is a help command
+      is_help_command?(command) ->
+        # Handle help command directly without calling AI API
+        help_response = format_available_tools()
 
-      # Start async task with timeout (Task.async automatically links to current process)
-      current_color = socket.assigns.current_color
-      Logger.info("CanvasLive: Passing current_color to AI: #{current_color}")
-      task =
-        Task.async(fn ->
-          Agent.execute_command(command, canvas_id, selected_ids, current_color: current_color)
-        end)
+        # Add command and response to interaction history
+        user_interaction = %{
+          type: :user,
+          content: command,
+          timestamp: DateTime.utc_now()
+        }
 
-      # Set loading state and store task reference for timeout monitoring
-      Process.send_after(self(), {:ai_timeout, task.ref}, 30_000)
+        ai_interaction = %{
+          type: :ai,
+          content: help_response,
+          timestamp: DateTime.utc_now()
+        }
 
-      {:noreply,
-       socket
-       |> assign(:ai_loading, true)
-       |> assign(:ai_task_ref, task.ref)
-       |> clear_flash()}
+        history = [ai_interaction, user_interaction | socket.assigns.ai_interaction_history]
+        # Keep only last 20 interactions
+        history = Enum.take(history, 20)
+
+        {:noreply,
+         socket
+         |> assign(:ai_interaction_history, history)
+         |> assign(:ai_command, "")
+         |> put_flash(:info, "Showing available AI commands")}
+
+      # Prevent duplicate AI commands while one is in progress
+      socket.assigns.ai_loading ->
+        {:noreply, put_flash(socket, :warning, "AI command already in progress, please wait...")}
+
+      # Execute normal AI command
+      true ->
+        canvas_id = socket.assigns.canvas_id
+
+        # Start async task with timeout (Task.async automatically links to current process)
+        current_color = socket.assigns.current_color
+        Logger.info("CanvasLive: Passing current_color to AI: #{current_color}")
+        task =
+          Task.async(fn ->
+            Agent.execute_command(command, canvas_id, selected_ids, current_color: current_color)
+          end)
+
+        # Set loading state and store task reference for timeout monitoring
+        Process.send_after(self(), {:ai_timeout, task.ref}, 30_000)
+
+        # Add command to interaction history
+        new_interaction = %{
+          type: :user,
+          content: command,
+          timestamp: DateTime.utc_now()
+        }
+
+        history = [new_interaction | socket.assigns.ai_interaction_history]
+        # Keep only last 20 interactions (10 command/response pairs)
+        history = Enum.take(history, 20)
+
+        {:noreply,
+         socket
+         |> assign(:ai_loading, true)
+         |> assign(:ai_task_ref, task.ref)
+         |> assign(:ai_interaction_history, history)
+         |> clear_flash()}
     end
   end
 
@@ -772,6 +1325,20 @@ defmodule CollabCanvasWeb.CanvasLive do
      socket
      |> assign(:selected_tool, tool)
      |> push_event("tool_selected", %{tool: tool})}
+  end
+
+  @doc """
+  Handles layer selection from the layers panel.
+
+  Selects an object when clicked in the layers panel, pushing a select event
+  to the JavaScript canvas manager.
+  """
+  def handle_event("select_layer", %{"object-id" => object_id_str}, socket) do
+    object_id = String.to_integer(object_id_str)
+
+    {:noreply,
+     socket
+     |> push_event("select_object_from_layer", %{object_id: object_id})}
   end
 
   @doc """
@@ -1114,21 +1681,117 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
-  Handles object_locked broadcasts from PubSub (from other clients).
+  Handles objects_grouped broadcasts from PubSub (from other clients).
 
-  Updates the object in local state to show it's locked and pushes to
-  JavaScript for visual feedback (grayed out, different cursor).
+  Updates objects in local state with their new group_id and pushes to
+  JavaScript for visual feedback (group indicators).
 
   ## Parameters
 
-  - `locked_object` - The object that was locked with locked_by field set
+  - `group_id` - The UUID of the newly created group
+  - `updated_objects` - List of objects that were grouped together
 
   ## Returns
 
   `{:noreply, socket}` with updated objects list and push_event to client.
   """
   @impl true
-  def handle_info({:object_locked, locked_object}, socket) do
+  def handle_info({:objects_grouped, group_id, updated_objects}, socket) do
+    # Create a map of updated objects for efficient lookup
+    updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+    # Update local state
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        Map.get(updated_map, obj.id, obj)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_grouped", %{group_id: group_id, objects: updated_objects})}
+  end
+
+  @doc """
+  Handles objects_ungrouped broadcasts from PubSub (from other clients).
+
+  Updates objects in local state to remove their group_id and pushes to
+  JavaScript for visual feedback.
+
+  ## Parameters
+
+  - `updated_objects` - List of objects that were ungrouped
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:objects_ungrouped, updated_objects}, socket) do
+    # Create a map of updated objects for efficient lookup
+    updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+    # Update local state
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        Map.get(updated_map, obj.id, obj)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_ungrouped", %{objects: updated_objects})}
+  end
+
+  @doc """
+  Handles objects_reordered broadcasts from PubSub (from other clients).
+
+  Updates objects in local state with their new z_index values and pushes to
+  JavaScript to re-render in correct order.
+
+  ## Parameters
+
+  - `updated_objects` - List of objects with updated z_index values
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:objects_reordered, updated_objects}, socket) do
+    # Create a map of updated objects for efficient lookup
+    updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+    # Update local state
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        Map.get(updated_map, obj.id, obj)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_reordered", %{objects: updated_objects})}
+  end
+
+  @doc """
+  Handles object_locked broadcasts from PubSub (from other clients).
+
+  Updates the object in local state to show it's locked and pushes to
+  JavaScript for visual feedback (grayed out, different cursor) along with
+  user information (name, color, avatar) for display.
+
+  ## Parameters
+
+  - `locked_object` - The object that was locked with locked_by field set
+  - `user_info` - Map with user's name, color, and avatar for display
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:object_locked, locked_object, user_info}, socket) do
     objects =
       Enum.map(socket.assigns.objects, fn obj ->
         if obj.id == locked_object.id, do: locked_object, else: obj
@@ -1137,7 +1800,7 @@ defmodule CollabCanvasWeb.CanvasLive do
     {:noreply,
      socket
      |> assign(:objects, objects)
-     |> push_event("object_locked", %{object: locked_object})}
+     |> push_event("object_locked", %{object: locked_object, user_info: user_info})}
   end
 
   @doc """
@@ -1369,6 +2032,205 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc false
+  # Checks if a command is requesting help or a list of available tools.
+  # Returns true for commands like "help", "show tools", "list tools", etc.
+  defp is_help_command?(command) do
+    normalized = command |> String.downcase() |> String.trim()
+
+    help_patterns = [
+      "help",
+      "show tools",
+      "list tools",
+      "what can you do",
+      "what tools",
+      "available tools",
+      "show commands",
+      "list commands",
+      "available commands",
+      "what commands"
+    ]
+
+    Enum.any?(help_patterns, fn pattern ->
+      String.contains?(normalized, pattern)
+    end)
+  end
+
+  @doc false
+  # Generates a formatted message showing all available AI tools with descriptions.
+  defp format_available_tools do
+    tools = CollabCanvas.AI.Tools.get_tool_definitions()
+
+    tool_categories = %{
+      creation: ["create_shape", "create_text", "create_component"],
+      manipulation: ["move_shape", "move_object", "resize_shape", "resize_object", "rotate_object"],
+      styling: ["change_style", "update_text"],
+      organization: ["arrange_objects", "distribute_objects", "group_objects"],
+      deletion: ["delete_object", "clear_canvas"]
+    }
+
+    output = """
+    **Available AI Commands**
+
+    I can help you create and manipulate shapes on the canvas. Here are my capabilities:
+
+    **🎨 Creating Objects**
+    """
+
+    creation_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.creation end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> "\n" <> creation_tools
+
+    output = output <> "\n\n**🔧 Manipulating Objects**\n"
+
+    manipulation_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.manipulation end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> manipulation_tools
+
+    output = output <> "\n\n**🎭 Styling**\n"
+
+    styling_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.styling end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> styling_tools
+
+    output = output <> "\n\n**📐 Organizing Objects**\n"
+
+    organization_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.organization end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> organization_tools
+
+    output = output <> "\n\n**🗑️ Deleting Objects**\n"
+
+    deletion_tools = tools
+    |> Enum.filter(fn t -> t.name in tool_categories.deletion end)
+    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+    |> Enum.join("\n")
+
+    output = output <> deletion_tools
+
+    output <> """
+
+
+    **Example Commands:**
+    - "Create a blue rectangle at x:100 y:200"
+    - "Add 3 red circles in a row"
+    - "Arrange selected objects in a grid"
+    - "Create a login form with email and password fields"
+    - "Move the selected shape 50 pixels right"
+    """
+  end
+
+  # Helper to format tool names for display
+  defp format_tool_name(name) do
+    name
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  @doc false
+  # Generates a clarifying question based on the error type to help the user
+  # understand what went wrong and how to fix their command.
+  defp generate_clarifying_question(error_type, command, _details \\ nil) do
+    case error_type do
+      :missing_api_key ->
+        """
+        I couldn't process your command because the AI service isn't configured yet.
+        Please ask your administrator to set up the AI API key.
+        """
+
+      :canvas_not_found ->
+        """
+        I couldn't find the canvas to work with. This usually happens if the canvas
+        was deleted. Try refreshing the page or navigating back to the dashboard.
+        """
+
+      :invalid_response_format ->
+        """
+        I received a response from the AI but couldn't understand it. This might be
+        a temporary issue. Could you try again? If the problem persists, try rephrasing
+        your command with more specific details.
+        """
+
+      {:api_error, status, body} ->
+        # Try to extract helpful information from API error
+        error_message = case body do
+          %{"error" => %{"message" => msg}} when is_binary(msg) -> msg
+          %{"error" => msg} when is_binary(msg) -> msg
+          _ -> "API error (status #{status})"
+        end
+
+        cond do
+          # Handle common validation errors
+          String.contains?(error_message, "Invalid") or String.contains?(error_message, "validation") ->
+            """
+            Your command "#{command}" couldn't be processed because of a validation error:
+            #{error_message}
+
+            Try being more specific. For example:
+            - Instead of "create a shape", try "create a blue rectangle at x:100 y:100"
+            - Specify positions (x and y coordinates)
+            - Specify dimensions (width and height for rectangles)
+            - Use specific colors (red, blue, #FF0000, etc.)
+            """
+
+          # Handle rate limiting
+          String.contains?(error_message, "rate") or status == 429 ->
+            """
+            The AI service is currently rate limited. Please wait a moment and try again.
+            """
+
+          # Handle overloaded errors
+          String.contains?(error_message, "overloaded") or status == 529 ->
+            """
+            The AI service is currently overloaded. Please try again in a few seconds.
+            """
+
+          # Generic error with suggestion
+          true ->
+            """
+            I encountered an error processing "#{command}":
+            #{error_message}
+
+            Try rephrasing your command with more details. For example:
+            - "create 3 blue circles in a row at x:100 y:100"
+            - "arrange all rectangles in a grid with 20px spacing"
+            - "create a login form with username and password fields"
+            """
+        end
+
+      {:request_failed, _reason} ->
+        """
+        I couldn't connect to the AI service. This might be a network issue.
+        Please check your internet connection and try again.
+        """
+
+      _other ->
+        """
+        Something unexpected went wrong with your command "#{command}".
+
+        Try being more specific with:
+        - Object types (circle, rectangle, text, etc.)
+        - Positions (x and y coordinates)
+        - Colors and sizes
+        - Arrangement patterns (grid, row, column, circle)
+
+        Example: "create 5 red squares in a grid"
+        """
+    end
+  end
+
+  @doc false
   # Private helper to process AI agent results and update socket state.
   # Handles all possible result types from Agent.execute_command/2:
   # - {:ok, results} - Successfully created objects
@@ -1379,10 +2241,24 @@ defmodule CollabCanvasWeb.CanvasLive do
   # - {:error, :invalid_response_format} - AI response parsing failed
   # - {:error, reason} - Other errors
   defp process_ai_result(result, socket) do
+    # Helper to add AI response to history
+    add_ai_response = fn socket, response_text ->
+      new_interaction = %{
+        type: :ai,
+        content: response_text,
+        timestamp: DateTime.utc_now()
+      }
+      history = [new_interaction | socket.assigns.ai_interaction_history]
+      # Keep only last 20 interactions
+      history = Enum.take(history, 20)
+      assign(socket, :ai_interaction_history, history)
+    end
+
     case result do
       {:ok, {:text_response, text}} ->
         # AI asked for clarification or provided text response
         socket
+        |> add_ai_response.(text)
         |> assign(:ai_command, "")
         |> put_flash(:info, text)
 
@@ -1392,11 +2268,13 @@ defmodule CollabCanvasWeb.CanvasLive do
         object_labels = generate_object_labels(socket.assigns.objects)
 
         # Push event to JavaScript to render labels
+        response = if(show, do: "✅ Object labels shown", else: "✅ Object labels hidden")
         socket
+        |> add_ai_response.(response)
         |> push_event("toggle_object_labels", %{show: show, labels: object_labels})
         |> assign(:ai_command, "")
         |> assign(:show_labels, show)
-        |> put_flash(:info, if(show, do: "Object labels shown", else: "Object labels hidden"))
+        |> put_flash(:info, response)
 
       {:ok, results} when is_list(results) and length(results) == 0 ->
         # AI returned no tool calls - it either doesn't understand or can't perform the action
@@ -1417,13 +2295,32 @@ defmodule CollabCanvasWeb.CanvasLive do
             |> assign(:show_labels, show)
             |> put_flash(:info, if(show, do: "Object labels shown", else: "Object labels hidden"))
 
+          [%{tool: "select_objects_by_description", result: {:ok, %{selected_ids: selected_ids, description: description}}}] ->
+            # Handle semantic selection - select objects matching the description
+            response = "✅ Selected #{length(selected_ids)} objects matching: #{description}"
+            socket
+            |> add_ai_response.(response)
+            |> push_event("select_objects", %{object_ids: selected_ids})
+            |> assign(:selected_objects, selected_ids)
+            |> assign(:ai_command, "")
+            |> put_flash(:info, response)
+
           _ ->
             # Separate created objects from updated objects
             {created_objects, updated_objects} =
               results
               |> Enum.reduce({[], []}, fn result, {created, updated} ->
                 case result do
-                  # Handle create operations
+                  # Handle batch create operations (count > 1)
+                  %{tool: tool, created_objects: batch_results} when tool in ["create_shape", "create_text"] and is_list(batch_results) ->
+                    # Extract successful objects from batch creation
+                    batch_objects = Enum.flat_map(batch_results, fn
+                      {:ok, object} -> [object]
+                      _ -> []
+                    end)
+                    {batch_objects ++ created, updated}
+
+                  # Handle single create operations
                   %{tool: tool, result: {:ok, object}} when tool in ["create_shape", "create_text", "create_component"] and is_map(object) and is_map_key(object, :id) ->
                     {[object | created], updated}
 
@@ -1503,20 +2400,23 @@ defmodule CollabCanvasWeb.CanvasLive do
         end)
 
         socket_with_all
+        |> add_ai_response.(message)
         |> assign(:objects, final_objects)
         |> assign(:ai_command, "")
         |> put_flash(:info, message)
         end
 
       {:error, :canvas_not_found} ->
-        put_flash(socket, :error, "Canvas not found")
+        clarifying_question = generate_clarifying_question(:canvas_not_found, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "Canvas not found")
 
       {:error, :missing_api_key} ->
-        put_flash(
-          socket,
-          :error,
-          "AI API key not configured. Please set CLAUDE_API_KEY environment variable."
-        )
+        clarifying_question = generate_clarifying_question(:missing_api_key, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "AI API key not configured. Please set CLAUDE_API_KEY environment variable.")
 
       {:error, {:api_error, status, body}} ->
         Logger.error("AI API error: #{status} - #{inspect(body)}")
@@ -1528,18 +2428,30 @@ defmodule CollabCanvasWeb.CanvasLive do
             _ -> "AI API error (#{status})"
           end
 
-        put_flash(socket, :error, error_msg)
+        clarifying_question = generate_clarifying_question({:api_error, status, body}, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, error_msg)
 
       {:error, {:request_failed, reason}} ->
         Logger.error("AI request failed: #{inspect(reason)}")
-        put_flash(socket, :error, "AI request failed: #{inspect(reason)}")
+        clarifying_question = generate_clarifying_question({:request_failed, reason}, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "AI request failed: #{inspect(reason)}")
 
       {:error, :invalid_response_format} ->
-        put_flash(socket, :error, "AI returned invalid response format")
+        clarifying_question = generate_clarifying_question(:invalid_response_format, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "AI returned invalid response format")
 
       {:error, reason} ->
         Logger.error("AI command failed: #{inspect(reason)}")
-        put_flash(socket, :error, "AI command failed: #{inspect(reason)}")
+        clarifying_question = generate_clarifying_question(reason, socket.assigns.ai_command)
+        socket
+        |> add_ai_response.(clarifying_question)
+        |> put_flash(:error, "AI command failed: #{inspect(reason)}")
     end
   end
 
@@ -1707,6 +2619,172 @@ defmodule CollabCanvasWeb.CanvasLive do
           <% end %>
         </div>
       </div>
+
+      <!-- Layers Panel -->
+      <div class="w-64 bg-white border-r border-gray-200 flex flex-col">
+        <div class="p-3 border-b border-gray-200">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-sm font-semibold text-gray-800">Layers</h2>
+            <span class="text-xs text-gray-500"><%= length(@objects) %> total</span>
+          </div>
+          <!-- Search/Filter Input -->
+          <input
+            type="text"
+            placeholder="Search layers..."
+            class="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            phx-keyup="filter_layers"
+            phx-debounce="300"
+          />
+        </div>
+
+        <!-- Layer List -->
+        <div class="flex-1 overflow-y-auto p-2">
+          <%= if length(@objects) == 0 do %>
+            <p class="text-xs text-gray-500 text-center mt-4">No objects yet</p>
+          <% else %>
+            <%
+              # Sort all objects by z-index (descending = front to back)
+              sorted_objects = @objects
+                |> Enum.sort_by(& &1.z_index, :desc)
+
+              # Add position numbers (1 = front-most)
+              objects_with_position = sorted_objects
+                |> Enum.with_index(1)
+                |> Enum.map(fn {obj, pos} -> {obj, pos} end)
+
+              # Get selected object IDs
+              selected_ids = @selected_object_ids
+
+              # Determine which objects to show
+              # If there's a selected object, show context around it (10 before, 10 after)
+              # Otherwise show top 50
+              objects_to_display = if MapSet.size(selected_ids) > 0 do
+                # Find first selected object's position
+                selected_pos = objects_with_position
+                  |> Enum.find_index(fn {obj, _pos} -> MapSet.member?(selected_ids, obj.id) end)
+
+                if selected_pos do
+                  # Show 10 objects before and after selected object
+                  start_idx = max(0, selected_pos - 10)
+                  end_idx = min(length(objects_with_position) - 1, selected_pos + 10)
+                  Enum.slice(objects_with_position, start_idx..end_idx)
+                else
+                  Enum.take(objects_with_position, 50)
+                end
+              else
+                Enum.take(objects_with_position, 50)
+              end
+
+              total_count = length(objects_with_position)
+              showing_count = length(objects_to_display)
+              hidden_count = total_count - showing_count
+            %>
+
+            <!-- Layer stacking info -->
+            <div class="mb-2 px-1">
+              <div class="text-[10px] text-gray-500">
+                Showing <%= showing_count %> of <%= total_count %> layers
+                <%= if hidden_count > 0 do %>
+                  <span class="text-gray-400">(+<%= hidden_count %> hidden)</span>
+                <% end %>
+              </div>
+            </div>
+
+            <!-- All Objects by Layer Order -->
+            <%= for {object, position} <- objects_to_display do %>
+              <%
+                decoded_data = Jason.decode!(object.data)
+                is_selected = MapSet.member?(selected_ids, object.id)
+              %>
+              <div
+                id={"layer-item-#{object.id}"}
+                phx-click="select_layer"
+                phx-value-object-id={object.id}
+                class={[
+                  "layer-item group relative px-2 py-2 mb-1 rounded-md cursor-pointer transition-colors",
+                  "hover:bg-gray-100 flex items-center gap-2",
+                  if(is_selected, do: "bg-blue-50 border border-blue-300", else: "border border-transparent")
+                ]}
+                data-layer-id={object.id}
+              >
+                <!-- Layer Position Number -->
+                <div class="flex-shrink-0 w-8 text-right">
+                  <span class={[
+                    "text-[10px] font-mono font-semibold",
+                    if(is_selected, do: "text-blue-600", else: "text-gray-400")
+                  ]}>
+                    #<%= position %>
+                  </span>
+                </div>
+
+                <!-- Object Type Icon -->
+                <div class="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                  <%= case object.type do %>
+                    <% "rectangle" -> %>
+                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <rect x="4" y="6" width="16" height="12" stroke-width="2" rx="2" />
+                      </svg>
+                    <% "circle" -> %>
+                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="8" stroke-width="2" />
+                      </svg>
+                    <% "text" -> %>
+                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+                      </svg>
+                    <% _ -> %>
+                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <rect x="3" y="3" width="18" height="18" stroke-width="2" rx="2" />
+                      </svg>
+                  <% end %>
+                </div>
+
+                <!-- Object Info -->
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-medium text-gray-800 truncate">
+                    <%= String.capitalize(object.type) %>
+                    <%= if object.type == "text" && decoded_data["text"] do %>
+                      - "<%= String.slice(decoded_data["text"], 0..15) %><%= if String.length(decoded_data["text"]) > 15, do: "..." %>"
+                    <% end %>
+                  </div>
+                  <div class="text-[10px] text-gray-500">
+                    <%= if position == 1 do %>
+                      <span class="text-green-600 font-semibold">Front</span>
+                    <% else %>
+                      <%= if position == total_count do %>
+                        <span class="text-orange-600 font-semibold">Back</span>
+                      <% else %>
+                        z: <%= Float.round(object.z_index, 1) %>
+                      <% end %>
+                    <% end %>
+                  </div>
+                </div>
+
+                <!-- Lock Indicator -->
+                <%= if object.locked_by do %>
+                  <div class="flex-shrink-0">
+                    <svg class="w-3 h-3 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+
+        <!-- Layer Controls Help -->
+        <div class="border-t border-gray-200 p-3">
+          <div class="text-[10px] text-gray-500 space-y-1">
+            <div>Right-click for options</div>
+            <div>⌘ ] / Ctrl ] = Forward</div>
+            <div>⌘ [ / Ctrl [ = Backward</div>
+            <div>⌘ Shift ] = To Front</div>
+            <div>⌘ Shift [ = To Back</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Main Canvas Area -->
       <div class="flex-1 flex flex-col">
         <!-- Top Bar -->
@@ -1727,6 +2805,7 @@ defmodule CollabCanvasWeb.CanvasLive do
           data-objects={Jason.encode!(@objects)}
           data-presences={Jason.encode!(@presences)}
           data-user-id={@user_id}
+          data-canvas-id={@canvas_id}
           data-current-color={@current_color}
         >
           <!-- PixiJS will render here -->
@@ -1739,24 +2818,95 @@ defmodule CollabCanvasWeb.CanvasLive do
           <p class="text-sm text-gray-500 mt-1">Describe what you want to create</p>
         </div>
 
-        <div class="flex-1 p-4 overflow-y-auto">
-          <div class="space-y-4">
-            <!-- AI Command Input -->
+        <div class="flex-1 flex flex-col">
+          <!-- AI Interaction History -->
+          <div class="flex-1 p-4 overflow-y-auto border-b border-gray-200">
+            <h3 class="text-sm font-medium text-gray-700 mb-3">AI Interaction History</h3>
+            <div class="space-y-2 flex flex-col-reverse">
+              <%= if length(@ai_interaction_history) == 0 do %>
+                <p class="text-sm text-gray-500 italic">No interactions yet. Enter a command below to get started.</p>
+              <% else %>
+                <%= for interaction <- @ai_interaction_history do %>
+                  <div class={[
+                    "p-2 rounded-lg text-sm",
+                    interaction.type == :user && "bg-blue-50 border border-blue-200",
+                    interaction.type == :ai && "bg-green-50 border border-green-200"
+                  ]}>
+                    <div class="flex items-start gap-2">
+                      <span class={[
+                        "font-semibold",
+                        interaction.type == :user && "text-blue-700",
+                        interaction.type == :ai && "text-green-700"
+                      ]}>
+                        <%= if interaction.type == :user do %>
+                          You:
+                        <% else %>
+                          AI:
+                        <% end %>
+                      </span>
+                      <span class="flex-1 text-gray-700"><%= interaction.content %></span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1">
+                      <%= Calendar.strftime(interaction.timestamp, "%H:%M:%S") %>
+                    </div>
+                  </div>
+                <% end %>
+              <% end %>
+            </div>
+          </div>
+
+          <!-- AI Command Input -->
+          <div class="p-4">
+            <div class="space-y-4">
+              <!-- AI Command Input -->
             <form phx-change="ai_command_change">
               <label class="block text-sm font-medium text-gray-700 mb-2">
                 Command
               </label>
-              <textarea
-                name="value"
-                value={@ai_command}
-                disabled={@ai_loading}
-                class={[
-                  "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none",
-                  @ai_loading && "bg-gray-50 cursor-not-allowed"
-                ]}
-                rows="4"
-                placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle'"
-              ><%= @ai_command %></textarea>
+              <div class="relative">
+                <textarea
+                  id="ai-command-input"
+                  name="value"
+                  value={@ai_command}
+                  disabled={@ai_loading}
+                  phx-hook="AICommandInput"
+                  class={[
+                    "w-full px-3 py-2 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none",
+                    @ai_loading && "bg-gray-50 cursor-not-allowed"
+                  ]}
+                  rows="4"
+                  placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle' (Enter to submit, Shift+Enter for new line)"
+                ><%= @ai_command %></textarea>
+
+                <!-- Voice Input Button (Push-to-Talk) -->
+                <button
+                  type="button"
+                  id="voice-input-button"
+                  phx-hook="VoiceInput"
+                  class="absolute right-2 top-2 p-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+                  title="Hold to speak (push-to-talk)"
+                  disabled={@ai_loading}
+                >
+                  <svg
+                    class="w-5 h-5 mic-icon"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                    />
+                  </svg>
+                  <span class="listening-indicator hidden absolute -top-1 -right-1 h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                  </span>
+                </button>
+              </div>
             </form>
 
             <button
@@ -1869,6 +3019,7 @@ defmodule CollabCanvasWeb.CanvasLive do
           </div>
         </div>
       </div>
+    </div>
 
       <!-- Color Picker Popup -->
       <%= if @show_color_picker do %>

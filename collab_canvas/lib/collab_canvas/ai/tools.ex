@@ -133,26 +133,26 @@ defmodule CollabCanvas.AI.Tools do
     [
       %{
         name: "create_shape",
-        description: "Create a shape (rectangle or circle) on the canvas",
+        description: "Create one or more shapes (rectangle or circle) on the canvas. ALWAYS provide type, x, y, and width (these are required). For creating multiple shapes, add the count parameter - shapes will be arranged horizontally with automatic spacing.",
         input_schema: %{
           type: "object",
           properties: %{
             type: %{
               type: "string",
               enum: ["rectangle", "circle"],
-              description: "The type of shape to create"
+              description: "REQUIRED: The type of shape to create"
             },
             x: %{
               type: "number",
-              description: "X coordinate for the shape position"
+              description: "REQUIRED: X coordinate for the first shape position (or only shape if count=1)"
             },
             y: %{
               type: "number",
-              description: "Y coordinate for the shape position"
+              description: "REQUIRED: Y coordinate for the first shape position (or only shape if count=1)"
             },
             width: %{
               type: "number",
-              description: "Width of the shape (for rectangles) or diameter (for circles)"
+              description: "REQUIRED: Width of the shape (for rectangles) or diameter (for circles)"
             },
             height: %{
               type: "number",
@@ -172,6 +172,18 @@ defmodule CollabCanvas.AI.Tools do
               type: "number",
               description: "Width of the stroke",
               default: 2
+            },
+            count: %{
+              type: "integer",
+              description: "Number of shapes to create (default: 1). When count > 1, shapes are arranged horizontally with spacing based on their width.",
+              default: 1,
+              minimum: 1,
+              maximum: 100
+            },
+            spacing: %{
+              type: "number",
+              description: "Spacing between multiple shapes in pixels (default: 1.5x the width). Only used when count > 1.",
+              default: nil
             }
           },
           required: ["type", "x", "y", "width"]
@@ -654,6 +666,48 @@ defmodule CollabCanvas.AI.Tools do
             }
           },
           required: ["relationships"]
+        }
+      },
+      %{
+        name: "select_objects_by_description",
+        description: "Select objects on the canvas using natural language descriptions. This tool allows selecting objects by their visual properties (color, size, shape), spatial position (top-left, center, bottom), or combinations of attributes. Use this when the user asks to 'select all red circles', 'select the small objects', 'select objects in the top-left corner', etc. Returns the IDs of objects matching the description.",
+        input_schema: %{
+          type: "object",
+          properties: %{
+            description: %{
+              type: "string",
+              description: "Natural language description of objects to select (e.g., 'all small red circles', 'objects in the top-left', 'blue rectangles larger than 100px')"
+            },
+            objects_context: %{
+              type: "array",
+              description: "List of all canvas objects with their properties for filtering",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: %{type: "integer"},
+                  type: %{type: "string"},
+                  position: %{
+                    type: "object",
+                    properties: %{
+                      x: %{type: "number"},
+                      y: %{type: "number"}
+                    }
+                  },
+                  data: %{
+                    type: "object",
+                    properties: %{
+                      width: %{type: "number"},
+                      height: %{type: "number"},
+                      color: %{type: "string"},
+                      text: %{type: "string"},
+                      font_size: %{type: "number"}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          required: ["description", "objects_context"]
         }
       }
     ]

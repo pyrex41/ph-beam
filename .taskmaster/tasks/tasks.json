@@ -3685,95 +3685,7 @@
         "priority": "high",
         "dependencies": [],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Modify Objects Schema to Include group_id Field",
-            "description": "Update the objects database schema to add a nullable UUID field named group_id to support grouping functionality.",
-            "dependencies": [],
-            "details": "Locate the objects schema file in the database models. Add a new field 'group_id' of type UUID that is nullable. Ensure the schema change is documented for future migrations. This field will allow objects to be associated with a group.",
-            "status": "pending",
-            "testStrategy": "Verify the schema update by checking the database table structure after applying changes."
-          },
-          {
-            "id": 2,
-            "title": "Create Database Migration for group_id Field",
-            "description": "Generate and apply a database migration to add the group_id field to the objects table.",
-            "dependencies": [
-              1
-            ],
-            "details": "Create a new migration file using the appropriate framework tool (e.g., Ecto for Elixir). The migration should add a nullable UUID column named 'group_id' to the objects table. Run the migration to update the database schema.",
-            "status": "pending",
-            "testStrategy": "Run the migration and confirm the new column exists in the database without data loss."
-          },
-          {
-            "id": 3,
-            "title": "Update Canvases Context to Include create_group Function",
-            "description": "Extend the Canvases context to include a new function for creating groups of objects.",
-            "dependencies": [
-              2
-            ],
-            "details": "Open the Canvases context file. Add a new function named 'create_group' that takes a list of objects as input. The function should generate a UUID for the group and prepare to assign it to the objects, setting up the logic for group management.",
-            "status": "pending",
-            "testStrategy": "Unit test the create_group function to ensure it generates a valid UUID and handles the objects list correctly."
-          },
-          {
-            "id": 4,
-            "title": "Implement UUID Assignment and Database Saving Logic",
-            "description": "Complete the create_group function to assign the UUID to each object's group_id and save changes to the database.",
-            "dependencies": [
-              3
-            ],
-            "details": "In the create_group function, for each object in the list, set the group_id to the generated UUID. Use the context's save or update methods to persist the changes to the database. Ensure atomic transactions if multiple objects are involved.",
-            "status": "pending",
-            "testStrategy": "Integration test to verify that after calling create_group, all objects in the list have the same group_id saved in the database."
-          },
-          {
-            "id": 5,
-            "title": "Add Retrieval Logic for Grouped Objects",
-            "description": "Enhance the Canvases context to support retrieving objects by their group_id.",
-            "dependencies": [
-              4
-            ],
-            "details": "Add a new function, such as 'get_grouped_objects(group_id)', to the Canvases context. This function should query the database to fetch all objects that share the specified group_id, enabling group-based operations.",
-            "status": "pending",
-            "testStrategy": "Test the retrieval function by creating a group and confirming that all associated objects are returned correctly."
-          },
-          {
-            "id": 6,
-            "title": "Add Ungroup Functionality to Canvases Context",
-            "description": "Implement function to ungroup objects by clearing their group_id.",
-            "dependencies": [
-              5
-            ],
-            "details": "Add ungroup_objects/1 function to Canvases context that takes a group_id, finds all objects with that group_id, sets their group_id to nil, and saves changes. Handle validation and return {:ok, objects} or {:error, reason}.",
-            "status": "pending",
-            "testStrategy": "Test ungrouping objects, verify group_id is cleared for all members."
-          },
-          {
-            "id": 7,
-            "title": "Add LiveView Handlers for Group/Ungroup Events",
-            "description": "Implement event handlers for create_group and ungroup in CanvasLive.",
-            "dependencies": [
-              3,
-              6
-            ],
-            "details": "In canvas_live.ex, add handle_event for 'create_group' (calls create_group with object IDs) and 'ungroup' (calls ungroup_objects with group_id). Broadcast group/ungroup events via PubSub for real-time sync.",
-            "status": "pending",
-            "testStrategy": "Test LiveView events trigger grouping/ungrouping and broadcast to other clients."
-          },
-          {
-            "id": 8,
-            "title": "Add Group Validation Logic",
-            "description": "Implement validation to prevent invalid grouping operations.",
-            "dependencies": [
-              3
-            ],
-            "details": "Add validation: prevent grouping objects from different canvases, prevent grouping already-grouped objects (or handle nested groups explicitly), require at least 2 objects for grouping. Return descriptive errors.",
-            "status": "pending",
-            "testStrategy": "Test validation rejects invalid grouping attempts with clear error messages."
-          }
-        ]
+        "subtasks": []
       },
       {
         "id": 2,
@@ -3786,82 +3698,7 @@
           1
         ],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Implement Shift+Click Multi-Selection",
-            "description": "Add event listener for Shift+Click to toggle selection of individual objects.",
-            "dependencies": [],
-            "details": "In canvas_manager.js, add a click event listener that checks for shift key. When shift is held and an object is clicked, toggle its selection state. Maintain a Set of selected object IDs for efficient lookup.",
-            "status": "pending",
-            "testStrategy": "Test selecting and deselecting multiple objects with Shift+Click, verify selection state persists."
-          },
-          {
-            "id": 2,
-            "title": "Implement Lasso/Drag Selection Box with PIXI.Graphics",
-            "description": "Create draggable selection box that selects all objects within its bounds.",
-            "dependencies": [],
-            "details": "Add mousedown/mousemove/mouseup listeners for drag selection. On drag, create PIXI.Graphics rectangle showing selection area. On mouseup, calculate which objects intersect the selection box and add them to selection.",
-            "status": "pending",
-            "testStrategy": "Test dragging to create selection box, verify all enclosed objects are selected."
-          },
-          {
-            "id": 3,
-            "title": "Implement Selection State Management",
-            "description": "Create centralized selection state manager to track and update selected objects.",
-            "dependencies": [
-              1,
-              2
-            ],
-            "details": "Create a SelectionManager class or module that maintains the current selection Set. Provide methods: addToSelection(), removeFromSelection(), clearSelection(), getSelectedObjects(). Emit events when selection changes for UI updates.",
-            "status": "pending",
-            "testStrategy": "Test selection state updates correctly across different selection methods."
-          },
-          {
-            "id": 4,
-            "title": "Implement Group Keyboard Shortcut (Cmd/Ctrl+G)",
-            "description": "Add keyboard shortcut to create groups from selected objects.",
-            "dependencies": [
-              3
-            ],
-            "details": "Add keydown listener for Cmd/Ctrl+G. When triggered with selected objects, call pushEvent('create_group', {object_ids: [...]}). Clear selection after grouping. Handle edge cases (empty selection, single object).",
-            "status": "pending",
-            "testStrategy": "Test grouping 2+ selected objects, verify backend receives correct IDs."
-          },
-          {
-            "id": 5,
-            "title": "Implement Ungroup Keyboard Shortcut (Cmd/Ctrl+Shift+G)",
-            "description": "Add keyboard shortcut to ungroup selected grouped objects.",
-            "dependencies": [
-              4
-            ],
-            "details": "Add keydown listener for Cmd/Ctrl+Shift+G. Identify which selected objects belong to groups, call pushEvent('ungroup', {group_ids: [...]}). Update selection to ungrouped objects.",
-            "status": "pending",
-            "testStrategy": "Test ungrouping grouped objects, verify objects are separated."
-          },
-          {
-            "id": 6,
-            "title": "Implement Atomic Transformation for Grouped Objects",
-            "description": "Ensure grouped objects move, resize, and rotate as a single unit.",
-            "dependencies": [
-              4
-            ],
-            "details": "When transforming (drag/resize/rotate) an object that's in a group, apply the same transformation to all group members. Calculate transformation delta and apply to each grouped object's position/scale/rotation. Broadcast all changes together.",
-            "status": "pending",
-            "testStrategy": "Test moving/resizing/rotating grouped objects, verify all members transform together."
-          },
-          {
-            "id": 7,
-            "title": "Add Visual Indication for Grouped Objects",
-            "description": "Draw visual indicators (border/badge) around grouped objects.",
-            "dependencies": [
-              4
-            ],
-            "details": "Use PIXI.Graphics to draw a subtle border or corner badge on grouped objects. Update visual when objects are grouped/ungrouped. Use distinct color (e.g., blue outline) to indicate group membership.",
-            "status": "pending",
-            "testStrategy": "Test visual indicators appear/disappear correctly when grouping/ungrouping."
-          }
-        ]
+        "subtasks": []
       },
       {
         "id": 3,
@@ -3874,61 +3711,7 @@
           1
         ],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Add z_index field to objects schema",
-            "description": "Modify the objects schema to include a new z_index float field for controlling layer order.",
-            "dependencies": [],
-            "details": "Update the Ecto schema file for objects to add a z_index field of type :float, ensuring it can be null or have a default value. This field will store the z-index value for each object to manage layering.",
-            "status": "pending",
-            "testStrategy": "Verify that the schema accepts z_index values and persists them correctly in the database."
-          },
-          {
-            "id": 2,
-            "title": "Create database migration for z_index field",
-            "description": "Generate and run a migration to add the z_index column to the objects table.",
-            "dependencies": [
-              1
-            ],
-            "details": "Create an Ecto migration file that adds a z_index column of type float to the objects table. Run the migration to update the database schema, ensuring backward compatibility if needed.",
-            "status": "pending",
-            "testStrategy": "Check that the migration applies successfully and the column exists in the database."
-          },
-          {
-            "id": 3,
-            "title": "Update Objects context to handle z_index",
-            "description": "Modify the Objects context to support storing and retrieving z_index values.",
-            "dependencies": [
-              2
-            ],
-            "details": "In the Objects context, update functions like create_object and update_object to accept and save z_index values. Ensure queries can filter or order by z_index for layer management.",
-            "status": "pending",
-            "testStrategy": "Test creating and updating objects with z_index values, confirming they are stored and retrieved accurately."
-          },
-          {
-            "id": 4,
-            "title": "Add LiveView Handlers for Layer Management Actions",
-            "description": "Implement event handlers for bring_to_front, send_to_back, align, distribute in CanvasLive.",
-            "dependencies": [
-              3
-            ],
-            "details": "In canvas_live.ex, add handle_event for 'bring_to_front', 'send_to_back', 'align_objects', 'distribute_objects'. Call existing Layout.ex functions (distribute_horizontally, distribute_vertically, align_objects) and update z_index for layer actions. Broadcast changes via PubSub.",
-            "status": "pending",
-            "testStrategy": "Test LiveView events trigger Layout.ex functions and update objects correctly."
-          },
-          {
-            "id": 5,
-            "title": "Integrate z_index Updates with Layout Functions",
-            "description": "Update existing Layout.ex functions to work with z_index values.",
-            "dependencies": [
-              4
-            ],
-            "details": "Review existing Layout.ex functions (distribute_horizontally, distribute_vertically, align_objects, arrange_grid, circular_layout) to ensure they work correctly when objects have z_index. Add helper functions to calculate new z_index values for bring_to_front/send_to_back operations.",
-            "status": "pending",
-            "testStrategy": "Test alignment/distribution functions with z_index values, verify layering is preserved."
-          }
-        ]
+        "subtasks": []
       },
       {
         "id": 4,
@@ -3942,76 +3725,7 @@
           3
         ],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Create Right-Click Context Menu Component",
-            "description": "Build context menu UI component that appears on right-click.",
-            "dependencies": [],
-            "details": "Create a context menu component (HTML/CSS or LiveView component) with menu items for layer and alignment actions. Position menu at mouse coordinates. Handle click-outside to close menu.",
-            "status": "pending",
-            "testStrategy": "Test context menu appears at cursor position on right-click and closes appropriately."
-          },
-          {
-            "id": 2,
-            "title": "Implement Bring to Front / Send to Back UI and Handlers",
-            "description": "Add menu items and event handlers for z-index manipulation.",
-            "dependencies": [
-              1
-            ],
-            "details": "Add 'Bring to Front', 'Bring Forward', 'Send Backward', 'Send to Back' to context menu. On click, calculate new z_index values and call pushEvent('update_z_index', {object_ids, action}). Frontend updates z-index immediately (optimistic UI).",
-            "status": "pending",
-            "testStrategy": "Test z-index changes apply correctly to single and multiple selections."
-          },
-          {
-            "id": 3,
-            "title": "Implement Alignment Tools UI (Left/Center/Right/Top/Middle/Bottom)",
-            "description": "Add alignment menu items and handlers.",
-            "dependencies": [
-              1
-            ],
-            "details": "Add align submenu with: Align Left, Center, Right, Top, Middle, Bottom. On click, call pushEvent('align_objects', {object_ids, alignment_type}). Display alignment options only when 2+ objects selected.",
-            "status": "pending",
-            "testStrategy": "Test aligning multiple objects to each edge/center, verify correct positioning."
-          },
-          {
-            "id": 4,
-            "title": "Implement Distribution Tools UI (Horizontal/Vertical)",
-            "description": "Add distribution menu items and handlers.",
-            "dependencies": [
-              1
-            ],
-            "details": "Add 'Distribute Horizontally' and 'Distribute Vertically' menu items. On click, call pushEvent('distribute_objects', {object_ids, direction}). Require 3+ objects for distribution.",
-            "status": "pending",
-            "testStrategy": "Test distributing 5+ objects evenly, verify mathematically even spacing."
-          },
-          {
-            "id": 5,
-            "title": "Add Toolbar Buttons for Common Actions",
-            "description": "Add quick-access toolbar buttons for frequently used alignment/layer actions.",
-            "dependencies": [
-              2,
-              3,
-              4
-            ],
-            "details": "Create toolbar section with icon buttons for common actions (align left/center/right, distribute). Wire to same pushEvent handlers as context menu. Disable when no/insufficient selection.",
-            "status": "pending",
-            "testStrategy": "Test toolbar buttons trigger same actions as context menu."
-          },
-          {
-            "id": 6,
-            "title": "Ensure Actions Work on Multi-Selections and Groups",
-            "description": "Verify all layer/alignment actions work correctly with multi-selections and grouped objects.",
-            "dependencies": [
-              2,
-              3,
-              4
-            ],
-            "details": "Test that layer and alignment actions handle: single objects, multi-selections, grouped objects, and mixed selections. Grouped objects should maintain their internal relationships during alignment.",
-            "status": "pending",
-            "testStrategy": "Test all actions with various selection combinations, verify correct behavior."
-          }
-        ]
+        "subtasks": []
       },
       {
         "id": 5,
@@ -4022,60 +3736,7 @@
         "priority": "medium",
         "dependencies": [],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Update Object Schema Validation for New Shape Types",
-            "description": "Add validation to accept new shape types: star, triangle, polygon.",
-            "dependencies": [],
-            "details": "In lib/collab_canvas/canvases/object.ex, update the validate_inclusion for :type field to include 'star', 'triangle', 'polygon'. Document the expected data structure for each shape type in the schema comments.",
-            "status": "pending",
-            "testStrategy": "Test creating objects with new types, verify validation accepts them."
-          },
-          {
-            "id": 2,
-            "title": "Document Data JSON Structure for New Shape Properties",
-            "description": "Define and document the data JSON structure for new shapes (sides, points, etc.).",
-            "dependencies": [
-              1
-            ],
-            "details": "Document in schema or separate file: polygon requires 'sides' (integer), star requires 'points' (integer) and 'innerRadius' (float), triangle requires 'orientation' (string). Add examples in comments.",
-            "status": "pending",
-            "testStrategy": "Create test objects with documented structure, verify they render correctly."
-          },
-          {
-            "id": 3,
-            "title": "Update AI Tools to Handle New Shape Types",
-            "description": "Extend CollabCanvas.AI.Tools to create and manipulate new shape types.",
-            "dependencies": [
-              2
-            ],
-            "details": "In lib/collab_canvas/ai/tools.ex, update create_shape tool definition to accept new types. Add parameters for sides/points/innerRadius. Update execute_tool_call in agent.ex to handle new shape creation with proper data structure.",
-            "status": "pending",
-            "testStrategy": "Test AI commands like 'create a pentagon' and verify correct shape is created."
-          },
-          {
-            "id": 4,
-            "title": "Update AI Tools for Text Formatting Properties",
-            "description": "Extend AI tools to handle text formatting: fontWeight, fontStyle, textDecoration, fontSize.",
-            "dependencies": [],
-            "details": "Update the modify_text or create_text tool in AI.Tools to accept formatting parameters. Ensure data JSON includes: fontWeight (bold/normal), fontStyle (italic/normal), textDecoration (underline/none), fontSize (number).",
-            "status": "pending",
-            "testStrategy": "Test AI commands like 'make text bold and italic', verify properties are set."
-          },
-          {
-            "id": 5,
-            "title": "Add Property Validation Logic",
-            "description": "Implement validation for new shape and text properties.",
-            "dependencies": [
-              2,
-              4
-            ],
-            "details": "Add validation functions that check: sides >= 3 for polygon, points >= 3 for star, fontSize > 0, fontWeight in ['normal', 'bold'], etc. Return descriptive errors for invalid values.",
-            "status": "pending",
-            "testStrategy": "Test creating objects with invalid properties, verify appropriate errors."
-          }
-        ]
+        "subtasks": []
       },
       {
         "id": 6,
@@ -4088,26 +3749,7 @@
           5
         ],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Implement Rendering Logic for New Shapes",
-            "description": "Add rendering logic for new shapes including stars, triangles, and polygons in canvas_manager.js using PIXI.Graphics.",
-            "dependencies": [],
-            "details": "Modify canvas_manager.js to handle new shape types. For polygons, implement drawing based on number of sides. Ensure shapes render correctly and integrate with existing canvas functionality. Update the AI agent to support these shapes.",
-            "status": "pending",
-            "testStrategy": "Test creating and rendering stars, triangles, and polygons on the canvas, verifying visual accuracy and performance."
-          },
-          {
-            "id": 2,
-            "title": "Enhance Text Formatting with Properties Panel and Real-Time Updates",
-            "description": "Create/update properties panel LiveComponent for text formatting with bold, italic, underline, font size controls.",
-            "dependencies": [],
-            "details": "Create or extend a PropertiesPanel LiveComponent. Add UI controls: bold/italic/underline toggle buttons, font size number input. On change, call handle_event to update selected text object's data field with new formatting. Push updates to canvas_manager.js via push_event for real-time preview. Ensure formatting is stored in data JSON: {fontWeight: 'bold', fontStyle: 'italic', textDecoration: 'underline', fontSize: 16}.",
-            "status": "pending",
-            "testStrategy": "Test formatting controls update text in real-time, verify properties persist in database."
-          }
-        ]
+        "subtasks": []
       },
       {
         "id": 7,
@@ -4120,62 +3762,7 @@
           2
         ],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Set up global keydown event listener",
-            "description": "Add a global event listener for keydown events in app.js or a dedicated module to capture keyboard inputs.",
-            "dependencies": [],
-            "details": "Implement a keydown event listener on the document or a specific element that captures key presses, preventing default behavior where necessary, and routes to specific handler functions based on key combinations.",
-            "status": "pending",
-            "testStrategy": "Verify that the listener captures key events without interfering with other inputs."
-          },
-          {
-            "id": 2,
-            "title": "Implement duplicate shortcut (Cmd/Ctrl+D)",
-            "description": "Handle the Cmd/Ctrl+D key combination to duplicate selected objects or groups.",
-            "dependencies": [
-              1
-            ],
-            "details": "In the keydown handler, check for ctrlKey (or metaKey for Cmd) and key 'd', then call pushEvent('duplicate', selected_ids) to trigger duplication on the backend via CanvasLive. Ensure it works for single objects and groups.",
-            "status": "pending",
-            "testStrategy": "Test duplicating a single object and a group, verifying new copies are created and positioned correctly."
-          },
-          {
-            "id": 3,
-            "title": "Implement nudge shortcuts (Arrow keys and Shift+Arrow)",
-            "description": "Handle arrow key presses for nudging selected objects 1px, and Shift+Arrow for 10px nudges.",
-            "dependencies": [
-              1
-            ],
-            "details": "In the keydown handler, detect arrow keys (up, down, left, right), and if Shift is held, nudge by 10px instead of 1px. Call pushEvent('nudge', {direction, amount, selected_ids}) to update positions via CanvasLive. Apply to singles and groups.",
-            "status": "pending",
-            "testStrategy": "Measure response time to ensure <50ms, test nudging single objects and groups in all directions with and without Shift."
-          },
-          {
-            "id": 4,
-            "title": "Implement copy shortcut (Cmd/Ctrl+C)",
-            "description": "Handle the Cmd/Ctrl+C key combination to copy selected objects or groups to a clipboard buffer.",
-            "dependencies": [
-              1
-            ],
-            "details": "In the keydown handler, check for ctrlKey (or metaKey) and key 'c', then store the selected_ids and their data in a local clipboard variable. Do not trigger backend yet, as copy is local preparation for paste.",
-            "status": "pending",
-            "testStrategy": "Test copying single objects and groups, verifying the clipboard holds the correct data without altering the canvas."
-          },
-          {
-            "id": 5,
-            "title": "Implement paste shortcut (Cmd/Ctrl+V)",
-            "description": "Handle the Cmd/Ctrl+V key combination to paste copied objects or groups at a new position.",
-            "dependencies": [
-              1,
-              4
-            ],
-            "details": "In the keydown handler, check for ctrlKey (or metaKey) and key 'v', then if clipboard has data, call pushEvent('paste', {clipboard_data, position}) to create new instances via CanvasLive. Position near the original or at a default location. Ensure works for singles and groups.",
-            "status": "pending",
-            "testStrategy": "Test pasting after copying, verifying new objects appear correctly positioned, and check pasting multiple times creates independent copies."
-          }
-        ]
+        "subtasks": []
       },
       {
         "id": 8,
@@ -4186,95 +3773,7 @@
         "priority": "medium",
         "dependencies": [],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Create Palette Schema",
-            "description": "Create Palette Ecto schema with id, name, user_id, timestamps.",
-            "dependencies": [],
-            "details": "Create file lib/collab_canvas/color_palettes/palette.ex with schema: id (UUID), name (string), user_id (references users), timestamps. Add belongs_to :user and has_many :palette_colors associations.",
-            "status": "pending",
-            "testStrategy": "Test schema compiles and associations are defined correctly."
-          },
-          {
-            "id": 2,
-            "title": "Create PaletteColor Schema",
-            "description": "Create PaletteColor schema with id, palette_id, color_hex, position.",
-            "dependencies": [],
-            "details": "Create file lib/collab_canvas/color_palettes/palette_color.ex with schema: id (UUID), palette_id (references palettes), color_hex (string), position (integer for ordering). Add belongs_to :palette.",
-            "status": "pending",
-            "testStrategy": "Test schema compiles and palette association works."
-          },
-          {
-            "id": 3,
-            "title": "Create Database Migrations for Palettes Tables",
-            "description": "Generate migrations to create palettes and palette_colors tables.",
-            "dependencies": [
-              1,
-              2
-            ],
-            "details": "Run 'mix ecto.gen.migration create_palettes_tables'. Create palettes table with columns: id, name, user_id, inserted_at, updated_at. Create palette_colors table with: id, palette_id, color_hex, position, timestamps. Add foreign keys and indexes.",
-            "status": "pending",
-            "testStrategy": "Run migration, verify tables exist with correct columns and constraints."
-          },
-          {
-            "id": 4,
-            "title": "Add create_palette Function to ColorPalettes Context",
-            "description": "Implement function to create a new palette with colors.",
-            "dependencies": [
-              3
-            ],
-            "details": "In lib/collab_canvas/color_palettes.ex, add create_palette/2 function that takes user_id and palette attrs (name, colors list). Create palette and associated colors in a transaction. Return {:ok, palette} or {:error, changeset}.",
-            "status": "pending",
-            "testStrategy": "Test creating palette with 5-8 colors, verify palette and colors saved correctly."
-          },
-          {
-            "id": 5,
-            "title": "Add list_user_palettes Function",
-            "description": "Implement function to retrieve all palettes for a user.",
-            "dependencies": [
-              3
-            ],
-            "details": "Add list_user_palettes/1 function that queries palettes by user_id and preloads palette_colors ordered by position. Return list of palette structs with colors.",
-            "status": "pending",
-            "testStrategy": "Test retrieving palettes for user, verify colors are preloaded and ordered."
-          },
-          {
-            "id": 6,
-            "title": "Add update_palette and delete_palette Functions",
-            "description": "Implement functions to update and delete palettes.",
-            "dependencies": [
-              4
-            ],
-            "details": "Add update_palette/2 (palette_id, attrs) to update name or colors. Add delete_palette/1 (palette_id) with cascade delete of colors. Both should handle not_found errors.",
-            "status": "pending",
-            "testStrategy": "Test updating palette name/colors and deleting palettes, verify cascades work."
-          },
-          {
-            "id": 7,
-            "title": "Add LiveView Handlers for Palette CRUD",
-            "description": "Implement event handlers in CanvasLive for palette operations.",
-            "dependencies": [
-              4,
-              5,
-              6
-            ],
-            "details": "In canvas_live.ex, add handle_event callbacks for: 'create_palette', 'update_palette', 'delete_palette', 'load_palettes'. Call ColorPalettes context functions and broadcast changes if needed.",
-            "status": "pending",
-            "testStrategy": "Test LiveView events trigger correct context functions and update state."
-          },
-          {
-            "id": 8,
-            "title": "Add Validation for Palette Constraints",
-            "description": "Validate palette name uniqueness per user and color count limits.",
-            "dependencies": [
-              4
-            ],
-            "details": "In Palette changeset, add validations: name required and unique per user_id, maximum 10 palettes per user. In create_palette, validate 5-8 colors per palette. Return clear error messages.",
-            "status": "pending",
-            "testStrategy": "Test validation errors for duplicate names, too many palettes, invalid color counts."
-          }
-        ]
+        "subtasks": []
       },
       {
         "id": 9,
@@ -4287,61 +3786,7 @@
           8
         ],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Update ColorPicker LiveComponent to Render Palette List",
-            "description": "Modify the ColorPicker LiveComponent to display a list of saved color palettes fetched from the backend.",
-            "dependencies": [],
-            "details": "In the LiveComponent's render function, add a section to display palettes as a list or grid of color swatches. Ensure the component fetches palettes from the backend context on mount or update.",
-            "status": "pending",
-            "testStrategy": "Verify that the palette list renders correctly with sample palettes and updates when new palettes are added."
-          },
-          {
-            "id": 2,
-            "title": "Implement Palette Creation Functionality",
-            "description": "Add UI elements and logic to allow users to create new color palettes within the ColorPicker component.",
-            "dependencies": [
-              1
-            ],
-            "details": "Introduce a button or form in the ColorPicker to create a new palette. On creation, collect selected colors and send a pushEvent to the backend to save the palette. Update the palette list dynamically after creation.",
-            "status": "pending",
-            "testStrategy": "Test creating a new palette with multiple colors and confirm it appears in the list and is saved to the backend."
-          },
-          {
-            "id": 3,
-            "title": "Enable Single-Click Color Application from Palettes",
-            "description": "Implement event handlers to apply a color to the selected object with a single click on a palette color.",
-            "dependencies": [
-              1
-            ],
-            "details": "Add click event listeners to each color swatch in the palettes. On click, apply the color to the currently selected object on the canvas by triggering the appropriate pushEvent to the backend context.",
-            "status": "pending",
-            "testStrategy": "Select an object, click a color from a palette, and verify the object's color changes immediately and persists."
-          },
-          {
-            "id": 4,
-            "title": "Integrate Backend for Saving Palettes",
-            "description": "Connect the palette creation process to the backend to persist new palettes.",
-            "dependencies": [
-              2
-            ],
-            "details": "Modify the palette creation logic to send a 'save_palette' event with palette data (name, colors) to the CanvasLive backend. Handle the response to update the local state and refresh the palette list.",
-            "status": "pending",
-            "testStrategy": "Create and save a palette, then reload the component to ensure the palette is retrieved and displayed."
-          },
-          {
-            "id": 5,
-            "title": "Integrate Backend for Loading Palettes",
-            "description": "Ensure palettes are loaded from the backend when the ColorPicker component initializes.",
-            "dependencies": [
-              1
-            ],
-            "details": "On component mount, send a 'load_palettes' event to fetch all saved palettes from the backend. Populate the palette list with the returned data and handle any updates in real-time via LiveView subscriptions.",
-            "status": "pending",
-            "testStrategy": "Check that existing palettes are loaded and displayed on component initialization, and update when palettes are modified externally."
-          }
-        ]
+        "subtasks": []
       },
       {
         "id": 10,
@@ -4354,61 +3799,7 @@
           2
         ],
         "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Implement Selection Bounding Box Calculation",
-            "description": "Calculate bounding box that encompasses all selected objects.",
-            "dependencies": [],
-            "details": "Create function to calculate min/max x/y coordinates of selected objects considering their positions and dimensions. Return bounding box {x, y, width, height} that contains all objects.",
-            "status": "pending",
-            "testStrategy": "Test bounding box calculation with various object selections, verify accuracy."
-          },
-          {
-            "id": 2,
-            "title": "Implement PNG Export with Offscreen Canvas",
-            "description": "Render selection or full canvas to PNG file.",
-            "dependencies": [
-              1
-            ],
-            "details": "Create function to: 1) Create offscreen PIXI.Application with bounding box dimensions, 2) Render selected objects (or all objects) to offscreen canvas, 3) Use app.renderer.extract.canvas() to get canvas, 4) Convert to blob with canvas.toBlob(), 5) Trigger download with URL.createObjectURL().",
-            "status": "pending",
-            "testStrategy": "Test exporting selection and full canvas to PNG, verify high-quality output."
-          },
-          {
-            "id": 3,
-            "title": "Implement SVG Export",
-            "description": "Convert PIXI objects to SVG elements for SVG export.",
-            "dependencies": [
-              1
-            ],
-            "details": "Create function to convert each object type (rectangle, circle, text, etc.) to SVG elements. Build SVG document with proper viewBox from bounding box. Convert shapes to <rect>, <circle>, <text>, <polygon> etc. with correct attributes. Create SVG string and trigger download as .svg file.",
-            "status": "pending",
-            "testStrategy": "Test SVG export, verify shapes match canvas and file is valid SVG."
-          },
-          {
-            "id": 4,
-            "title": "Add Export Button and Menu UI",
-            "description": "Create UI controls for triggering export.",
-            "dependencies": [],
-            "details": "Add export button to toolbar or menu with dropdown for 'Export Selection' and 'Export All'. Show format options (PNG/SVG). Disable export when nothing is selected (for selection export). On click, call export function with appropriate parameters.",
-            "status": "pending",
-            "testStrategy": "Test export UI appears correctly and triggers export functions."
-          },
-          {
-            "id": 5,
-            "title": "Handle Full Canvas vs Selection Export Modes",
-            "description": "Implement logic to export either selected objects or entire canvas.",
-            "dependencies": [
-              2,
-              3,
-              4
-            ],
-            "details": "Create export function that accepts mode parameter ('selection' | 'all'). If selection mode, use selected objects and their bounding box. If all mode, use all objects on canvas and canvas dimensions. Pass appropriate object list to PNG/SVG export functions.",
-            "status": "pending",
-            "testStrategy": "Test both export modes produce correct output with right objects included."
-          }
-        ]
+        "subtasks": []
       }
     ],
     "metadata": {
@@ -4427,93 +3818,21 @@
         "testStrategy": "Validate through the AI Command Test Suite (task 5) with a success rate >90% on test cases involving at least two combined attributes and vague terms. Manual testing to ensure selections match user intent.",
         "priority": "high",
         "dependencies": [],
-        "status": "blocked",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Implement NLP Parsing Logic for Semantic Descriptions",
-            "description": "Develop the natural language processing logic to parse user descriptions like 'small red circles' into structured queries that can be used to filter objects based on attributes such as size, color, shape, and position.",
-            "dependencies": [],
-            "details": "In the tools.ex module, implement a function to tokenize and parse the description string using basic NLP techniques or a library like NLTK if available. Handle combined attributes (e.g., 'small red circles') by identifying adjectives and nouns, and map them to object properties. Ensure the parser can handle vague terms by using fuzzy matching or context-aware reasoning over the provided objects_list.",
-            "status": "pending",
-            "testStrategy": "Unit tests to verify parsing accuracy for various descriptions, including combined attributes and vague terms, with expected output structures.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 2,
-            "title": "Develop Object Property Filtering Mechanism",
-            "description": "Create a filtering function that applies the parsed NLP query to the list of objects, selecting those that match the described criteria.",
-            "dependencies": [
-              1
-            ],
-            "details": "Extend the select_objects_by_description function in tools.ex to take the parsed query from the NLP logic and filter the objects_list. Implement logic for exact matches, ranges (e.g., 'small' as size < threshold), and spatial reasoning (e.g., 'top-left corner' based on position coordinates). Support multiple combined attributes by applying filters sequentially or with logical AND/OR operations.",
-            "status": "pending",
-            "testStrategy": "Integration tests with mock objects_list to ensure correct filtering for single and combined attributes, achieving >90% accuracy on test cases.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 3,
-            "title": "Integrate with Agent.ex for Context Building and Testing",
-            "description": "Modify the Agent.ex module to include object properties in the AI prompt context and perform initial testing of the tool with combined attributes.",
-            "dependencies": [
-              1,
-              2
-            ],
-            "details": "Update the build_command_with_context function in Agent.ex to append a detailed list of all canvas objects with their properties (position, size, color, shape) to the AI request prompt. Ensure the select_objects_by_description tool is callable from the agent. Conduct initial manual and automated tests to validate selections for descriptions involving at least two combined attributes and vague terms, aiming for a success rate >90%.",
-            "status": "pending",
-            "testStrategy": "Validate through manual testing and AI Command Test Suite integration, ensuring selections match user intent and handle edge cases like vague terms.",
-            "parentId": "undefined"
-          }
-        ],
-        "complexity": 8,
-        "recommendedSubtasks": 3,
-        "expansionPrompt": "Break down the implementation of the AI semantic selection tool into subtasks focusing on NLP parsing logic, object property filtering, integration with Agent.ex for context building, and initial testing for combined attributes.",
-        "updatedAt": "2025-10-18T04:48:05.530Z"
+        "status": "done",
+        "subtasks": [],
+        "updatedAt": "2025-10-18T04:58:56.570Z"
       },
       {
         "id": "2",
         "title": "Add Voice Command Input with Push-to-Talk",
-        "description": "Implement a push-to-talk microphone icon using the Groq Whisper API for transcription. Frontend records audio using MediaRecorder API and sends the audio blob to the LiveView backend. Backend forwards the audio to the Groq Whisper API endpoint (https://api.groq.com/openai/v1/audio/transcriptions) using the GROQ_API_KEY environment variable. Backend returns the transcription text to the frontend, which inserts it into the AI textarea for user editing before submission.",
-        "status": "pending",
-        "dependencies": [],
+        "description": "Implement a push-to-talk microphone icon using the browser's SpeechRecognition API to stream live transcription into the AI input field, making interactions faster and more natural.",
+        "details": "In the frontend JavaScript, add a new hook or modify app.js to manage microphone state and API interaction. Include UI feedback for 'listening' and 'transcribing' states. Handle microphone permissions gracefully, with fallback to text input if API is unavailable. Pseudo-code: Create a hook that initializes SpeechRecognition, starts/stops on button press, updates input field in real-time, and handles errors.",
+        "testStrategy": "Test transcription latency <500ms, permission handling, and editability of transcribed text before submission. Use browser developer tools to simulate API unavailability.",
         "priority": "medium",
-        "details": "In the frontend JavaScript, add a new hook or modify app.js to manage microphone recording with MediaRecorder API, sending the audio blob to the backend via a LiveView event. Include UI feedback for 'recording' and 'transcribing' states. Handle microphone permissions gracefully, with fallback to text input if recording is unavailable. On the backend, create a LiveView handler to receive the audio blob, forward it to the Groq Whisper API, and send the transcription back to the frontend. Pseudo-code: Frontend hook initializes MediaRecorder, starts/stops on button press, sends blob on stop; Backend receives blob, posts to Groq API, returns text.",
-        "testStrategy": "Test transcription latency <500ms, permission handling, editability of transcribed text before submission, and API error handling. Use browser developer tools to simulate network issues and API unavailability. Mock backend responses for testing.",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Create Audio Recording Hook",
-            "description": "Develop a custom React hook to manage audio recording using the MediaRecorder API, including initialization, starting/stopping on button press, sending the audio blob to the backend via LiveView event, and handling errors.",
-            "dependencies": [],
-            "details": "In the frontend JavaScript, create a new hook (e.g., useAudioRecording.js) that initializes the MediaRecorder API with appropriate options, sets up event listeners for start, dataavailable, stop, and error events. Implement functions to start and stop recording on button press, collect audio chunks into a blob, and send the blob to the backend via a LiveView push event. Handle API errors and browser compatibility gracefully.",
-            "status": "pending",
-            "testStrategy": "Test recording functionality and latency using browser developer tools, simulate API errors, and verify audio blob is sent correctly to the backend.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 2,
-            "title": "Implement UI Feedback and Permission Handling",
-            "description": "Add UI elements for microphone icon with states like 'recording' and 'transcribing', handle microphone permissions, and provide fallback to text input if MediaRecorder is unavailable. Receive and insert transcription from backend into the AI textarea.",
-            "dependencies": [],
-            "details": "Modify the app.js or relevant component to include a push-to-talk button with visual feedback (e.g., icon changes for recording/transcribing states). Use the hook to manage states and request microphone permissions on first use. If permissions are denied or API unavailable, display a message and ensure the text input remains functional. Handle the backend response to insert transcription into the textarea, allowing user edits before submission. Include error handling for permission denials, recording failures, and backend errors.",
-            "status": "pending",
-            "testStrategy": "Test permission prompts in different browsers, verify UI state changes, confirm fallback to text input when recording is unavailable or permissions denied, and ensure transcription is inserted and editable.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 3,
-            "title": "Implement Backend Transcription Handler",
-            "description": "Create a LiveView handler to receive the audio blob from the frontend, forward it to the Groq Whisper API, and return the transcription text to the frontend.",
-            "dependencies": [],
-            "details": "In the LiveView backend, add a handle_event or handle_info function to process the incoming audio blob. Use HTTPoison or similar to POST the blob to https://api.groq.com/openai/v1/audio/transcriptions with the GROQ_API_KEY. Parse the JSON response for the transcription text and push it back to the frontend via a LiveView update or event. Handle API errors, timeouts, and invalid responses gracefully.",
-            "status": "pending",
-            "testStrategy": "Unit test the handler with mocked audio blobs and API responses, asserting correct transcription return. Integration test with frontend to verify end-to-end flow, including error scenarios.",
-            "parentId": "undefined"
-          }
-        ],
-        "complexity": 6,
-        "recommendedSubtasks": 2,
-        "expansionPrompt": "Divide the voice command input feature into subtasks for creating the SpeechRecognition hook, implementing UI feedback states, and handling permissions and fallbacks."
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [],
+        "updatedAt": "2025-10-18T05:05:11.730Z"
       },
       {
         "id": "3",
@@ -4523,34 +3842,9 @@
         "testStrategy": "Verify panel displays history correctly, input field is docked, and responses are distinguished. Test with multiple interactions to ensure persistence during session.",
         "priority": "medium",
         "dependencies": [],
-        "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Update LiveView State Management for Interaction History",
-            "description": "Modify the CanvasLive module to store user commands and AI responses in socket assigns as a list of tuples for session persistence.",
-            "dependencies": [],
-            "details": "In the LiveView assigns, maintain a list of {user: command, ai: response} tuples. Update the assigns on each interaction to append new entries, ensuring the list holds at least the last 20 interactions. Handle state updates in the handle_event functions for AI command execution.",
-            "status": "pending",
-            "testStrategy": "Verify that interaction history is correctly stored and persisted in socket assigns during the session, checking with multiple commands.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 2,
-            "title": "Modify Template for Scrollable History Panel with Docked Input",
-            "description": "Update the CanvasLive template to render a scrollable chat-like panel displaying interaction history with distinguished user and AI messages, and dock the input field at the bottom.",
-            "dependencies": [
-              1
-            ],
-            "details": "Replace the AI input area with a scrollable div containing the history list, styled with conditional classes for user (e.g., right-aligned) and AI (e.g., left-aligned) messages. Dock the input textarea at the bottom of the panel. Ensure the panel auto-scrolls to the latest interaction and handles overflow gracefully.",
-            "status": "pending",
-            "testStrategy": "Test that the panel displays history correctly, input is docked, messages are distinguished, and scrolling works with 20+ interactions.",
-            "parentId": "undefined"
-          }
-        ],
-        "complexity": 5,
-        "recommendedSubtasks": 2,
-        "expansionPrompt": "Split the history panel implementation into subtasks for updating LiveView state management to store interaction history and modifying the template for scrollable rendering with docked input."
+        "status": "done",
+        "subtasks": [],
+        "updatedAt": "2025-10-18T05:09:56.185Z"
       },
       {
         "id": "4",
@@ -4560,71 +3854,9 @@
         "testStrategy": "Test that Enter submits and clears the field, Shift+Enter adds newline. Ensure no interference with other form behaviors.",
         "priority": "medium",
         "dependencies": [],
-        "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Locate the AI Command Textarea Element",
-            "description": "Identify and reference the specific textarea element used for AI command input in the form.",
-            "dependencies": [],
-            "details": "In the frontend code, find the textarea with the appropriate selector (e.g., by ID or class) that handles AI command input. Ensure it's accessible for attaching event listeners.",
-            "status": "pending",
-            "testStrategy": "Verify the element is correctly selected using browser developer tools or console logging.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 2,
-            "title": "Attach Keydown Event Listener to Textarea",
-            "description": "Add an event listener for keydown events on the textarea to capture user key presses.",
-            "dependencies": [
-              1
-            ],
-            "details": "Using JavaScript, attach a keydown event listener to the textarea element. This listener will handle the logic for Enter and Shift+Enter combinations.",
-            "status": "pending",
-            "testStrategy": "Check that the event listener is attached by logging events in the console when typing in the textarea.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 3,
-            "title": "Implement Enter Key Submission Logic",
-            "description": "In the event listener, check if the pressed key is 'Enter' without Shift, then trigger the submission.",
-            "dependencies": [
-              2
-            ],
-            "details": "Inside the keydown event handler, add a condition: if e.key === 'Enter' && !e.shiftKey, prevent default behavior, trigger the execute_ai_command event, and clear the textarea value.",
-            "status": "pending",
-            "testStrategy": "Test by pressing Enter in the textarea and confirm the command is submitted and field is cleared.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 4,
-            "title": "Implement Shift+Enter Newline Logic",
-            "description": "In the event listener, allow default behavior for Shift+Enter to insert a newline.",
-            "dependencies": [
-              2
-            ],
-            "details": "In the keydown event handler, add an else condition or ensure that if e.shiftKey is true (regardless of key), allow the default behavior to insert a newline in the textarea.",
-            "status": "pending",
-            "testStrategy": "Test by pressing Shift+Enter and verify a newline is added without submitting the command.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 5,
-            "title": "Integrate and Test the Hook in the Form",
-            "description": "Ensure the JavaScript hook is properly integrated into the form and test overall functionality.",
-            "dependencies": [
-              3,
-              4
-            ],
-            "details": "Attach the hook to the form as specified, ensuring it works seamlessly with existing form behaviors. Perform end-to-end testing to confirm Enter submits and clears, Shift+Enter adds newline, and no interference occurs.",
-            "status": "pending",
-            "testStrategy": "Run comprehensive tests including edge cases like rapid key presses, and ensure compatibility with other form elements.",
-            "parentId": "undefined"
-          }
-        ],
-        "complexity": 3,
-        "recommendedSubtasks": 0,
-        "expansionPrompt": "No expansion needed as this is a simple JavaScript hook for key event handling."
+        "status": "done",
+        "subtasks": [],
+        "updatedAt": "2025-10-18T05:05:25.233Z"
       },
       {
         "id": "5",
@@ -4639,198 +3871,16 @@
           "3",
           "4"
         ],
-        "status": "pending",
-        "subtasks": [
-          {
-            "id": 1,
-            "title": "Set up the test file structure for AI Command Test Suite",
-            "description": "Create the new test file test/collab_canvas/ai/agent_test.exs and establish the basic structure for the test suite, including necessary imports, setup functions, and mock configurations.",
-            "dependencies": [],
-            "details": "Initialize the test file with ExUnit setup, import required modules like Agent, and define helper functions for mocking canvas_id and canvas state. Ensure the file is placed in the correct directory and follows project conventions for test organization.",
-            "status": "pending",
-            "testStrategy": "Verify that the file compiles without errors and that basic test setup runs successfully using mix test.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 2,
-            "title": "Write tests for creation commands",
-            "description": "Develop tests for AI commands related to creating objects on the canvas, such as adding shapes, text, or other elements, with 5-7 core commands and variations.",
-            "dependencies": [
-              1
-            ],
-            "details": "For each creation command, write test cases that call Agent.execute_command/3 with mock canvas_id, assert on the returned results tuple for expected state changes like new object additions. Include 3-5 variations per command for different phrasings to test robustness.",
-            "status": "pending",
-            "testStrategy": "Run the specific test module and check for 100% pass rate on creation-related tests, ensuring no regressions in object creation logic.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 3,
-            "title": "Write tests for manipulation and layout commands",
-            "description": "Develop tests for AI commands involving object manipulation (e.g., resizing, moving) and layout adjustments (e.g., aligning, grouping), covering 5-7 core commands each with variations.",
-            "dependencies": [
-              1,
-              2
-            ],
-            "details": "Implement test cases that simulate manipulation and layout commands via Agent.execute_command/3, asserting on canvas state changes such as position updates or grouping. Incorporate 3-5 variations per command to handle different natural language phrasings.",
-            "status": "pending",
-            "testStrategy": "Execute tests and validate that manipulation and layout assertions hold true, with a focus on edge cases like overlapping objects or boundary conditions.",
-            "parentId": "undefined"
-          },
-          {
-            "id": 4,
-            "title": "Write tests for selection commands and robustness variations",
-            "description": "Develop tests for AI selection commands (e.g., selecting by description) and add comprehensive variations across all command types for phrasing robustness, aiming for 20-30 total tests.",
-            "dependencies": [
-              1,
-              2,
-              3
-            ],
-            "details": "Create tests for selection commands that depend on tools like select_objects_by_description, asserting on correct object selections. Additionally, expand variations for all previous command categories (creation, manipulation, layout) to cover 3-5 phrasings each, ensuring overall test suite reaches 20-30 tests.",
-            "status": "pending",
-            "testStrategy": "Run the full test suite and measure success rate >90%, integrating with CI to catch regressions and validate robustness against varied inputs.",
-            "parentId": "undefined"
-          }
-        ],
-        "complexity": 7,
-        "recommendedSubtasks": 4,
-        "expansionPrompt": "Expand the test suite creation into subtasks for setting up the test file structure, writing tests for creation commands, manipulation commands, layout commands, selection commands, and variations for robustness."
-      },
-      {
-        "id": "6",
-        "title": "Implement Tool Behaviour Pattern",
-        "description": "Create the Tool behaviour pattern in lib/collab_canvas/ai/tool.ex defining definition/0 and execute/2 callbacks to establish the architectural foundation for composable AI tools.",
-        "details": "Define a Tool behaviour module with callbacks: definition/0 returning a map with tool metadata (name, description, parameters), and execute/2 taking context and parameters, returning a result tuple. Use Elixir behaviours for this. Pseudo-code: defmodule Tool do @callback definition() :: map() @callback execute(map(), map()) :: {:ok, any()} | {:error, any()} end",
-        "testStrategy": "Unit test the behaviour by creating a mock tool module implementing Tool, asserting that definition/0 returns expected metadata and execute/2 handles valid/invalid inputs correctly.",
-        "priority": "high",
-        "dependencies": [],
         "status": "done",
         "subtasks": [],
-        "updatedAt": "2025-10-18T04:47:26.307Z"
-      },
-      {
-        "id": "7",
-        "title": "Create ToolRegistry with Auto-Discovery",
-        "description": "Implement ToolRegistry in lib/collab_canvas/ai/tool_registry.ex to automatically discover and register modules implementing the Tool behaviour at compile time.",
-        "details": "Use Elixir's __before_compile__ hook or Module.concat to scan lib/collab_canvas/ai/tools/ for modules implementing Tool. Store registered tools in an ETS table or map for fast lookup. Pseudo-code: defmodule ToolRegistry do def __before_compile__(_env) do # scan and register tools end def get_tools() do # return list of tools end end",
-        "testStrategy": "Integration test by adding a test tool file, recompiling, and asserting ToolRegistry.get_tools() includes the new tool; verify auto-discovery works without manual registration.",
-        "priority": "high",
-        "dependencies": [
-          "6"
-        ],
-        "status": "done",
-        "subtasks": [],
-        "updatedAt": "2025-10-18T04:47:28.279Z"
-      },
-      {
-        "id": "8",
-        "title": "Update Agent.ex for ToolRegistry Integration",
-        "description": "Modify Agent.ex to prioritize ToolRegistry for tool execution, falling back to legacy pattern matching for backward compatibility during migration.",
-        "details": "In Agent.execute_tool_call/3, first query ToolRegistry for the tool, if found call its execute/2, else fall back to legacy clauses renamed to execute_tool_call_legacy. Ensure hybrid execution works. Pseudo-code: def execute_tool_call(canvas_id, tool_name, params) do case ToolRegistry.get_tool(tool_name) do nil -> execute_tool_call_legacy(...) tool -> tool.execute(%{canvas_id: canvas_id}, params) end end",
-        "testStrategy": "Functional test with both new and legacy tools: call execute_tool_call with new tool name, assert correct execution; call with legacy tool, assert fallback works; verify no errors in hybrid mode.",
-        "priority": "high",
-        "dependencies": [
-          "7"
-        ],
-        "status": "done",
-        "subtasks": [],
-        "updatedAt": "2025-10-18T04:47:30.116Z"
-      },
-      {
-        "id": "9",
-        "title": "Migrate Existing Tools to New Framework",
-        "description": "Migrate create_shape, delete_object, and arrange_objects to the new plugin-based system in lib/collab_canvas/ai/tools/*.ex.",
-        "details": "For each tool, create a new module implementing Tool behaviour, moving logic from legacy clauses into execute/2. Ensure parameters match legacy expectations. Place files in tools/ directory for auto-discovery.",
-        "testStrategy": "Isolation test each migrated tool: instantiate the module, call execute/2 with test params, assert canvas state changes as expected (e.g., shape created); compare results with legacy execution.",
-        "priority": "high",
-        "dependencies": [
-          "8"
-        ],
-        "status": "done",
-        "subtasks": [],
-        "updatedAt": "2025-10-18T04:47:32.045Z"
-      },
-      {
-        "id": "10",
-        "title": "Enhance build_command_with_context for Semantic Selection",
-        "description": "Update Agent.ex's build_command_with_context function to provide AI with a comprehensive list of all canvas objects and their properties for every request.",
-        "details": "Modify build_command_with_context to fetch all objects via Canvas.get_objects/1, serialize properties (position, size, color, shape, etc.) into a structured prompt context. Append this to the AI prompt for better reasoning. Pseudo-code: def build_command_with_context(canvas_id, user_input) do objects = Canvas.get_objects(canvas_id) |> Enum.map(&serialize_object/1) context = \"Objects: #{objects}\" <> user_input # pass to AI end",
-        "testStrategy": "Unit test by mocking Canvas.get_objects, asserting the context string includes serialized object data; integration test with AI agent to verify context is used in responses.",
-        "priority": "medium",
-        "dependencies": [
-          "8"
-        ],
-        "status": "pending",
-        "subtasks": []
-      },
-      {
-        "id": "11",
-        "title": "Implement Semantic Selection Tool",
-        "description": "Create select_objects_by_description tool in lib/collab_canvas/ai/tools/semantic_selection.ex to enable AI commands like 'select all small red circles'.",
-        "details": "Implement Tool behaviour: definition/0 describes the tool for AI, execute/2 parses description, filters objects based on attributes (color, shape, size, position), using canvas context. Handle vague terms by defining thresholds (e.g., small: size < 50). Return selected object IDs. Pseudo-code: def execute(%{canvas_id: id}, %{description: desc}) do objects = Canvas.get_objects(id) selected = filter_objects(objects, desc) {:ok, selected} end",
-        "testStrategy": "Test suite with 20-30 commands (AIX-05): assert selection accuracy >90% on variations like 'small red circles', 'top-left objects'; use mock canvas states and verify selected IDs match expectations.",
-        "priority": "medium",
-        "dependencies": [
-          "10"
-        ],
-        "status": "pending",
-        "subtasks": []
-      },
-      {
-        "id": "12",
-        "title": "Add Voice Command Input Frontend",
-        "description": "Implement push-to-talk microphone icon using browser's SpeechRecognition API to stream transcription into AI input field.",
-        "details": "Add JS hook in app.js: manage microphone state (listening/transcribing), handle permissions, start/stop recognition on icon click. Stream transcription to textarea in real-time (<500ms latency). Provide UI feedback (icon states). Gracefully handle API unavailability. Pseudo-code: const recognition = new SpeechRecognition(); recognition.onresult = (e) => { textarea.value += e.results[0][0].transcript; };",
-        "testStrategy": "Manual/UI test: click microphone, speak, verify transcription appears <500ms; test permissions denied; edit transcribed text before submit; ensure fallback to text input works.",
-        "priority": "medium",
-        "dependencies": [],
-        "status": "cancelled",
-        "subtasks": [],
-        "updatedAt": "2025-10-18T04:47:33.951Z"
-      },
-      {
-        "id": "13",
-        "title": "Implement AI Interaction History Panel",
-        "description": "Replace AI input area with a persistent, scrollable chat-like panel displaying history of user commands and AI responses.",
-        "details": "Update CanvasLive template: add scrollable div for history, dock input at bottom. Store history in socket assigns (list of {user: msg, ai: response}). Display last 20+ interactions, distinguish user/AI visually. Pseudo-code: def handle_event(\"execute_ai_command\", %{\"command\" => cmd}, socket) do # execute, add to history assigns end",
-        "testStrategy": "UI test: submit multiple commands, assert history shows correctly (user input, AI response like '✅ Created 3 objects'); scroll and verify persistence; check input clearing and docking.",
-        "priority": "medium",
-        "dependencies": [],
-        "status": "cancelled",
-        "subtasks": [],
-        "updatedAt": "2025-10-18T04:47:35.825Z"
-      },
-      {
-        "id": "14",
-        "title": "Configure Enter to Submit Command",
-        "description": "Modify AI command textarea to submit on Enter and add newline on Shift+Enter.",
-        "details": "Attach JS hook to textarea: on keydown, if event.key === 'Enter' and !event.shiftKey, prevent default, trigger form submit; else allow newline. Clear textarea on successful submit. Pseudo-code: textarea.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.submit(); } });",
-        "testStrategy": "UI test: type command, press Enter, assert submit; press Shift+Enter, assert newline added; verify textarea clears after submit.",
-        "priority": "medium",
-        "dependencies": [],
-        "status": "cancelled",
-        "subtasks": [],
-        "updatedAt": "2025-10-18T04:47:37.685Z"
-      },
-      {
-        "id": "15",
-        "title": "Create AI Command Test Suite",
-        "description": "Develop a dedicated test suite in test/collab_canvas/ai/agent_test.exs covering 20-30 core commands with variations for robustness.",
-        "details": "Create test file with describe blocks for commands (creation, manipulation, layout, selection). Each test calls Agent.execute_command/3 with mock canvas_id, asserts on returned tuple (e.g., {:ok, changes}). Include 3-5 variations per command. Pseudo-code: test \"create shape variations\" do assert {:ok, _} = Agent.execute_command(canvas_id, \"create a red circle\", %{}) end",
-        "testStrategy": "Run mix test, ensure all pass; measure robustness by adding edge cases; update suite as new features (e.g., layering from PRD#1) are added, verifying no regressions.",
-        "priority": "medium",
-        "dependencies": [
-          "8"
-        ],
-        "status": "cancelled",
-        "subtasks": [],
-        "updatedAt": "2025-10-18T04:47:39.596Z"
+        "updatedAt": "2025-10-18T05:20:56.938Z"
       }
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2025-10-18T04:48:05.532Z",
-      "taskCount": 15,
-      "completedCount": 4,
+      "lastModified": "2025-10-18T05:20:56.939Z",
+      "taskCount": 5,
+      "completedCount": 5,
       "tags": [
         "copilot"
       ]

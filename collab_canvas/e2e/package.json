@@ -1,0 +1,17 @@
+{
+  "name": "collab-canvas-e2e-tests",
+  "version": "1.0.0",
+  "description": "End-to-end tests for CollabCanvas workflow features",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:smoke": "node --test test/smoke.test.js",
+    "test:workflow": "node --test test/workflow.test.js",
+    "test:palette": "node --test test/color-palette.test.js",
+    "test:grouping": "node --test test/grouping.test.js",
+    "test:integration": "node --test test/integration.test.js"
+  },
+  "dependencies": {
+    "puppeteer": "^22.0.0"
+  }
+}

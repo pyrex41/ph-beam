@@ -11,12 +11,13 @@ export default {
    * Hook lifecycle - mounted
    */
   async mounted() {
-    // Store current user ID
+    // Store current user ID and canvas ID
     this.currentUserId = this.el.dataset.userId;
+    this.canvasId = this.el.dataset.canvasId;
 
     // Create CanvasManager instance
     this.canvasManager = new CanvasManager();
-    await this.canvasManager.initialize(this.el, this.currentUserId);
+    await this.canvasManager.initialize(this.el, this.currentUserId, this.canvasId);
 
     // Set initial current color from data attribute
     const currentColor = this.el.dataset.currentColor || '#000000';
@@ -58,6 +59,10 @@ export default {
       this.safePushEvent('update_object', data);
     });
 
+    this.canvasManager.on('update_objects_batch', (data) => {
+      this.safePushEvent('update_objects_batch', data);
+    });
+
     this.canvasManager.on('delete_object', (data) => {
       this.safePushEvent('delete_object', data);
     });
@@ -76,6 +81,22 @@ export default {
 
     this.canvasManager.on('tool_changed', (data) => {
       this.safePushEvent('select_tool', data);
+    });
+
+    this.canvasManager.on('bring_to_front', (data) => {
+      this.safePushEvent('bring_to_front', data);
+    });
+
+    this.canvasManager.on('send_to_back', (data) => {
+      this.safePushEvent('send_to_back', data);
+    });
+
+    this.canvasManager.on('move_forward', (data) => {
+      this.safePushEvent('move_forward', data);
+    });
+
+    this.canvasManager.on('move_backward', (data) => {
+      this.safePushEvent('move_backward', data);
     });
 
     // Setup drag-and-drop for component instantiation
@@ -213,11 +234,17 @@ export default {
       this.canvasManager.updateObject(data.object, { animate: data.animate });
     });
 
-    // Handle batch object updates (for layout operations)
+    // Handle batch object updates (for layout operations and AI)
     this.handleEvent('objects_updated_batch', (data) => {
       console.log('Batch update received:', data.objects.length, 'objects');
-      // Update all objects in the batch with animation
-      data.objects.forEach(obj => this.canvasManager.updateObject(obj, { animate: true }));
+      // Start history batch for undo/redo
+      this.canvasManager.startHistoryBatch();
+      // Skip animation if this client is currently dragging (they already see objects in final position)
+      // Use animation for remote clients watching the drag or for AI/layout operations
+      const shouldAnimate = !this.canvasManager.isDragging;
+      data.objects.forEach(obj => this.canvasManager.updateObject(obj, { animate: shouldAnimate }));
+      // End history batch
+      this.canvasManager.endHistoryBatch();
     });
 
     // Handle object deleted events
@@ -243,11 +270,17 @@ export default {
     // Handle object lock updates from server
     this.handleEvent('object_locked', (data) => {
       this.canvasManager.updateObject(data.object);
+      // Show lock indicator with user info
+      if (data.user_info) {
+        this.canvasManager.showLockIndicator(data.object.id, data.user_info);
+      }
     });
 
     // Handle object unlock updates from server
     this.handleEvent('object_unlocked', (data) => {
       this.canvasManager.updateObject(data.object);
+      // Remove lock indicator
+      this.canvasManager.hideLockIndicator(data.object.id);
     });
 
     // Handle object label toggle
@@ -264,6 +297,18 @@ export default {
     // Handle color changes from color picker
     this.handleEvent('color_changed', (data) => {
       this.canvasManager.setCurrentColor(data.color);
+    });
+
+    // Handle layer reordering (bring to front, send to back, etc.)
+    this.handleEvent('objects_reordered', (data) => {
+      console.log('[Hook] objects_reordered event received:', data.objects.length, 'objects');
+      this.canvasManager.reorderObjects(data.objects);
+    });
+
+    // Handle object selection from layers panel
+    this.handleEvent('select_object_from_layer', (data) => {
+      console.log('[Hook] select_object_from_layer event received:', data.object_id);
+      this.canvasManager.selectObjectById(data.object_id);
     });
 
     // Setup debounced viewport saving

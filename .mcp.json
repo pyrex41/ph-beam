@@ -19,6 +19,10 @@
 				"OLLAMA_API_KEY": "YOUR_OLLAMA_API_KEY_HERE",
 				"GROQ_API_KEY": "YOUR_GROQ_API_KEY_HERE"
 			}
+		},
+		"browsermcp": {
+			"command": "npx",
+			"args": ["@browsermcp/mcp@latest"]
 		}
 	}
 }

@@ -1,5 +1,7 @@
 import * as PIXI from '../../vendor/pixi.min.mjs';
 import { PerformanceMonitor } from './performance_monitor.js';
+import { OfflineQueue } from './offline_queue.js';
+import { HistoryManager } from './history_manager.js';
 
 /**
  * CanvasManager - Standalone PixiJS Canvas Management
@@ -14,19 +16,30 @@ export class CanvasManager {
     this.objectContainer = null;
     this.labelContainer = null; // Separate container for labels (renders on top)
     this.cursorContainer = null;
+    this.selectionContainer = null; // Container for selected objects (enables group transforms)
 
     // Object and cursor storage
     this.objects = new Map();
     this.cursors = new Map();
     this.objectLabels = new Map(); // Map of objectId -> label Text object
     this.labelsVisible = false; // Track if labels are currently visible
+    this.lockIndicators = new Map(); // Map of objectId -> lock indicator container
+
+    // Offline support
+    this.offlineQueue = null;
+    this.connectionStatusIndicator = null;
+
+    // History management (undo/redo)
+    this.historyManager = new HistoryManager(50);
 
     // Interaction state
     this.currentUserId = null;
     this.selectedObjects = new Set(); // Changed from selectedObject to support multi-selection
     this.selectionBoxes = new Map(); // Map of objectId -> selectionBox graphics
+    this.selectionData = new Map(); // Map of objectId -> {originalParent, originalX, originalY, originalRotation, originalIndex}
     this.isDragging = false;
-    this.dragOffsets = new Map(); // Map of objectId -> {x, y} drag offset
+    this.dragOffsets = new Map(); // Map of objectId -> {x, y} drag offset (deprecated with selection container)
+    this.dragOffset = null; // Single drag offset for selection container {x, y}
     this.currentTool = 'select';
     this.isCreating = false;
     this.createStart = { x: 0, y: 0 };
@@ -54,9 +67,19 @@ export class CanvasManager {
     this.zoomLevel = 1;
     this.spacePressed = false;
 
+    // Lasso selection state
+    this.isLassoSelecting = false;
+    this.lassoStart = { x: 0, y: 0 };
+    this.lassoRect = null; // Graphics object for lasso visualization
+
+    // Clipboard state for copy/paste
+    this.clipboard = [];
+
     // Throttle tracking
     this.lastCursorUpdate = 0;
     this.lastDragUpdate = 0;
+    this.lastRotateUpdate = 0;
+    this.lastResizeUpdate = 0;
     this.lastCullUpdate = 0;
 
     // Viewport dimensions
@@ -75,14 +98,21 @@ export class CanvasManager {
     // Shared resources for cursor label optimization
     this.sharedCursorLabelStyle = null;
     this.sharedLabelBgContext = null;
+
+    // Remote transform tracking for smooth updates and visual feedback
+    this.remoteTransforms = new Map(); // Map of objectId -> {userId, type: 'drag'|'rotate'|'resize'}
+    this.remoteTransformGlows = new Map(); // Map of objectId -> PIXI.Graphics glow
+    this.interpolationTargets = new Map(); // Map of objectId -> {x, y, width, height, rotation, startTime}
+    this.presences = {}; // Store presence data for user colors
   }
 
   /**
    * Initialize the PixiJS application
    * @param {HTMLElement} container - DOM element to attach canvas to
    * @param {string} userId - Current user ID
+   * @param {string} canvasId - Canvas ID for offline queue
    */
-  async initialize(container, userId) {
+  async initialize(container, userId, canvasId) {
     this.currentUserId = userId;
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -112,6 +142,10 @@ export class CanvasManager {
     // this.objectContainer.cullable = true;
     this.objectContainer.isRenderGroup = true; // v8 render groups for batching
     this.app.stage.addChild(this.objectContainer);
+
+    // Create selection container for group transforms (child of objectContainer)
+    this.selectionContainer = new PIXI.Container();
+    this.objectContainer.addChild(this.selectionContainer);
 
     // Create label container (renders above objects, below cursors)
     this.labelContainer = new PIXI.Container();
@@ -145,6 +179,70 @@ export class CanvasManager {
     this.performanceMonitor = new PerformanceMonitor({ sampleSize: 60 });
     this.performanceMonitor.start();
 
+    // Start interpolation ticker for smooth remote transforms
+    this.app.ticker.add(this.updateInterpolations.bind(this));
+
+    // Initialize offline queue
+    if (canvasId) {
+      this.offlineQueue = new OfflineQueue(canvasId);
+      
+      // Register sync callback
+      this.offlineQueue.onSync(async (type, data) => {
+        this.emit(type + '_object', data);
+      });
+
+      // Register status change callback
+      this.offlineQueue.onStatusChange((status, queueSize) => {
+        this.updateConnectionStatus(status, queueSize);
+      });
+
+      // Create connection status indicator
+      this.createConnectionStatusIndicator();
+    }
+
+    // Setup history manager callbacks
+    this.historyManager.onUndo(async (operation) => {
+      console.log('[CanvasManager] Undoing operation:', operation);
+      
+      switch (operation.type) {
+        case 'create':
+          // Delete the created object
+          this.emit('delete_object', { object_id: operation.data.id });
+          break;
+        case 'update':
+          // Restore previous state
+          if (operation.previousState) {
+            this.emit('update_object', operation.previousState);
+          }
+          break;
+        case 'delete':
+          // Recreate the deleted object
+          if (operation.previousState) {
+            this.emit('create_object', operation.previousState);
+          }
+          break;
+      }
+    });
+
+    this.historyManager.onRedo(async (operation) => {
+      console.log('[CanvasManager] Redoing operation:', operation);
+      
+      switch (operation.type) {
+        case 'create':
+          // Recreate the object
+          this.emit('create_object', operation.data);
+          break;
+        case 'update':
+          // Reapply the update
+          this.emit('update_object', operation.data);
+          break;
+        case 'delete':
+          // Delete again
+          this.emit('delete_object', { object_id: operation.data.id });
+          break;
+      }
+    });
+
     // Initial viewport culling (disabled for now)
     // this.updateVisibleObjects();
   }
@@ -176,6 +274,12 @@ export class CanvasManager {
     window.addEventListener('mousemove', this.boundHandlers.handleMouseMove);
     window.addEventListener('mouseup', this.boundHandlers.handleMouseUp);
     canvas.addEventListener('wheel', this.boundHandlers.handleWheel);
+
+    // Prevent default browser context menu on canvas
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      console.log('[CanvasManager] Browser context menu prevented');
+    });
 
     // Touch events for mobile
     canvas.addEventListener('touchstart', this.boundHandlers.handleTouchStart);
@@ -210,10 +314,21 @@ export class CanvasManager {
 
   /**
    * Emit an event to all registered listeners
+   * Queues events when offline for later sync
    * @param {string} event - Event name
    * @param {*} data - Event data
    */
   emit(event, data) {
+    // Check if this is a canvas operation that should be queued when offline
+    const queueableEvents = ['create_object', 'update_object', 'delete_object'];
+
+    if (queueableEvents.includes(event) && this.offlineQueue && !this.offlineQueue.online) {
+      // Queue the operation for later sync
+      this.offlineQueue.queueOperation(event.replace('_object', ''), data);
+      // Don't return early - still emit the event so local UI updates
+    }
+
+    // Normal event emission (happens both online and offline)
     const listeners = this.eventListeners.get(event);
     if (listeners) {
       listeners.forEach(callback => callback(data));
@@ -238,7 +353,10 @@ export class CanvasManager {
     }
 
     let pixiObject;
-    const data = objectData.data ? JSON.parse(objectData.data) : {};
+    // Handle both parsed objects and JSON strings
+    const data = (typeof objectData.data === 'string')
+      ? JSON.parse(objectData.data)
+      : (objectData.data || {});
     const position = objectData.position || { x: 0, y: 0 };
 
     switch (objectData.type) {
@@ -251,6 +369,15 @@ export class CanvasManager {
       case 'text':
         pixiObject = this.createText(position, data);
         break;
+      case 'star':
+        pixiObject = this.createStar(position, data);
+        break;
+      case 'triangle':
+        pixiObject = this.createTriangle(position, data);
+        break;
+      case 'polygon':
+        pixiObject = this.createPolygon(position, data);
+        break;
       default:
         console.warn('Unknown object type:', objectData.type);
         return;
@@ -259,6 +386,9 @@ export class CanvasManager {
     // Store object reference and lock information
     pixiObject.objectId = objectData.id;
     pixiObject.lockedBy = objectData.locked_by;
+    pixiObject.zIndex = objectData.z_index || 0.0; // Store z_index for layer ordering
+    pixiObject.objectType = objectData.type; // Store type for resize redrawing
+    pixiObject.objectData = data; // Store original data for resize redrawing
     pixiObject.eventMode = 'static'; // Replaces interactive = true
 
     // Set cursor and visual appearance based on lock status
@@ -268,6 +398,7 @@ export class CanvasManager {
     pixiObject.on('pointerdown', this.onObjectPointerDown.bind(this));
     pixiObject.on('pointermove', this.onObjectPointerMove.bind(this));
     pixiObject.on('pointerup', this.onObjectPointerUp.bind(this));
+    pixiObject.on('rightdown', this.onObjectRightClick.bind(this));
 
     this.objects.set(objectData.id, pixiObject);
     this.objectContainer.addChild(pixiObject);
@@ -288,10 +419,12 @@ export class CanvasManager {
     const graphics = new PIXI.Graphics();
     const width = data.width || 100;
     const height = data.height || 100;
+
     // Check for both 'fill' and 'color' fields for backwards compatibility
-    const fillColor = data.fill || data.color || '#3b82f6';
+    // Validate that the color is a valid string before using it
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = data.stroke || data.color || '#1e40af';
+    const strokeColor = this.validateColor(data.stroke || data.color) || '#1e40af';
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -328,10 +461,12 @@ export class CanvasManager {
   createCircle(position, data) {
     const graphics = new PIXI.Graphics();
     const radius = (data.width || 100) / 2;
+
     // Check for both 'fill' and 'color' fields for backwards compatibility
-    const fillColor = data.fill || data.color || '#3b82f6';
+    // Validate that the color is a valid string before using it
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = data.stroke || data.color || '#1e40af';
+    const strokeColor = this.validateColor(data.stroke || data.color) || '#1e40af';
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -360,16 +495,63 @@ export class CanvasManager {
   }
 
   /**
+   * Redraw a Graphics object with new dimensions
+   * Used during resize to show smooth visual updates
+   * @param {PIXI.Graphics} graphics - The graphics object to redraw
+   * @param {number} width - New width
+   * @param {number} height - New height
+   */
+  redrawGraphicsWithSize(graphics, width, height) {
+    if (!(graphics instanceof PIXI.Graphics)) {
+      return; // Only works for Graphics objects
+    }
+
+    const data = graphics.objectData || {};
+    const type = graphics.objectType;
+
+    // Get fill and stroke from stored data
+    const fillColor = data.fill || data.color || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = data.stroke || data.color || '#1e40af';
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Clear and redraw
+    graphics.clear();
+
+    if (type === 'circle') {
+      const radius = width / 2;
+      graphics.circle(radius, radius, radius)
+        .fill(fill)
+        .stroke({ width: strokeWidth, color: stroke });
+      graphics.pivot.set(radius, radius);
+    } else {
+      // Rectangle (default)
+      graphics.rect(0, 0, width, height)
+        .fill(fill)
+        .stroke({ width: strokeWidth, color: stroke });
+      graphics.pivot.set(width / 2, height / 2);
+    }
+
+    // Restore opacity if it was set
+    // Preserve alpha, default to 1.0 (fully opaque) if not specified
+    graphics.alpha = data.opacity !== undefined ? data.opacity : 1.0;
+  }
+
+  /**
    * Create text object
    * @param {Object} position - {x, y} position
    * @param {Object} data - Text data
    * @returns {PIXI.Text}
    */
   createText(position, data) {
+    // Validate color before using
+    const textColor = this.validateColor(data.color) || '#000000';
+
     const style = new PIXI.TextStyle({
       fontFamily: data.font_family || 'Arial',
       fontSize: data.font_size || 16,
-      fill: data.color || '#000000',
+      fill: textColor,
       align: data.align || 'left',
       // Task 8: Support bold and italic from update_text command
       fontWeight: data.bold ? 'bold' : 'normal',
@@ -395,6 +577,142 @@ export class CanvasManager {
     }
 
     return text;
+  }
+
+  /**
+   * Create a star shape
+   * @param {Object} position - {x, y} position
+   * @param {Object} data - Shape data
+   * @returns {PIXI.Graphics}
+   */
+  createStar(position, data) {
+    const graphics = new PIXI.Graphics();
+    const points = data.points || 5; // Number of star points
+    const outerRadius = (data.width || 100) / 2;
+    const innerRadius = outerRadius * (data.innerRatio || 0.5);
+
+    // Validate colors
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = this.validateColor(data.stroke) || fillColor;
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Calculate star points
+    const starPoints = [];
+    for (let i = 0; i < points * 2; i++) {
+      const angle = (i * Math.PI) / points - Math.PI / 2;
+      const radius = i % 2 === 0 ? outerRadius : innerRadius;
+      starPoints.push(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius
+      );
+    }
+
+    // Draw star using poly
+    graphics.poly(starPoints)
+      .fill({ color: fill, alpha: data.opacity || 1 })
+      .stroke({ width: strokeWidth, color: stroke });
+
+    graphics.x = position.x;
+    graphics.y = position.y;
+
+    // Apply rotation if specified
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, outerRadius * 2, outerRadius * 2);
+    } else {
+      graphics.pivot.set(0, 0);
+    }
+
+    return graphics;
+  }
+
+  /**
+   * Create a triangle shape
+   * @param {Object} position - {x, y} position
+   * @param {Object} data - Shape data
+   * @returns {PIXI.Graphics}
+   */
+  createTriangle(position, data) {
+    const graphics = new PIXI.Graphics();
+    const width = data.width || 100;
+    const height = data.height || 100;
+
+    // Validate colors
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = this.validateColor(data.stroke) || fillColor;
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Draw equilateral triangle pointing up
+    const trianglePoints = [
+      0, -height / 2,           // Top
+      -width / 2, height / 2,   // Bottom left
+      width / 2, height / 2     // Bottom right
+    ];
+
+    graphics.poly(trianglePoints)
+      .fill({ color: fill, alpha: data.opacity || 1 })
+      .stroke({ width: strokeWidth, color: stroke });
+
+    graphics.x = position.x;
+    graphics.y = position.y;
+
+    // Apply rotation if specified
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, width, height);
+    } else {
+      graphics.pivot.set(0, 0);
+    }
+
+    return graphics;
+  }
+
+  /**
+   * Create a polygon shape
+   * @param {Object} position - {x, y} position
+   * @param {Object} data - Shape data
+   * @returns {PIXI.Graphics}
+   */
+  createPolygon(position, data) {
+    const graphics = new PIXI.Graphics();
+    const sides = data.sides || 6; // Default to hexagon
+    const radius = (data.width || 100) / 2;
+
+    // Validate colors
+    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
+    const fill = parseInt(fillColor.replace('#', '0x'));
+    const strokeColor = this.validateColor(data.stroke) || fillColor;
+    const stroke = parseInt(strokeColor.replace('#', '0x'));
+    const strokeWidth = data.stroke_width || 2;
+
+    // Calculate polygon points
+    const polygonPoints = [];
+    for (let i = 0; i < sides; i++) {
+      const angle = (i * 2 * Math.PI) / sides - Math.PI / 2;
+      polygonPoints.push(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius
+      );
+    }
+
+    // Draw polygon
+    graphics.poly(polygonPoints)
+      .fill({ color: fill, alpha: data.opacity || 1 })
+      .stroke({ width: strokeWidth, color: stroke });
+
+    graphics.x = position.x;
+    graphics.y = position.y;
+
+    // Apply rotation if specified
+    if (data.rotation !== undefined && data.rotation !== 0) {
+      this.applyRotation(graphics, data.rotation, data.pivot_point, radius * 2, radius * 2);
+    } else {
+      graphics.pivot.set(0, 0);
+    }
+
+    return graphics;
   }
 
   /**
@@ -433,56 +751,10 @@ export class CanvasManager {
   }
 
   /**
-   * Show visual feedback animation for AI-modified objects (Task 8)
-   * @param {number} objectId - ID of the modified object
-   */
-  showAIFeedback(objectId) {
-    const pixiObject = this.objects.get(objectId);
-    if (!pixiObject) return;
-
-    // Use local bounds (container-relative) instead of global bounds
-    const bounds = pixiObject.getLocalBounds();
-    const highlight = new PIXI.Graphics();
-
-    // Draw a glowing border around the object
-    highlight.rect(
-      -4,
-      -4,
-      bounds.width + 8,
-      bounds.height + 8
-    ).stroke({ width: 3, color: 0x10b981 }); // Green highlight
-
-    // Position highlight at object's position
-    highlight.x = pixiObject.x;
-    highlight.y = pixiObject.y;
-
-    // Match rotation and pivot of the object so highlight rotates with it
-    highlight.angle = pixiObject.angle;
-    highlight.pivot.set(pixiObject.pivot.x, pixiObject.pivot.y);
-
-    this.objectContainer.addChild(highlight);
-
-    // Animate the highlight (fade out and remove)
-    let alpha = 1.0;
-    const fadeInterval = setInterval(() => {
-      alpha -= 0.05;
-      highlight.alpha = alpha;
-
-      if (alpha <= 0) {
-        clearInterval(fadeInterval);
-        if (highlight.parent) {
-          highlight.parent.removeChild(highlight);
-        }
-        highlight.destroy();
-      }
-    }, 50);
-  }
-
-  /**
    * Update an existing object
    * @param {Object} objectData - Object data from server
    */
-  updateObject(objectData) {
+  updateObject(objectData, options = {}) {
     const pixiObject = this.objects.get(objectData.id);
     if (!pixiObject) {
       // Object doesn't exist, create it
@@ -505,13 +777,36 @@ export class CanvasManager {
       return;
     }
 
+    // Determine if this is a remote transform (not from current user)
+    const isRemoteTransform = pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId;
+
+    if (isRemoteTransform) {
+      console.log('[CanvasManager] Remote transform detected for object', objectData.id, 'locked by', pixiObject.lockedBy, 'current user', this.currentUserId);
+    }
+
     // Update position if changed
     if (objectData.position) {
-      pixiObject.x = objectData.position.x;
-      pixiObject.y = objectData.position.y;
+      // Skip position updates for objects in selection container (being dragged/selected)
+      const isInSelectionContainer = pixiObject.parent === this.selectionContainer;
+
+      if (isInSelectionContainer) {
+        console.log('[CanvasManager] Skipping position update for object', objectData.id, 'in selectionContainer');
+      } else if (isRemoteTransform) {
+        // Remote user is transforming - use smooth interpolation
+        // ONLY set position, not size or rotation
+        this.setInterpolationTarget(objectData.id, {
+          x: objectData.position.x,
+          y: objectData.position.y,
+          onlyPosition: true  // Flag to prevent size/rotation interpolation
+        });
+      } else {
+        // Local update or unlocked object - immediate update
+        pixiObject.x = objectData.position.x;
+        pixiObject.y = objectData.position.y;
+      }
 
       // Update label position for this object if labels are visible
-      if (this.labelsVisible) {
+      if (this.labelsVisible && !isRemoteTransform) {
         const label = this.objectLabels.get(objectData.id);
         if (label) {
           // Use local bounds and object position (same as selection boxes)
@@ -524,20 +819,143 @@ export class CanvasManager {
 
     // Update lock status
     if (objectData.locked_by !== undefined) {
+      const wasRemoteLocked = pixiObject.lockedBy && pixiObject.lockedBy !== this.currentUserId;
+      const isNowRemoteLocked = objectData.locked_by && objectData.locked_by !== this.currentUserId;
+      const isNowUnlocked = objectData.locked_by === null;
+
+      console.log('[CanvasManager] Updating lock status for object', objectData.id, 'locked_by:', objectData.locked_by, 'current user:', this.currentUserId);
       pixiObject.lockedBy = objectData.locked_by;
       this.updateObjectAppearance(pixiObject);
+
+      // If object is NOW locked by another user, immediately hide selection box
+      if (isNowRemoteLocked) {
+        console.log('[CanvasManager] Object locked by remote user, removing selection box', objectData.id);
+        const box = this.selectionBoxes.get(objectData.id);
+        if (box) {
+          box.visible = false;
+        }
+        const rotationHandle = this.rotationHandles.get(objectData.id);
+        if (rotationHandle) {
+          rotationHandle.visible = false;
+        }
+        const resizeHandle = this.resizeHandles.get(objectData.id);
+        if (resizeHandle) {
+          resizeHandle.visible = false;
+        }
+      }
+
+      // Clean up remote transform state if object was unlocked
+      if (wasRemoteLocked && isNowUnlocked) {
+        console.log('[CanvasManager] Object unlocked, cleaning up interpolation state', objectData.id);
+        this.interpolationTargets.delete(objectData.id);
+
+        // Make selection box visible again if it exists
+        const box = this.selectionBoxes.get(objectData.id);
+        if (box) {
+          box.visible = true;
+        }
+        const rotationHandle = this.rotationHandles.get(objectData.id);
+        if (rotationHandle) {
+          rotationHandle.visible = true;
+        }
+        const resizeHandle = this.resizeHandles.get(objectData.id);
+        if (resizeHandle) {
+          resizeHandle.visible = true;
+        }
+      }
     }
 
-    // For more complex updates, recreate the object
+    // Handle data changes - check if this is a partial update (like rotation only) or full object replacement
     if (objectData.data) {
-      this.deleteObject(objectData.id);
-      this.createObject(objectData);
+      try {
+        const newData = JSON.parse(objectData.data);
 
-      // Show AI feedback for data changes (Task 8)
-      this.showAIFeedback(objectData.id);
+        // If this is ONLY a rotation update (single key), apply it without recreating
+        const keys = Object.keys(newData);
+        if (keys.length === 1 && keys[0] === 'rotation') {
+          if (isRemoteTransform) {
+            // Remote user is rotating - use smooth interpolation
+            // ONLY set rotation, not position or size
+            this.setInterpolationTarget(objectData.id, {
+              rotation: newData.rotation,
+              onlyRotation: true  // Flag to prevent size interpolation
+            });
+          } else {
+            // Local update - immediate rotation
+            pixiObject.angle = newData.rotation;
 
-      // Update label for recreated object if labels are visible
-      this.updateObjectLabels();
+            // Update selection box to match rotation
+            const selectionBox = this.selectionBoxes.get(objectData.id);
+            if (selectionBox) {
+              selectionBox.angle = newData.rotation;
+            }
+          }
+
+          return;
+        }
+
+        // If this is ONLY a size update (width/height), try to update without recreating
+        if (keys.length <= 2 && keys.every(k => k === 'width' || k === 'height')) {
+          // Only handle size updates for Graphics objects (not Text)
+          if (pixiObject instanceof PIXI.Graphics) {
+            if (isRemoteTransform) {
+              // Remote user is resizing - use smooth interpolation
+              // ONLY set width/height, not rotation
+              this.setInterpolationTarget(objectData.id, {
+                width: newData.width,
+                height: newData.height,
+                onlyResize: true  // Flag to prevent rotation interpolation
+              });
+            } else {
+              // Local update - immediate resize
+              const bounds = pixiObject.getLocalBounds();
+              const width = newData.width !== undefined ? newData.width : bounds.width;
+              const height = newData.height !== undefined ? newData.height : bounds.height;
+
+              // Redraw using our helper method (preserves colors/styles)
+              this.redrawGraphicsWithSize(pixiObject, width, height);
+
+              // Update selection boxes
+              this.updateSelectionBoxes();
+            }
+            return;
+          }
+        }
+
+        // For complex updates or full data replacement, recreate the object
+        // Note: This path is now less frequent due to partial update optimizations
+        // for rotation-only (line 738) and size-only updates (line 761)
+
+        // IMPORTANT: Preserve selection state before recreating
+        const wasSelected = this.selectedObjects.has(pixiObject);
+        const wasInSelectionContainer = pixiObject.parent === this.selectionContainer;
+        const savedSelectionData = this.selectionData.get(objectData.id);
+
+        this.deleteObject(objectData.id);
+        this.createObject(objectData);
+
+        // Restore selection state after recreation
+        if (wasSelected && wasInSelectionContainer) {
+          const recreatedObject = this.objects.get(objectData.id);
+          if (recreatedObject) {
+            console.log('[CanvasManager] Restoring selection for recreated object', objectData.id);
+
+            // Restore selectionData if it existed
+            if (savedSelectionData) {
+              this.selectionData.set(objectData.id, savedSelectionData);
+            }
+
+            this.addToSelection(recreatedObject);
+            this.selectedObjects.add(recreatedObject);
+            // Don't create selection box - it should already exist
+          }
+        }
+
+        // Update label for recreated object if labels are visible
+        this.updateObjectLabels();
+      } catch (error) {
+        console.error('[CanvasManager] Error handling object data update:', error);
+      }
     }
   }
 
@@ -555,6 +973,234 @@ export class CanvasManager {
       pixiObject.alpha = 1.0;
       pixiObject.cursor = 'pointer';
     }
+  }
+
+  /**
+   * Show a lock indicator (avatar/name tag) next to a locked object
+   * @param {number} objectId - ID of the locked object
+   * @param {Object} userInfo - User info with name, color, avatar
+   */
+  showLockIndicator(objectId, userInfo) {
+    // Remove existing indicator if any
+    this.hideLockIndicator(objectId);
+
+    const pixiObject = this.objects.get(objectId);
+    if (!pixiObject) return;
+
+    // Only show indicator if locked by another user
+    if (pixiObject.lockedBy === this.currentUserId) return;
+
+    // Create container for the lock indicator
+    const container = new PIXI.Container();
+
+    // Create background pill
+    const bg = new PIXI.Graphics();
+    const bgColor = parseInt(userInfo.color.replace('#', '0x'));
+    const textColor = this.getContrastColor(userInfo.color);
+    
+    // Create text
+    const text = new PIXI.Text({
+      text: `🔒 ${userInfo.name}`,
+      style: new PIXI.TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 12,
+        fill: textColor,
+        fontWeight: 'bold'
+      })
+    });
+
+    // Draw rounded rectangle background
+    const padding = 6;
+    const radius = 6;
+    bg.roundRect(
+      0,
+      0,
+      text.width + padding * 2,
+      text.height + padding * 2,
+      radius
+    )
+    .fill(bgColor)
+    .stroke({ width: 2, color: 0xffffff });
+
+    // Position text inside background
+    text.x = padding;
+    text.y = padding;
+
+    container.addChild(bg);
+    container.addChild(text);
+
+    // Position indicator above the object
+    const bounds = pixiObject.getBounds();
+    container.x = bounds.x;
+    container.y = bounds.y - container.height - 10;
+
+    // Add to label container (renders above objects)
+    this.labelContainer.addChild(container);
+    this.lockIndicators.set(objectId, container);
+  }
+
+  /**
+   * Hide the lock indicator for an object
+   * @param {number} objectId - ID of the object
+   */
+  hideLockIndicator(objectId) {
+    const indicator = this.lockIndicators.get(objectId);
+    if (indicator) {
+      this.labelContainer.removeChild(indicator);
+      indicator.destroy();
+      this.lockIndicators.delete(objectId);
+    }
+  }
+
+  /**
+   * Get contrast color (black or white) for a given background color
+   * @param {string} hexColor - Hex color string like "#3b82f6"
+   * @returns {string} - Hex color string for text
+   */
+  getContrastColor(hexColor) {
+    // Remove # if present
+    const hex = hexColor.replace('#', '');
+    
+    // Convert to RGB
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    
+    // Calculate perceived brightness
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    
+    // Return black for light backgrounds, white for dark
+    return brightness > 128 ? 0x000000 : 0xffffff;
+  }
+
+  /**
+   * Update positions of all lock indicators to follow their objects
+   */
+  updateLockIndicators() {
+    this.lockIndicators.forEach((indicator, objectId) => {
+      const pixiObject = this.objects.get(objectId);
+      if (pixiObject) {
+        const bounds = pixiObject.getBounds();
+        indicator.x = bounds.x;
+        indicator.y = bounds.y - indicator.height - 10;
+      }
+    });
+  }
+
+  /**
+   * Create connection status indicator
+   */
+  createConnectionStatusIndicator() {
+    const container = new PIXI.Container();
+    
+    // Create background
+    const bg = new PIXI.Graphics();
+    bg.roundRect(0, 0, 200, 40, 6)
+      .fill(0x10b981)
+      .stroke({ width: 2, color: 0xffffff });
+    
+    // Create status text
+    const text = new PIXI.Text({
+      text: 'Online',
+      style: new PIXI.TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 14,
+        fill: 0xffffff,
+        fontWeight: 'bold'
+      })
+    });
+    text.x = 10;
+    text.y = 10;
+    
+    container.addChild(bg);
+    container.addChild(text);
+    
+    // Position in top-right corner
+    container.x = this.canvasWidth - 220;
+    container.y = 20;
+    container.visible = false; // Hidden by default (only show when offline)
+    
+    this.app.stage.addChild(container);
+    this.connectionStatusIndicator = { container, bg, text };
+  }
+
+  /**
+   * Update connection status indicator
+   * @param {string} status - 'online', 'offline', or 'reconnecting'
+   * @param {number} queueSize - Number of queued operations
+   */
+  updateConnectionStatus(status, queueSize) {
+    if (!this.connectionStatusIndicator) return;
+    
+    const { container, bg, text } = this.connectionStatusIndicator;
+    
+    switch (status) {
+      case 'online':
+        container.visible = false;
+        break;
+        
+      case 'offline':
+        container.visible = true;
+        bg.clear();
+        bg.roundRect(0, 0, 200, 40, 6)
+          .fill(0xef4444)
+          .stroke({ width: 2, color: 0xffffff });
+        text.text = `Offline (${queueSize} queued)`;
+        break;
+        
+      case 'reconnecting':
+        container.visible = true;
+        bg.clear();
+        bg.roundRect(0, 0, 200, 40, 6)
+          .fill(0xf59e0b)
+          .stroke({ width: 2, color: 0xffffff });
+        text.text = `Syncing... (${queueSize} left)`;
+        break;
+    }
+  }
+
+  /**
+   * Perform undo operation
+   */
+  async performUndo() {
+    const success = await this.historyManager.undo();
+    if (success) {
+      console.log('[CanvasManager] Undo performed');
+    }
+  }
+
+  /**
+   * Perform redo operation
+   */
+  async performRedo() {
+    const success = await this.historyManager.redo();
+    if (success) {
+      console.log('[CanvasManager] Redo performed');
+    }
+  }
+
+  /**
+   * Add operation to history for undo/redo
+   * @param {string} type - Operation type: 'create', 'update', 'delete'
+   * @param {Object} data - Operation data
+   * @param {Object} previousState - Previous state for undo
+   */
+  addToHistory(type, data, previousState = null) {
+    this.historyManager.addOperation(type, data, previousState);
+  }
+
+  /**
+   * Start batching operations (for multi-object or AI operations)
+   */
+  startHistoryBatch() {
+    this.historyManager.startBatch();
+  }
+
+  /**
+   * End batching operations
+   */
+  endHistoryBatch() {
+    this.historyManager.endBatch();
   }
 
   /**
@@ -576,6 +1222,9 @@ export class CanvasManager {
       label.container.destroy();
       this.objectLabels.delete(objectId);
     }
+
+    // Also remove the lock indicator if it exists
+    this.hideLockIndicator(objectId);
   }
 
   /**
@@ -655,6 +1304,9 @@ export class CanvasManager {
    * @param {Object} presences - Presence data from server
    */
   updatePresences(presences) {
+    // Store presence data for user colors and info
+    this.presences = presences;
+
     // Remove cursors for users who left
     this.cursors.forEach((cursor, userId) => {
       if (!presences[userId]) {
@@ -724,19 +1376,32 @@ export class CanvasManager {
     if (this.currentTool === 'select') {
       if (clickedObject) {
         // This shouldn't happen if PixiJS events work, but keep as fallback
-        console.log('[CanvasManager] Object clicked via DOM event (fallback)');
+        console.log('[CanvasManager] Object clicked via DOM event (fallback), objectId:', clickedObject.objectId);
         // Shift+click = toggle selection, regular click = replace selection
         if (event.shiftKey) {
           this.toggleSelection(clickedObject);
         } else {
-          this.setSelection(clickedObject);
+          // Check if object is in selection container (not the Set - reference equality bug)
+          const isInSelection = clickedObject.parent === this.selectionContainer;
+          console.log('[CanvasManager] DOM fallback: isInSelection:', isInSelection, 'selectionContainer children:', this.selectionContainer.children.length);
+
+          if (!isInSelection) {
+            console.log('[CanvasManager] DOM fallback: calling setSelection');
+            this.setSelection(clickedObject);
+          } else {
+            console.log('[CanvasManager] DOM fallback: object already in selection, preserving multi-selection');
+          }
         }
       } else {
-        // Clicking on empty space = clear selection (unless shift-clicking)
-        console.log('[CanvasManager] Empty space clicked, clearing selection');
+        // Clicking on empty space = start lasso selection or clear selection
+        console.log('[CanvasManager] Empty space clicked');
         if (!event.shiftKey) {
           this.clearSelection();
         }
+        // Start lasso selection
+        this.isLassoSelecting = true;
+        this.lassoStart = position;
+        this.createLassoRect(position);
       }
     } else if (this.currentTool === 'delete') {
       if (clickedObject) {
@@ -858,6 +1523,21 @@ export class CanvasManager {
       if (selectionBox) {
         selectionBox.angle = angle;
       }
+
+      // Broadcast rotation changes during rotate (throttled to avoid spam)
+      if (!this.lastRotateUpdate || Date.now() - this.lastRotateUpdate > 50) {
+        const objectData = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+        if (objectData) {
+          const [objectId] = objectData;
+          this.emit('update_object', {
+            object_id: objectId,
+            data: {
+              rotation: Math.round(angle)
+            }
+          });
+        }
+        this.lastRotateUpdate = Date.now();
+      }
     } else if (this.isResizing && this.resizingObject) {
       // Calculate new size using relative mouse movement
       const obj = this.resizingObject;
@@ -879,23 +1559,59 @@ export class CanvasManager {
       obj.tempWidth = newWidth;
       obj.tempHeight = newHeight;
 
+      // Redraw object with new size for smooth visual feedback
+      this.redrawGraphicsWithSize(obj, newWidth, newHeight);
+
       // Update selection box to match new size
       this.updateSelectionBoxes();
+
+      // Broadcast size changes during resize (throttled to avoid spam)
+      if (!this.lastResizeUpdate || Date.now() - this.lastResizeUpdate > 50) {
+        const objectData = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+        if (objectData) {
+          const [objectId] = objectData;
+          this.emit('update_object', {
+            object_id: objectId,
+            data: {
+              width: Math.round(newWidth),
+              height: Math.round(newHeight)
+            }
+          });
+        }
+        this.lastResizeUpdate = Date.now();
+      }
+    } else if (this.isLassoSelecting) {
+      // Update lasso selection rectangle
+      this.updateLassoRect(position);
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
     } else if (this.isDragging && this.selectedObjects.size > 0) {
-      // Move all selected objects together (Task 19: multi-object dragging)
-      this.selectedObjects.forEach(obj => {
-        const offset = this.dragOffsets.get(obj.objectId);
-        if (offset) {
-          const newX = position.x + offset.x;
-          const newY = position.y + offset.y;
-
-          obj.x = newX;
-          obj.y = newY;
+      // Check if actual movement occurred (more than 3 pixels threshold)
+      if (this.dragStartPos) {
+        const dx = Math.abs(position.x - this.dragStartPos.x);
+        const dy = Math.abs(position.y - this.dragStartPos.y);
+        if (dx > 3 || dy > 3) {
+          this.hasDragged = true;
         }
-      });
+      }
+
+      // Move the entire selection container (all children move together automatically)
+      if (this.dragOffset) {
+        const newX = position.x + this.dragOffset.x;
+        const newY = position.y + this.dragOffset.y;
+
+        this.selectionContainer.x = newX;
+        this.selectionContainer.y = newY;
+
+        // Log drag movement (throttled)
+        if (!this.lastDragLog || Date.now() - this.lastDragLog > 200) {
+          console.log('[CanvasManager] Dragging selectionContainer to', { x: newX, y: newY }, 'children:', this.selectionContainer.children.length);
+          this.lastDragLog = Date.now();
+        }
+      } else {
+        console.error('[CanvasManager] isDragging but no dragOffset!');
+      }
 
       // Update all selection boxes
       this.updateSelectionBoxes();
@@ -903,14 +1619,35 @@ export class CanvasManager {
       // Update all object labels to follow dragged objects
       this.updateObjectLabels();
 
+      // Update all lock indicators to follow dragged objects
+      this.updateLockIndicators();
+
       // Broadcast positions for all selected objects during drag (throttled to avoid spam)
       if (!this.lastDragUpdate || Date.now() - this.lastDragUpdate > 50) {
+        const batchUpdates = [];
+
         this.selectedObjects.forEach(obj => {
-          this.emit('update_object', {
+          // Skip if object has been destroyed (no parent means it's not in scene graph)
+          if (!obj || !obj.parent) {
+            console.warn('[CanvasManager] Skipping destroyed object in selectedObjects during drag');
+            this.selectedObjects.delete(obj);
+            return;
+          }
+
+          // Get world position then convert to objectContainer's local space
+          // This ensures coordinates are consistent across all clients
+          const worldPos = obj.getGlobalPosition();
+          const localPos = this.objectContainer.toLocal(worldPos);
+          batchUpdates.push({
             object_id: obj.objectId,
-            position: { x: obj.x, y: obj.y }
+            position: { x: localPos.x, y: localPos.y }
           });
         });
+
+        // Send single batch update for all objects
+        if (batchUpdates.length > 0) {
+          this.emit('update_objects_batch', { updates: batchUpdates });
+        }
         this.lastDragUpdate = Date.now();
       }
     }
@@ -992,21 +1729,58 @@ export class CanvasManager {
     // Only get mouse position if we need it
     const position = this.getMousePosition(event);
 
-    if (this.isCreating) {
+    if (this.isLassoSelecting) {
+      // Finalize lasso selection
+      this.finalizeLassoSelection(event);
+    } else if (this.isCreating) {
       // Finalize object creation
       this.finalizeTempObject(position);
     } else if (this.isDragging && this.selectedObjects.size > 0) {
-      // Send final update to server after dragging all selected objects
-      this.selectedObjects.forEach(obj => {
-        this.emit('update_object', {
-          object_id: obj.objectId,
-          position: {
-            x: obj.x,
-            y: obj.y
+      // Check if actual dragging occurred
+      if (this.hasDragged) {
+        console.log('[CanvasManager] Committing drag - actual movement detected');
+        // Commit drag: get world positions, reset container, update local positions
+        const updates = [];
+        this.selectedObjects.forEach(obj => {
+          // Skip if object has been destroyed
+          if (!obj || !obj.parent) {
+            console.warn('[CanvasManager] Skipping destroyed object in selectedObjects during drag commit');
+            this.selectedObjects.delete(obj);
+            return;
           }
+
+          // Get world position then convert to objectContainer's local space
+          const worldPos = obj.getGlobalPosition();
+          const localPos = this.objectContainer.toLocal(worldPos);
+          updates.push({ obj, localPos });
         });
-      });
+
+        // Reset selection container to origin
+        this.selectionContainer.x = 0;
+        this.selectionContainer.y = 0;
+
+        // Update each object's local position to maintain world position
+        updates.forEach(({ obj, localPos }) => {
+          // Set position in objectContainer's local space (consistent with server coordinates)
+          obj.x = localPos.x;
+          obj.y = localPos.y;
+        });
+
+        // Update selection boxes to match new positions
+        this.updateSelectionBoxes();
+
+        // No need to send batch update here - the final throttled update
+        // during drag already contains the correct positions
+      } else {
+        console.log('[CanvasManager] No movement detected - treating as click, not drag');
+        // No actual movement - just a click, not a drag
+        // Don't commit anything, just clear the drag state
+      }
+
       this.isDragging = false;
+      this.hasDragged = false;
+      this.dragOffset = null;
+      this.dragStartPos = null;
     }
   }
 
@@ -1075,12 +1849,30 @@ export class CanvasManager {
    * Handle keyboard events
    */
   handleKeyDown(event) {
+    // Don't handle keyboard shortcuts if user is typing
+    const isTyping = event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA';
+
+    // Handle Cmd/Ctrl+Z for Undo
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      if (!isTyping) {
+        event.preventDefault();
+        this.performUndo();
+      }
+      return;
+    }
+
+    // Handle Cmd/Ctrl+Shift+Z for Redo
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && event.shiftKey) {
+      if (!isTyping) {
+        event.preventDefault();
+        this.performRedo();
+      }
+      return;
+    }
+
     // Handle spacebar for panning
     if (event.code === 'Space' && !this.spacePressed) {
-      // Don't handle spacebar if user is typing in an input
-      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-        return;
-      }
+      if (isTyping) return;
       event.preventDefault();
       this.spacePressed = true;
       if (!this.isPanning) {
@@ -1090,8 +1882,70 @@ export class CanvasManager {
     }
 
     // Don't handle keyboard shortcuts if user is typing in an input
-    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-      return;
+    if (isTyping) return;
+
+    // Check for modifier keys
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey;
+
+    // Handle keyboard shortcuts with Cmd/Ctrl
+    if (cmdOrCtrl) {
+      switch (event.key.toLowerCase()) {
+        case 'g':
+          event.preventDefault();
+          if (event.shiftKey) {
+            this.ungroupSelected();
+          } else {
+            this.groupSelected();
+          }
+          return;
+        case 'd':
+          event.preventDefault();
+          this.duplicateSelected();
+          return;
+        case 'c':
+          event.preventDefault();
+          this.copySelected();
+          return;
+        case 'v':
+          event.preventDefault();
+          this.pasteFromClipboard();
+          return;
+        case 'a':
+          event.preventDefault();
+          this.selectAll();
+          return;
+        case ']':
+          event.preventDefault();
+          if (event.shiftKey) {
+            // Cmd/Ctrl + Shift + ] = Bring to Front
+            this.bringToFront();
+          } else {
+            // Cmd/Ctrl + ] = Move Forward
+            this.moveForward();
+          }
+          return;
+        case '[':
+          event.preventDefault();
+          if (event.shiftKey) {
+            // Cmd/Ctrl + Shift + [ = Send to Back
+            this.sendToBack();
+          } else {
+            // Cmd/Ctrl + [ = Move Backward
+            this.moveBackward();
+          }
+          return;
+      }
+    }
+
+    // Handle arrow keys for nudging
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      if (this.selectedObjects.size > 0) {
+        event.preventDefault();
+        const nudgeAmount = event.shiftKey ? 10 : 1;
+        this.nudgeSelected(event.key, nudgeAmount);
+        return;
+      }
     }
 
     switch (event.key.toLowerCase()) {
@@ -1114,13 +1968,17 @@ export class CanvasManager {
         this.setTool('rectangle');
         break;
       case 'c':
-        this.setTool('circle');
+        if (!cmdOrCtrl) {
+          this.setTool('circle');
+        }
         break;
       case 't':
         this.setTool('text');
         break;
       case 'd':
-        this.setTool('delete');
+        if (!cmdOrCtrl) {
+          this.setTool('delete');
+        }
         break;
       case 's':
         this.setTool('select');
@@ -1254,6 +2112,117 @@ export class CanvasManager {
   }
 
   /**
+   * Create lasso selection rectangle for visual feedback
+   * @param {Object} position - {x, y} starting position
+   */
+  createLassoRect(position) {
+    if (this.lassoRect) {
+      this.objectContainer.removeChild(this.lassoRect);
+      this.lassoRect.destroy();
+    }
+
+    this.lassoRect = new PIXI.Graphics();
+    this.lassoRect.x = position.x;
+    this.lassoRect.y = position.y;
+    this.lassoRect.alpha = 0.3;
+    this.objectContainer.addChild(this.lassoRect);
+  }
+
+  /**
+   * Update lasso selection rectangle during drag
+   * @param {Object} currentPosition - {x, y} current position
+   */
+  updateLassoRect(currentPosition) {
+    if (!this.lassoRect || !this.isLassoSelecting) return;
+
+    const width = currentPosition.x - this.lassoStart.x;
+    const height = currentPosition.y - this.lassoStart.y;
+
+    this.lassoRect.clear();
+    
+    // Draw selection rectangle with dashed border effect
+    this.lassoRect.rect(0, 0, width, height)
+      .fill({ color: 0x3b82f6, alpha: 0.1 })
+      .stroke({ width: 1, color: 0x1e40af });
+  }
+
+  /**
+   * Finalize lasso selection and select objects within rectangle
+   * @param {MouseEvent} event - Mouse event for shift key detection
+   */
+  finalizeLassoSelection(event) {
+    if (!this.lassoRect || !this.isLassoSelecting) return;
+
+    const endPos = this.getMousePosition(event);
+    
+    // Calculate selection rectangle bounds
+    const minX = Math.min(this.lassoStart.x, endPos.x);
+    const maxX = Math.max(this.lassoStart.x, endPos.x);
+    const minY = Math.min(this.lassoStart.y, endPos.y);
+    const maxY = Math.max(this.lassoStart.y, endPos.y);
+
+    // Find objects within the lasso rectangle
+    const width = maxX - minX;
+    const height = maxY - minY;
+    
+    // Only process if lasso has reasonable size (at least 5px)
+    if (width > 5 && height > 5) {
+      // Clear previous selection unless shift is held
+      if (!event.shiftKey) {
+        this.clearSelection();
+      }
+
+      // Select all objects that intersect with the lasso rectangle
+      this.objects.forEach((obj, objectId) => {
+        const bounds = obj.getBounds();
+
+        // Check if object intersects with lasso rectangle
+        if (this.rectanglesIntersect(
+          minX, minY, maxX, maxY,
+          bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height
+        )) {
+          if (!this.selectedObjects.has(obj)) {
+            // Reparent object to selection container
+            this.addToSelection(obj);
+            // Add to selection tracking
+            this.selectedObjects.add(obj);
+            this.emit('lock_object', { object_id: obj.objectId });
+            this.createSelectionBox(obj);
+          }
+        }
+      });
+    }
+
+    console.log('[CanvasManager] AFTER lasso loop, selectionContainer children:', this.selectionContainer.children.length, 'children IDs:', this.selectionContainer.children.map(c => c.objectId));
+
+    // Remove lasso rect
+    this.objectContainer.removeChild(this.lassoRect);
+    this.lassoRect.destroy();
+    this.lassoRect = null;
+    this.isLassoSelecting = false;
+
+    console.log('[CanvasManager] Lasso selection complete, selected', this.selectedObjects.size, 'objects');
+    console.log('[CanvasManager] Selected object IDs:', Array.from(this.selectedObjects).map(o => o.objectId));
+    console.log('[CanvasManager] FINAL check - selectionContainer children:', this.selectionContainer.children.length);
+  }
+
+  /**
+   * Check if two rectangles intersect
+   * @param {number} x1min - First rectangle min x
+   * @param {number} y1min - First rectangle min y
+   * @param {number} x1max - First rectangle max x
+   * @param {number} y1max - First rectangle max y
+   * @param {number} x2min - Second rectangle min x
+   * @param {number} y2min - Second rectangle min y
+   * @param {number} x2max - Second rectangle max x
+   * @param {number} y2max - Second rectangle max y
+   * @returns {boolean} True if rectangles intersect
+   */
+  rectanglesIntersect(x1min, y1min, x1max, y1max, x2min, y2min, x2max, y2max) {
+    return !(x1max < x2min || x2max < x1min || y1max < y2min || y2max < y1min);
+  }
+
+  /**
    * Find object at given position
    * @param {Object} position - {x, y} position
    * @returns {PIXI.DisplayObject|null}
@@ -1286,6 +2255,11 @@ export class CanvasManager {
       this.emit('unlock_object', { object_id: obj.objectId });
     });
 
+    // Reparent all objects back to their original parents
+    this.selectedObjects.forEach(obj => {
+      this.removeFromSelection(obj);
+    });
+
     // Remove all selection boxes
     this.selectionBoxes.forEach((box, objectId) => {
       if (box.parent) {
@@ -1314,6 +2288,109 @@ export class CanvasManager {
     this.selectionBoxes.clear();
     this.rotationHandles.clear();
     this.resizeHandles.clear();
+
+    // Reset selection container position to origin
+    this.selectionContainer.x = 0;
+    this.selectionContainer.y = 0;
+  }
+
+  /**
+   * Add object to selection container (reparents to selectionContainer)
+   * Preserves world position by converting coordinates between containers
+   * @param {PIXI.DisplayObject} object - Object to add to selection
+   */
+  addToSelection(object) {
+    if (!object || !object.objectId) {
+      console.error('[CanvasManager] addToSelection: Invalid object', object);
+      return;
+    }
+
+    console.log('[CanvasManager] addToSelection: object', object.objectId, 'current parent:', object.parent?.constructor?.name, 'selectionContainer children before:', this.selectionContainer.children.length);
+
+    // Get world position before reparenting
+    const worldPos = object.getGlobalPosition();
+
+    // Store original parent and local state
+    this.selectionData.set(object.objectId, {
+      originalParent: object.parent,
+      originalX: object.x,
+      originalY: object.y,
+      originalRotation: object.rotation,
+      originalIndex: object.parent.getChildIndex(object)
+    });
+
+    // Remove from current parent and add to selection container
+    object.parent.removeChild(object);
+    this.selectionContainer.addChild(object);
+
+    console.log('[CanvasManager] addToSelection: object', object.objectId, 'reparented, new parent:', object.parent?.constructor?.name, 'selectionContainer children after:', this.selectionContainer.children.length);
+
+    // Convert world position to selection container's local space
+    const localPos = this.selectionContainer.toLocal(worldPos);
+    object.x = localPos.x;
+    object.y = localPos.y;
+  }
+
+  /**
+   * Remove object from selection container (reparents back to original parent)
+   * Preserves world position by converting coordinates between containers
+   * @param {PIXI.DisplayObject} object - Object to remove from selection
+   */
+  removeFromSelection(object) {
+    if (!object || !object.objectId) {
+      console.error('[CanvasManager] removeFromSelection: Invalid object', object);
+      return;
+    }
+
+    console.log('[CanvasManager] removeFromSelection called for object', object.objectId, 'parent:', object.parent?.constructor?.name, 'selectionContainer children before:', this.selectionContainer.children.length);
+
+    // If object is not in selection container, nothing to do
+    if (object.parent !== this.selectionContainer) {
+      console.log('[CanvasManager] removeFromSelection: object not in selectionContainer, skipping');
+      this.selectionData.delete(object.objectId);
+      return;
+    }
+
+    const savedData = this.selectionData.get(object.objectId);
+
+    // If no saved data, fall back to moving to objectContainer at current world position
+    if (!savedData) {
+      console.warn('[CanvasManager] removeFromSelection: No saved data for object', object.objectId, '- moving to objectContainer');
+
+      // Get world position before reparenting
+      const worldPos = object.getGlobalPosition();
+
+      // Remove from selection container and add to objectContainer
+      this.selectionContainer.removeChild(object);
+      this.objectContainer.addChild(object);
+
+      // Convert world position to objectContainer's local space
+      const localPos = this.objectContainer.toLocal(worldPos);
+      object.x = localPos.x;
+      object.y = localPos.y;
+      return;
+    }
+
+    // Get world position before reparenting
+    const worldPos = object.getGlobalPosition();
+
+    // Remove from selection container
+    this.selectionContainer.removeChild(object);
+
+    // Add back to original parent (at end, not at originalIndex which may be stale)
+    savedData.originalParent.addChild(object);
+
+    // Convert world position to original parent's local space
+    const localPos = savedData.originalParent.toLocal(worldPos);
+    object.x = localPos.x;
+    object.y = localPos.y;
+
+    // Clean up saved data
+    this.selectionData.delete(object.objectId);
+
+    // Reorder all objects by z_index to prevent layer flicker
+    // This ensures objects render in correct stacking order
+    this.reorderObjects();
   }
 
   /**
@@ -1322,9 +2399,13 @@ export class CanvasManager {
    */
   setSelection(object) {
     // Clear previous selection
+    console.log('[CanvasManager] setSelection: BEFORE clearSelection, selectionContainer children:', this.selectionContainer.children.length, 'children:', this.selectionContainer.children.map(c => ({ id: c.objectId, parent: c.parent?.constructor?.name })));
     this.clearSelection();
 
-    // Add to selection
+    // Reparent object to selection container
+    this.addToSelection(object);
+
+    // Add to selection tracking
     this.selectedObjects.add(object);
 
     // Lock the object for editing
@@ -1340,7 +2421,8 @@ export class CanvasManager {
    */
   toggleSelection(object) {
     if (this.selectedObjects.has(object)) {
-      // Deselect
+      // Deselect - reparent back to original container
+      this.removeFromSelection(object);
       this.selectedObjects.delete(object);
       this.emit('unlock_object', { object_id: object.objectId });
 
@@ -1374,11 +2456,30 @@ export class CanvasManager {
         this.resizeHandles.delete(object.objectId);
       }
     } else {
-      // Add to selection
+      // Add to selection - reparent to selection container
+      this.addToSelection(object);
       this.selectedObjects.add(object);
       this.emit('lock_object', { object_id: object.objectId });
       this.createSelectionBox(object);
     }
+  }
+
+  /**
+   * Select an object by its ID (from layers panel)
+   * @param {number} objectId - ID of the object to select
+   */
+  selectObjectById(objectId) {
+    // Find the object in the objects map
+    const object = this.objects.get(objectId);
+
+    if (!object) {
+      console.warn('[CanvasManager] selectObjectById: Object not found:', objectId);
+      return;
+    }
+
+    // Clear current selection and select this object
+    this.clearSelection();
+    this.setSelection(object);
   }
 
   /**
@@ -1527,6 +2628,25 @@ export class CanvasManager {
     this.selectionBoxes.forEach((box, objectId) => {
       const obj = this.objects.get(objectId);
       if (obj) {
+        // Skip if object is locked by another user (remote transform in progress)
+        // Remote users should see glow, not selection boxes
+        if (obj.lockedBy && obj.lockedBy !== this.currentUserId) {
+          console.log('[CanvasManager] Hiding selection box for remote locked object', objectId, 'locked by', obj.lockedBy);
+          box.visible = false;
+
+          // Also hide rotation and resize handles
+          const rotationHandle = this.rotationHandles.get(objectId);
+          if (rotationHandle) rotationHandle.visible = false;
+
+          const resizeHandle = this.resizeHandles.get(objectId);
+          if (resizeHandle) resizeHandle.visible = false;
+
+          return; // Skip updating positions
+        }
+
+        // Ensure visible for local objects or unlocked objects
+        box.visible = true;
+
         // Use local bounds (container-relative)
         const bounds = obj.getLocalBounds();
         box.clear();
@@ -1537,9 +2657,11 @@ export class CanvasManager {
           bounds.height + 4
         ).stroke({ width: 2, color: 0x3b82f6 });
 
-        // Update position to match object
-        box.x = obj.x;
-        box.y = obj.y;
+        // Update position to match object (convert to objectContainer space)
+        const worldPos = obj.getGlobalPosition();
+        const boxLocalPos = this.objectContainer.toLocal(worldPos);
+        box.x = boxLocalPos.x;
+        box.y = boxLocalPos.y;
 
         // Update rotation and pivot to match object (for rotated objects)
         box.angle = obj.angle;
@@ -1548,6 +2670,7 @@ export class CanvasManager {
         // Update rotation handle position (top-right corner)
         const rotationHandle = this.rotationHandles.get(objectId);
         if (rotationHandle) {
+          rotationHandle.visible = true; // Ensure visible for local objects
           // Use temp size if resizing, otherwise use actual bounds
           const width = obj.tempWidth || bounds.width;
           const height = obj.tempHeight || bounds.height;
@@ -1561,14 +2684,19 @@ export class CanvasManager {
           const rotatedX = localX * Math.cos(angleRad) - localY * Math.sin(angleRad);
           const rotatedY = localX * Math.sin(angleRad) + localY * Math.cos(angleRad);
 
-          // Position handle at rotated corner position
-          rotationHandle.x = obj.x + rotatedX;
-          rotationHandle.y = obj.y + rotatedY;
+          // Position handle at rotated corner position (convert to objectContainer space)
+          const handleWorldX = worldPos.x + rotatedX;
+          const handleWorldY = worldPos.y + rotatedY;
+          const handleLocalPos = this.objectContainer.toLocal(new PIXI.Point(handleWorldX, handleWorldY));
+          rotationHandle.x = handleLocalPos.x;
+          rotationHandle.y = handleLocalPos.y;
         }
 
         // Update resize handle position (bottom-right corner)
         const resizeHandle = this.resizeHandles.get(objectId);
         if (resizeHandle) {
+          resizeHandle.visible = true; // Ensure visible for local objects
+
           // Use temp size if resizing, otherwise use actual bounds
           const width = obj.tempWidth || bounds.width;
           const height = obj.tempHeight || bounds.height;
@@ -1582,9 +2710,12 @@ export class CanvasManager {
           const rotatedX = localX * Math.cos(angleRad) - localY * Math.sin(angleRad);
           const rotatedY = localX * Math.sin(angleRad) + localY * Math.cos(angleRad);
 
-          // Position handle at rotated corner position
-          resizeHandle.x = obj.x + rotatedX;
-          resizeHandle.y = obj.y + rotatedY;
+          // Position handle at rotated corner position (convert to objectContainer space)
+          const resizeWorldX = worldPos.x + rotatedX;
+          const resizeWorldY = worldPos.y + rotatedY;
+          const resizeLocalPos = this.objectContainer.toLocal(new PIXI.Point(resizeWorldX, resizeWorldY));
+          resizeHandle.x = resizeLocalPos.x;
+          resizeHandle.y = resizeLocalPos.y;
 
           // Rotate handle to point towards center (object angle + 180° to point inward)
           resizeHandle.angle = obj.angle + 180;
@@ -1671,6 +2802,11 @@ export class CanvasManager {
    * Object interaction handlers
    */
   onObjectPointerDown(event) {
+    // Ignore right-clicks (button 2) - those are handled by rightdown event
+    if (event.data.button === 2) {
+      return;
+    }
+
     // Prevent event bubbling
     event.stopPropagation();
 
@@ -1678,7 +2814,7 @@ export class CanvasManager {
     const globalPos = event.data.global;
     const localPos = this.screenToCanvas(globalPos);
 
-    console.log('[CanvasManager] Object pointer down, isPanning:', this.isPanning, 'objectId:', object.objectId);
+    console.log('[CanvasManager] PixiJS Object pointer down, objectId:', object.objectId, 'selectedObjects.size:', this.selectedObjects.size, 'has object:', this.selectedObjects.has(object));
 
     // Check if object is locked by another user
     const pixiObject = this.objects.get(object.objectId);
@@ -1689,23 +2825,34 @@ export class CanvasManager {
     }
 
     if (this.currentTool === 'select') {
-      // If object is not selected, select it (but don't deselect others if shift was held during initial click)
-      if (!this.selectedObjects.has(object)) {
+      // Check if clicked object is a child of selectionContainer
+      // (This handles lasso selections properly since all selected objects are reparented there)
+      const isInSelection = object.parent === this.selectionContainer;
+
+      console.log('[CanvasManager] onObjectPointerDown: object', object.objectId, 'parent:', object.parent?.constructor?.name, 'isInSelection:', isInSelection, 'selectionContainer children:', this.selectionContainer.children.length, 'selectedObjects size:', this.selectedObjects.size);
+
+      if (!isInSelection) {
+        // Object is not in selection container, select it
+        console.log('[CanvasManager] onObjectPointerDown: calling setSelection for object', object.objectId);
         this.setSelection(object);
+      } else {
+        console.log('[CanvasManager] onObjectPointerDown: object already in selection, preserving multi-selection');
       }
 
-      // Prepare for dragging all selected objects
-      console.log('[CanvasManager] Setting isDragging=true');
+      // Prepare for dragging the selection container (all children move together)
       this.isDragging = true;
+      this.hasDragged = false; // Track if actual movement occurs
 
-      // Calculate drag offset for each selected object
-      this.dragOffsets.clear();
-      this.selectedObjects.forEach(obj => {
-        this.dragOffsets.set(obj.objectId, {
-          x: obj.x - localPos.x,
-          y: obj.y - localPos.y
-        });
-      });
+      // Calculate single drag offset for selection container
+      this.dragOffset = {
+        x: this.selectionContainer.x - localPos.x,
+        y: this.selectionContainer.y - localPos.y
+      };
+
+      // Store initial mouse position to detect clicks vs drags
+      this.dragStartPos = { x: localPos.x, y: localPos.y };
+
+      console.log('[CanvasManager] onObjectPointerDown: set dragOffset', this.dragOffset, 'selectionContainer pos:', { x: this.selectionContainer.x, y: this.selectionContainer.y });
     } else if (this.currentTool === 'delete') {
       // Delete object
       this.emit('delete_object', { object_id: object.objectId });
@@ -1718,6 +2865,89 @@ export class CanvasManager {
 
   onObjectPointerUp(event) {
     // Handled by global mouse up handler
+  }
+
+  onObjectRightClick(event) {
+    event.stopPropagation();
+    const object = event.currentTarget;
+
+    console.log('[CanvasManager] Right-click on object:', object.objectId);
+
+    // Get the screen position for the context menu
+    const globalPos = event.data.global;
+    const canvasRect = this.app.canvas.getBoundingClientRect();
+    const screenX = globalPos.x + canvasRect.left;
+    const screenY = globalPos.y + canvasRect.top;
+
+    // Show context menu
+    this.showObjectContextMenu(screenX, screenY, object.objectId);
+  }
+
+  showObjectContextMenu(x, y, objectId) {
+    // Remove any existing context menu
+    this.hideContextMenu();
+
+    // Create context menu
+    const menu = document.createElement('div');
+    menu.id = 'object-context-menu';
+    menu.className = 'fixed bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    // Menu items
+    const menuItems = [
+      { label: 'Bring to Front', icon: '⬆⬆', event: 'bring_to_front' },
+      { label: 'Move Forward', icon: '⬆', event: 'move_forward' },
+      { label: 'Move Backward', icon: '⬇', event: 'move_backward' },
+      { label: 'Send to Back', icon: '⬇⬇', event: 'send_to_back' },
+    ];
+
+    menuItems.forEach((item) => {
+      const menuItem = document.createElement('button');
+      menuItem.className = 'w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2';
+      menuItem.innerHTML = `
+        <span class="text-gray-500">${item.icon}</span>
+        <span>${item.label}</span>
+      `;
+      menuItem.addEventListener('click', () => {
+        // Clear selection before layer operation so we can see the result
+        this.clearSelection();
+
+        this.emit(item.event, { object_id: objectId });
+        this.hideContextMenu();
+      });
+      menu.appendChild(menuItem);
+    });
+
+    document.body.appendChild(menu);
+
+    // Adjust position if menu goes off-screen
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      menu.style.left = `${window.innerWidth - rect.width - 10}px`;
+    }
+    if (rect.bottom > window.innerHeight) {
+      menu.style.top = `${window.innerHeight - rect.height - 10}px`;
+    }
+
+    // Close context menu when clicking elsewhere
+    const clickHandler = (e) => {
+      if (menu && !menu.contains(e.target)) {
+        this.hideContextMenu();
+        document.removeEventListener('click', clickHandler);
+      }
+    };
+    // Use setTimeout to avoid immediate closure from the same click
+    setTimeout(() => {
+      document.addEventListener('click', clickHandler);
+    }, 0);
+  }
+
+  hideContextMenu() {
+    const menu = document.getElementById('object-context-menu');
+    if (menu) {
+      menu.remove();
+    }
   }
 
   /**
@@ -1865,6 +3095,27 @@ export class CanvasManager {
   }
 
   /**
+   * Validate and sanitize color values to prevent NaN errors
+   * @param {any} color - Color value to validate (can be string, number, null, undefined, NaN, etc.)
+   * @returns {string|null} Valid hex color string or null if invalid
+   */
+  validateColor(color) {
+    // Return null if color is not a valid string
+    if (typeof color !== 'string' || !color || color === 'null' || color === 'undefined' || color === 'NaN') {
+      console.warn('[CanvasManager] Invalid color value:', color, '- using default');
+      return null;
+    }
+
+    // Check if it's a valid hex color format
+    if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      console.warn('[CanvasManager] Invalid hex color format:', color, '- using default');
+      return null;
+    }
+
+    return color;
+  }
+
+  /**
    * Convert screen position to canvas position
    * @param {Object} screenPos - {x, y} screen position
    * @returns {Object} {x, y} canvas position
@@ -1932,6 +3183,534 @@ export class CanvasManager {
    */
   getSelectedObjectIds() {
     return Array.from(this.selectedObjects).map(obj => obj.objectId);
+  }
+
+  /**
+   * Group selected objects together
+   */
+  groupSelected() {
+    if (this.selectedObjects.size < 2) {
+      console.log('[CanvasManager] Need at least 2 objects to create a group');
+      return;
+    }
+
+    const objectIds = this.getSelectedObjectIds();
+    this.emit('create_group', { object_ids: objectIds });
+    console.log('[CanvasManager] Creating group with objects:', objectIds);
+  }
+
+  /**
+   * Ungroup selected objects
+   */
+  ungroupSelected() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected to ungroup');
+      return;
+    }
+
+    const objectIds = this.getSelectedObjectIds();
+    this.emit('ungroup', { object_ids: objectIds });
+    console.log('[CanvasManager] Ungrouping objects:', objectIds);
+  }
+
+  /**
+   * Duplicate selected objects
+   */
+  duplicateSelected() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected to duplicate');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      // Get the object's data
+      const objectEntry = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+      if (objectEntry) {
+        const [objectId, pixiObj] = objectEntry;
+        
+        // Create duplicate with offset position
+        this.emit('duplicate_object', {
+          object_id: objectId,
+          offset: { x: 20, y: 20 }
+        });
+      }
+    });
+
+    console.log('[CanvasManager] Duplicating selected objects');
+  }
+
+  /**
+   * Copy selected objects to clipboard
+   */
+  copySelected() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected to copy');
+      return;
+    }
+
+    this.clipboard = [];
+    this.selectedObjects.forEach(obj => {
+      const objectEntry = Array.from(this.objects.entries()).find(([id, pixiObj]) => pixiObj === obj);
+      if (objectEntry) {
+        const [objectId, pixiObj] = objectEntry;
+        
+        // Store object data for pasting
+        this.clipboard.push({
+          id: objectId,
+          x: pixiObj.x,
+          y: pixiObj.y,
+          angle: pixiObj.angle || 0
+        });
+      }
+    });
+
+    console.log('[CanvasManager] Copied', this.clipboard.length, 'objects to clipboard');
+  }
+
+  /**
+   * Paste objects from clipboard
+   */
+  pasteFromClipboard() {
+    if (this.clipboard.length === 0) {
+      console.log('[CanvasManager] Clipboard is empty');
+      return;
+    }
+
+    this.clipboard.forEach(clipboardItem => {
+      this.emit('duplicate_object', {
+        object_id: clipboardItem.id,
+        offset: { x: 20, y: 20 }
+      });
+    });
+
+    console.log('[CanvasManager] Pasting', this.clipboard.length, 'objects from clipboard');
+  }
+
+  /**
+   * Nudge selected objects in a direction
+   * @param {string} direction - Arrow key direction
+   * @param {number} amount - Amount to nudge in pixels
+   */
+  nudgeSelected(direction, amount) {
+    if (this.selectedObjects.size === 0) {
+      return;
+    }
+
+    const delta = { x: 0, y: 0 };
+    switch (direction) {
+      case 'ArrowUp':
+        delta.y = -amount;
+        break;
+      case 'ArrowDown':
+        delta.y = amount;
+        break;
+      case 'ArrowLeft':
+        delta.x = -amount;
+        break;
+      case 'ArrowRight':
+        delta.x = amount;
+        break;
+    }
+
+    // Update all selected objects
+    this.selectedObjects.forEach(obj => {
+      obj.x += delta.x;
+      obj.y += delta.y;
+
+      // Emit update to server
+      this.emit('update_object', {
+        object_id: obj.objectId,
+        position: { x: obj.x, y: obj.y }
+      });
+    });
+
+    // Update selection boxes
+    this.updateSelectionBoxes();
+  }
+
+  /**
+   * Select all objects on the canvas
+   */
+  selectAll() {
+    this.clearSelection();
+
+    this.objects.forEach((pixiObj, objectId) => {
+      // Reparent to selection container
+      this.addToSelection(pixiObj);
+      // Add to selection tracking
+      this.selectedObjects.add(pixiObj);
+      this.emit('lock_object', { object_id: pixiObj.objectId });
+      this.createSelectionBox(pixiObj);
+    });
+
+    console.log('[CanvasManager] Selected all', this.selectedObjects.size, 'objects');
+  }
+
+  /**
+   * Reorder objects in the objectContainer based on their z_index values
+   * @param {Array} objectsData - Array of object data with z_index (optional, uses all objects if not provided)
+   */
+  reorderObjects(objectsData) {
+    // Get all objects to reorder
+    const objectsToSort = objectsData ? objectsData.map(data => {
+      const pixiObj = this.objects.get(data.id);
+      if (pixiObj) {
+        // Update stored z_index
+        pixiObj.zIndex = data.z_index || 0.0;
+      }
+      return pixiObj;
+    }).filter(Boolean) : Array.from(this.objects.values());
+
+    // Sort by z_index (lower values = back, higher values = front)
+    objectsToSort.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
+
+    // Reorder children in objectContainer to match z_index order
+    objectsToSort.forEach((pixiObj) => {
+      // Only reorder objects that are in the objectContainer (not in selectionContainer)
+      if (pixiObj.parent === this.objectContainer) {
+        // Remove and re-add at end to move to proper z-order
+        this.objectContainer.removeChild(pixiObj);
+        this.objectContainer.addChild(pixiObj);
+      }
+    });
+
+    console.log('[CanvasManager] Reordered', objectsToSort.length, 'objects by z_index');
+  }
+
+  /**
+   * Bring selected objects to front
+   */
+  bringToFront() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('bring_to_front', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Bringing', this.selectedObjects.size, 'objects to front');
+  }
+
+  /**
+   * Send selected objects to back
+   */
+  sendToBack() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('send_to_back', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Sending', this.selectedObjects.size, 'objects to back');
+  }
+
+  /**
+   * Move selected objects forward one layer
+   */
+  moveForward() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('move_forward', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Moving', this.selectedObjects.size, 'objects forward');
+  }
+
+  /**
+   * Move selected objects backward one layer
+   */
+  moveBackward() {
+    if (this.selectedObjects.size === 0) {
+      console.log('[CanvasManager] No objects selected');
+      return;
+    }
+
+    this.selectedObjects.forEach(obj => {
+      this.emit('move_backward', { object_id: obj.objectId });
+    });
+
+    console.log('[CanvasManager] Moving', this.selectedObjects.size, 'objects backward');
+  }
+
+  /**
+   * Align selected objects
+   * @param {string} alignment - 'left', 'right', 'center', 'top', 'bottom', 'middle'
+   */
+  alignObjects(alignment) {
+    if (this.selectedObjects.size < 2) {
+      console.log('[CanvasManager] Need at least 2 objects to align');
+      return;
+    }
+
+    const selectedIds = this.getSelectedObjectIds();
+    this.emit('align_objects', {
+      object_ids: selectedIds,
+      alignment: alignment
+    });
+
+    console.log('[CanvasManager] Aligning', selectedIds.length, 'objects:', alignment);
+  }
+
+  /**
+   * Distribute selected objects horizontally
+   */
+  distributeHorizontally() {
+    if (this.selectedObjects.size < 3) {
+      console.log('[CanvasManager] Need at least 3 objects to distribute');
+      return;
+    }
+
+    const selectedIds = this.getSelectedObjectIds();
+    this.emit('distribute_objects', {
+      object_ids: selectedIds,
+      direction: 'horizontal'
+    });
+
+    console.log('[CanvasManager] Distributing', selectedIds.length, 'objects horizontally');
+  }
+
+  /**
+   * Distribute selected objects vertically
+   */
+  distributeVertically() {
+    if (this.selectedObjects.size < 3) {
+      console.log('[CanvasManager] Need at least 3 objects to distribute');
+      return;
+    }
+
+    const selectedIds = this.getSelectedObjectIds();
+    this.emit('distribute_objects', {
+      object_ids: selectedIds,
+      direction: 'vertical'
+    });
+
+    console.log('[CanvasManager] Distributing', selectedIds.length, 'objects vertically');
+  }
+
+  /**
+   * Show context menu for selected objects
+   * @param {Object} position - {x, y} position for menu
+   */
+  showContextMenu(position) {
+    if (this.selectedObjects.size === 0) {
+      return;
+    }
+
+    this.emit('show_context_menu', {
+      position: position,
+      selected_count: this.selectedObjects.size
+    });
+  }
+
+  /**
+   * Export canvas to PNG
+   * @param {boolean} selectionOnly - Export only selected objects
+   */
+  async exportToPNG(selectionOnly = false) {
+    try {
+      let renderTarget;
+      
+      if (selectionOnly && this.selectedObjects.size > 0) {
+        // Calculate bounds of selected objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        this.selectedObjects.forEach(obj => {
+          const bounds = obj.getBounds();
+          minX = Math.min(minX, bounds.x);
+          minY = Math.min(minY, bounds.y);
+          maxX = Math.max(maxX, bounds.x + bounds.width);
+          maxY = Math.max(maxY, bounds.y + bounds.height);
+        });
+        
+        const width = maxX - minX;
+        const height = maxY - minY;
+        
+        // Create temporary container for selected objects
+        const tempContainer = new PIXI.Container();
+        tempContainer.x = -minX;
+        tempContainer.y = -minY;
+        
+        this.selectedObjects.forEach(obj => {
+          tempContainer.addChild(obj);
+        });
+        
+        // Create render texture
+        const renderTexture = PIXI.RenderTexture.create({
+          width: Math.ceil(width),
+          height: Math.ceil(height),
+          resolution: window.devicePixelRatio || 1
+        });
+        
+        this.app.renderer.render(tempContainer, { renderTexture });
+        
+        // Extract canvas and trigger download
+        const canvas = this.app.renderer.extract.canvas(renderTexture);
+        this.triggerDownload(canvas.toDataURL('image/png'), 'canvas-selection.png');
+        
+        // Restore objects to original container
+        this.selectedObjects.forEach(obj => {
+          this.objectContainer.addChild(obj);
+        });
+        
+        tempContainer.destroy();
+        renderTexture.destroy();
+      } else {
+        // Export entire canvas
+        // Calculate bounds of all objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        this.objects.forEach(obj => {
+          const bounds = obj.getBounds();
+          minX = Math.min(minX, bounds.x);
+          minY = Math.min(minY, bounds.y);
+          maxX = Math.max(maxX, bounds.x + bounds.width);
+          maxY = Math.max(maxY, bounds.y + bounds.height);
+        });
+        
+        const width = maxX - minX;
+        const height = maxY - minY;
+        
+        // Create render texture
+        const renderTexture = PIXI.RenderTexture.create({
+          width: Math.ceil(width) || 800,
+          height: Math.ceil(height) || 600,
+          resolution: window.devicePixelRatio || 1
+        });
+        
+        // Temporarily offset container
+        const originalX = this.objectContainer.x;
+        const originalY = this.objectContainer.y;
+        this.objectContainer.x = -minX;
+        this.objectContainer.y = -minY;
+        
+        this.app.renderer.render(this.objectContainer, { renderTexture });
+        
+        // Restore original position
+        this.objectContainer.x = originalX;
+        this.objectContainer.y = originalY;
+        
+        // Extract canvas and trigger download
+        const canvas = this.app.renderer.extract.canvas(renderTexture);
+        this.triggerDownload(canvas.toDataURL('image/png'), 'canvas-export.png');
+        
+        renderTexture.destroy();
+      }
+      
+      console.log('[CanvasManager] PNG export complete');
+    } catch (error) {
+      console.error('[CanvasManager] PNG export failed:', error);
+    }
+  }
+
+  /**
+   * Export canvas to SVG
+   * @param {boolean} selectionOnly - Export only selected objects
+   */
+  exportToSVG(selectionOnly = false) {
+    try {
+      const objectsToExport = selectionOnly && this.selectedObjects.size > 0
+        ? Array.from(this.selectedObjects)
+        : Array.from(this.objects.values());
+      
+      if (objectsToExport.length === 0) {
+        console.warn('[CanvasManager] No objects to export');
+        return;
+      }
+      
+      // Calculate bounds
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      
+      objectsToExport.forEach(obj => {
+        const bounds = obj.getBounds();
+        minX = Math.min(minX, bounds.x);
+        minY = Math.min(minY, bounds.y);
+        maxX = Math.max(maxX, bounds.x + bounds.width);
+        maxY = Math.max(maxY, bounds.y + bounds.height);
+      });
+      
+      const width = maxX - minX;
+      const height = maxY - minY;
+      
+      // Create SVG
+      let svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${minX} ${minY} ${width} ${height}">
+`;
+      
+      // Convert each object to SVG
+      objectsToExport.forEach(obj => {
+        svg += this.objectToSVG(obj);
+      });
+      
+      svg += '</svg>';
+      
+      // Trigger download
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      this.triggerDownload(url, 'canvas-export.svg');
+      URL.revokeObjectURL(url);
+      
+      console.log('[CanvasManager] SVG export complete');
+    } catch (error) {
+      console.error('[CanvasManager] SVG export failed:', error);
+    }
+  }
+
+  /**
+   * Convert a PixiJS object to SVG string
+   * @param {PIXI.DisplayObject} obj - Object to convert
+   * @returns {string} SVG string
+   */
+  objectToSVG(obj) {
+    let svg = '';
+    
+    if (obj instanceof PIXI.Graphics) {
+      // Extract bounds and color info from the graphics object
+      const bounds = obj.getBounds();
+      const fill = obj.fill?.color !== undefined 
+        ? `#${obj.fill.color.toString(16).padStart(6, '0')}`
+        : '#3b82f6';
+      const stroke = obj.stroke?.color !== undefined
+        ? `#${obj.stroke.color.toString(16).padStart(6, '0')}`
+        : fill;
+      const strokeWidth = obj.stroke?.width || 2;
+      
+      // Simple rectangle approximation for graphics objects
+      svg = `  <rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" 
+        fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" 
+        opacity="${obj.alpha}" transform="rotate(${obj.angle} ${bounds.x + bounds.width/2} ${bounds.y + bounds.height/2})" />\n`;
+    } else if (obj instanceof PIXI.Text) {
+      const bounds = obj.getBounds();
+      const fill = obj.style.fill || '#000000';
+      const fontSize = obj.style.fontSize || 16;
+      const fontFamily = obj.style.fontFamily || 'Arial';
+      
+      svg = `  <text x="${bounds.x}" y="${bounds.y + fontSize}" 
+        fill="${fill}" font-size="${fontSize}" font-family="${fontFamily}" 
+        opacity="${obj.alpha}">${obj.text}</text>\n`;
+    }
+    
+    return svg;
+  }
+
+  /**
+   * Trigger file download
+   * @param {string} dataUrl - Data URL or blob URL
+   * @param {string} filename - Filename for download
+   */
+  triggerDownload(dataUrl, filename) {
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = dataUrl;
+    link.click();
   }
 
   /**
@@ -2065,6 +3844,169 @@ export class CanvasManager {
 
       this.objectLabels.clear();
     }
+  }
+
+  /**
+   * Show a subtle glow effect for remote transforms
+   * @param {number} objectId - Object ID
+   * @param {string} userId - User ID performing the transform
+   */
+  showRemoteTransformGlow(objectId, userId) {
+    // Remove existing glow if any
+    this.hideRemoteTransformGlow(objectId);
+
+    const pixiObject = this.objects.get(objectId);
+    if (!pixiObject) {
+      console.log('[CanvasManager] showRemoteTransformGlow: pixiObject not found for', objectId);
+      return;
+    }
+
+    // Get user's color from presence data
+    const userData = this.presences[userId];
+    const userColor = userData?.metas?.[0]?.color || '#3b82f6';
+    const glowColor = parseInt(userColor.replace('#', '0x'));
+
+    console.log('[CanvasManager] Creating glow for object', objectId, 'user', userId, 'color', userColor);
+
+    // Create glow graphics
+    const glow = new PIXI.Graphics();
+    const bounds = pixiObject.getLocalBounds();
+
+    // Draw subtle glow outline (larger than object, with transparency)
+    const glowPadding = 8;
+    glow.rect(
+      -glowPadding,
+      -glowPadding,
+      bounds.width + glowPadding * 2,
+      bounds.height + glowPadding * 2
+    ).stroke({ width: 3, color: glowColor, alpha: 0.6 });
+
+    // Position glow at object's position
+    glow.x = pixiObject.x;
+    glow.y = pixiObject.y;
+
+    // Match rotation and pivot of the object
+    glow.angle = pixiObject.angle;
+    glow.pivot.set(pixiObject.pivot.x, pixiObject.pivot.y);
+
+    // Store the color for later use during updates
+    glow.strokeColor = glowColor;
+    glow.userId = userId;
+
+    this.objectContainer.addChild(glow);
+    this.remoteTransformGlows.set(objectId, glow);
+  }
+
+  /**
+   * Hide the remote transform glow for an object
+   * @param {number} objectId - Object ID
+   */
+  hideRemoteTransformGlow(objectId) {
+    const glow = this.remoteTransformGlows.get(objectId);
+    if (glow) {
+      if (glow.parent) {
+        glow.parent.removeChild(glow);
+      }
+      glow.destroy();
+      this.remoteTransformGlows.delete(objectId);
+    }
+  }
+
+  /**
+   * Set interpolation target for smooth animation
+   * @param {number} objectId - Object ID
+   * @param {Object} target - Target values {x, y, width, height, rotation}
+   */
+  setInterpolationTarget(objectId, target) {
+    const pixiObject = this.objects.get(objectId);
+    if (!pixiObject) return;
+
+    const interpolationData = {
+      startTime: Date.now(),
+      duration: 150 // Animate over 150ms
+    };
+
+    // Only set position if it's being updated
+    if (target.x !== undefined || target.y !== undefined) {
+      interpolationData.startX = pixiObject.x;
+      interpolationData.startY = pixiObject.y;
+      interpolationData.targetX = target.x !== undefined ? target.x : pixiObject.x;
+      interpolationData.targetY = target.y !== undefined ? target.y : pixiObject.y;
+    }
+
+    // Only set size if it's being updated (and NOT during rotation-only updates)
+    if ((target.width !== undefined || target.height !== undefined) && !target.onlyRotation && !target.onlyPosition) {
+      const bounds = pixiObject.getLocalBounds();
+      interpolationData.startWidth = bounds.width;
+      interpolationData.startHeight = bounds.height;
+      interpolationData.targetWidth = target.width !== undefined ? target.width : bounds.width;
+      interpolationData.targetHeight = target.height !== undefined ? target.height : bounds.height;
+    }
+
+    // Only set rotation if it's being updated (and NOT during resize-only updates)
+    if (target.rotation !== undefined && !target.onlyResize && !target.onlyPosition) {
+      interpolationData.startRotation = pixiObject.angle || 0;
+      interpolationData.targetRotation = target.rotation;
+    }
+
+    this.interpolationTargets.set(objectId, interpolationData);
+  }
+
+  /**
+   * Update interpolations for smooth remote transforms (called each frame)
+   */
+  updateInterpolations() {
+    const now = Date.now();
+    const completedInterpolations = [];
+
+    this.interpolationTargets.forEach((target, objectId) => {
+      const pixiObject = this.objects.get(objectId);
+      if (!pixiObject) {
+        completedInterpolations.push(objectId);
+        return;
+      }
+
+      const elapsed = now - target.startTime;
+      const progress = Math.min(elapsed / target.duration, 1.0);
+
+      // Use easeOutCubic for smooth deceleration
+      const eased = 1 - Math.pow(1 - progress, 3);
+
+      // Interpolate position
+      if (target.targetX !== undefined && target.startX !== undefined) {
+        pixiObject.x = target.startX + (target.targetX - target.startX) * eased;
+      }
+      if (target.targetY !== undefined && target.startY !== undefined) {
+        pixiObject.y = target.startY + (target.targetY - target.startY) * eased;
+      }
+
+      // Interpolate rotation
+      if (target.targetRotation !== undefined && target.startRotation !== undefined) {
+        let rotationDelta = target.targetRotation - target.startRotation;
+        // Handle angle wrapping (shortest path)
+        if (rotationDelta > 180) rotationDelta -= 360;
+        if (rotationDelta < -180) rotationDelta += 360;
+        pixiObject.angle = target.startRotation + rotationDelta * eased;
+      }
+
+      // Interpolate size
+      if ((target.targetWidth !== undefined || target.targetHeight !== undefined) &&
+          pixiObject instanceof PIXI.Graphics) {
+        const width = target.startWidth + (target.targetWidth - target.startWidth) * eased;
+        const height = target.startHeight + (target.targetHeight - target.startHeight) * eased;
+        this.redrawGraphicsWithSize(pixiObject, width, height);
+      }
+
+      // Mark as complete if finished
+      if (progress >= 1.0) {
+        completedInterpolations.push(objectId);
+      }
+    });
+
+    // Clean up completed interpolations
+    completedInterpolations.forEach(objectId => {
+      this.interpolationTargets.delete(objectId);
+    });
   }
 
   /**
