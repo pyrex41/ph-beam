@@ -509,11 +509,11 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         case Canvases.update_object(object_id, attrs) do
           {:ok, updated_object} ->
-            # Broadcast to all connected clients
+            # Broadcast to all connected clients (include originating user_id to prevent self-update)
             Phoenix.PubSub.broadcast(
               CollabCanvas.PubSub,
               socket.assigns.topic,
-              {:object_updated, updated_object}
+              {:object_updated, updated_object, user_id}
             )
 
             # Update local state and push to JavaScript immediately
@@ -597,11 +597,11 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     case result do
       {:ok, updated_objects} ->
-        # Broadcast to all connected clients (including this one via handle_info)
+        # Broadcast to all connected clients (include originating user_id to prevent self-update)
         Phoenix.PubSub.broadcast(
           CollabCanvas.PubSub,
           socket.assigns.topic,
-          {:objects_updated_batch, updated_objects}
+          {:objects_updated_batch, updated_objects, user_id}
         )
 
         # Update local state
@@ -1081,7 +1081,7 @@ defmodule CollabCanvasWeb.CanvasLive do
         Canvases.update_object(update.id, %{position: update.position})
       end)
 
-      # Broadcast to all clients
+      # Broadcast to all clients (include originating user_id to prevent self-update)
       updated_objects = Enum.map(updates, fn update ->
         Canvases.get_object(update.id)
       end)
@@ -1089,7 +1089,7 @@ defmodule CollabCanvasWeb.CanvasLive do
       Phoenix.PubSub.broadcast(
         CollabCanvas.PubSub,
         socket.assigns.topic,
-        {:objects_updated_batch, updated_objects}
+        {:objects_updated_batch, updated_objects, socket.assigns.user_id}
       )
 
       {:noreply, socket}
@@ -1145,7 +1145,7 @@ defmodule CollabCanvasWeb.CanvasLive do
         Canvases.update_object(update.id, %{position: update.position})
       end)
 
-      # Broadcast to all clients
+      # Broadcast to all clients (include originating user_id to prevent self-update)
       updated_objects = Enum.map(updates, fn update ->
         Canvases.get_object(update.id)
       end)
@@ -1153,7 +1153,7 @@ defmodule CollabCanvasWeb.CanvasLive do
       Phoenix.PubSub.broadcast(
         CollabCanvas.PubSub,
         socket.assigns.topic,
-        {:objects_updated_batch, updated_objects}
+        {:objects_updated_batch, updated_objects, socket.assigns.user_id}
       )
 
       {:noreply, socket}
@@ -1604,25 +1604,35 @@ defmodule CollabCanvasWeb.CanvasLive do
   Updates the object in local state with the new properties and pushes to
   JavaScript for re-rendering. Common during drag operations or property changes.
 
+  Skips the client-side push if the update originated from the current user to
+  prevent visual jumping during drag operations (optimistic updates are already applied).
+
   ## Parameters
 
   - `updated_object` - The updated canvas object struct with new properties
+  - `originating_user_id` - The user_id who initiated this update
 
   ## Returns
 
-  `{:noreply, socket}` with updated objects list and push_event to client.
+  `{:noreply, socket}` with updated objects list and push_event to client
+  (push_event skipped if update is from current user).
   """
   @impl true
-  def handle_info({:object_updated, updated_object}, socket) do
+  def handle_info({:object_updated, updated_object, originating_user_id}, socket) do
     objects =
       Enum.map(socket.assigns.objects, fn obj ->
         if obj.id == updated_object.id, do: updated_object, else: obj
       end)
 
-    {:noreply,
-     socket
-     |> assign(:objects, objects)
-     |> push_event("object_updated", %{object: updated_object})}
+    # Skip push_event if this update originated from the current user
+    # (prevents visual jumping on drag release - client already has optimistic update)
+    socket = assign(socket, :objects, objects)
+
+    if originating_user_id == socket.assigns.user_id do
+      {:noreply, socket}
+    else
+      {:noreply, push_event(socket, "object_updated", %{object: updated_object})}
+    end
   end
 
   @doc """
@@ -1631,16 +1641,21 @@ defmodule CollabCanvasWeb.CanvasLive do
   Updates multiple objects in local state with new properties and pushes to
   JavaScript for re-rendering. Used during multi-object dragging operations.
 
+  Skips the client-side push if the update originated from the current user to
+  prevent visual jumping during drag operations (optimistic updates are already applied).
+
   ## Parameters
 
   - `updated_objects` - List of updated canvas object structs
+  - `originating_user_id` - The user_id who initiated this batch update
 
   ## Returns
 
-  `{:noreply, socket}` with updated objects list and push_event to client.
+  `{:noreply, socket}` with updated objects list and push_event to client
+  (push_event skipped if update is from current user).
   """
   @impl true
-  def handle_info({:objects_updated_batch, updated_objects}, socket) do
+  def handle_info({:objects_updated_batch, updated_objects, originating_user_id}, socket) do
     # Create a map of updated objects for efficient lookup
     updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
 
@@ -1650,10 +1665,15 @@ defmodule CollabCanvasWeb.CanvasLive do
         Map.get(updated_map, obj.id, obj)
       end)
 
-    {:noreply,
-     socket
-     |> assign(:objects, objects)
-     |> push_event("objects_updated_batch", %{objects: updated_objects})}
+    # Skip push_event if this update originated from the current user
+    # (prevents visual jumping on drag release - client already has optimistic update)
+    socket = assign(socket, :objects, objects)
+
+    if originating_user_id == socket.assigns.user_id do
+      {:noreply, socket}
+    else
+      {:noreply, push_event(socket, "objects_updated_batch", %{objects: updated_objects})}
+    end
   end
 
   @doc """
@@ -2351,12 +2371,13 @@ defmodule CollabCanvasWeb.CanvasLive do
           )
         end)
 
-        # Broadcast updated objects
+        # Broadcast updated objects (include originating user_id to prevent self-update)
+        user_id = socket.assigns.user_id
         Enum.each(updated_objects, fn object ->
           Phoenix.PubSub.broadcast(
             CollabCanvas.PubSub,
             socket.assigns.topic,
-            {:object_updated, object}
+            {:object_updated, object, user_id}
           )
         end)
 
