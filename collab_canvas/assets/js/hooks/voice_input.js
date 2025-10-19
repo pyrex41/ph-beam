@@ -103,20 +103,24 @@ export default {
     // Create floating panel (not a blocking modal)
     this.dialog = document.createElement('div');
     this.dialog.className = 'fixed hidden z-50';
-    this.dialog.style.top = '20px';
-    this.dialog.style.right = '20px';
     this.dialog.style.pointerEvents = 'auto';
+
+    // Load saved position from localStorage or use default
+    const savedPosition = this.loadDialogPosition();
+    this.dialog.style.top = savedPosition.top;
+    this.dialog.style.right = savedPosition.right;
+
     this.dialog.innerHTML = `
-      <div id="voice-dialog-content" class="bg-white/95 backdrop-blur-sm rounded-lg p-6 shadow-2xl w-80 border border-gray-200">
+      <div id="voice-dialog-content" class="bg-white/95 backdrop-blur-sm rounded-lg p-6 shadow-2xl w-80 border border-gray-200 cursor-move">
         <div class="text-center">
-          <h3 class="text-lg font-semibold mb-4 cursor-move" id="dialog-header">Recording...</h3>
+          <h3 class="text-lg font-semibold mb-4" id="dialog-header">Recording...</h3>
           <div id="audio-visualizer" class="flex items-center justify-center gap-1 h-24 mb-4"></div>
           <p class="text-sm text-gray-600 mb-4">
             <kbd class="px-2 py-1 bg-gray-200 rounded">Space</kbd> to stop
             <span class="mx-2">•</span>
             <kbd class="px-2 py-1 bg-gray-200 rounded">Esc</kbd> to cancel
           </p>
-          <button id="stop-recording-btn" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors">
+          <button id="stop-recording-btn" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors cursor-pointer">
             Stop Recording
           </button>
         </div>
@@ -167,21 +171,47 @@ export default {
     this.setupDragFunctionality();
   },
 
+  loadDialogPosition() {
+    try {
+      const saved = localStorage.getItem('voiceDialogPosition');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (error) {
+      console.error('Failed to load dialog position:', error);
+    }
+    // Default position
+    return { top: '20px', right: '20px' };
+  },
+
+  saveDialogPosition() {
+    try {
+      const rect = this.dialog.getBoundingClientRect();
+      const position = {
+        top: `${rect.top}px`,
+        right: `${window.innerWidth - rect.right}px`
+      };
+      localStorage.setItem('voiceDialogPosition', JSON.stringify(position));
+    } catch (error) {
+      console.error('Failed to save dialog position:', error);
+    }
+  },
+
   setupDragFunctionality() {
     const handleMouseDown = (e) => {
-      if (e.target !== this.dialogHeader) return;
+      // Allow dragging from anywhere except buttons and interactive elements
+      const isButton = e.target.tagName === 'BUTTON' ||
+                      e.target.closest('button') !== null ||
+                      e.target.tagName === 'KBD';
+
+      if (isButton) return;
 
       this.isDragging = true;
-      const rect = this.dialogContent.getBoundingClientRect();
+      const rect = this.dialog.getBoundingClientRect();
       this.dragOffset = {
         x: e.clientX - rect.left,
         y: e.clientY - rect.top
       };
-
-      this.dialogContent.style.position = 'fixed';
-      this.dialogContent.style.left = `${rect.left}px`;
-      this.dialogContent.style.top = `${rect.top}px`;
-      this.dialogContent.style.margin = '0';
 
       e.preventDefault();
     };
@@ -193,20 +223,27 @@ export default {
       const newY = e.clientY - this.dragOffset.y;
 
       // Keep dialog within viewport
-      const maxX = window.innerWidth - this.dialogContent.offsetWidth;
-      const maxY = window.innerHeight - this.dialogContent.offsetHeight;
+      const maxX = window.innerWidth - this.dialog.offsetWidth;
+      const maxY = window.innerHeight - this.dialog.offsetHeight;
 
-      this.dialogContent.style.left = `${Math.max(0, Math.min(newX, maxX))}px`;
-      this.dialogContent.style.top = `${Math.max(0, Math.min(newY, maxY))}px`;
+      const clampedX = Math.max(0, Math.min(newX, maxX));
+      const clampedY = Math.max(0, Math.min(newY, maxY));
+
+      this.dialog.style.left = `${clampedX}px`;
+      this.dialog.style.top = `${clampedY}px`;
+      this.dialog.style.right = 'auto'; // Override right position when dragging
 
       e.preventDefault();
     };
 
     const handleMouseUp = () => {
-      this.isDragging = false;
+      if (this.isDragging) {
+        this.isDragging = false;
+        this.saveDialogPosition();
+      }
     };
 
-    this.dialogHeader.addEventListener('mousedown', handleMouseDown);
+    this.dialogContent.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
 
@@ -257,12 +294,6 @@ export default {
 
         // Hide dialog
         this.dialog.classList.add('hidden');
-
-        // Reset dialog position
-        this.dialogContent.style.position = '';
-        this.dialogContent.style.left = '';
-        this.dialogContent.style.top = '';
-        this.dialogContent.style.margin = '';
 
         // Only process audio if we have chunks (not cancelled)
         if (this.audioChunks.length > 0) {
@@ -421,12 +452,6 @@ export default {
       // Hide dialog
       this.dialog.classList.add('hidden');
 
-      // Reset dialog position
-      this.dialogContent.style.position = '';
-      this.dialogContent.style.left = '';
-      this.dialogContent.style.top = '';
-      this.dialogContent.style.margin = '';
-
       this.updateUI();
     } catch (error) {
       console.error('Failed to cancel recording:', error);
@@ -534,6 +559,9 @@ export default {
 
     // Remove drag listeners
     if (this.dragListeners) {
+      if (this.dialogContent) {
+        this.dialogContent.removeEventListener('mousedown', this.dragListeners.handleMouseDown);
+      }
       document.removeEventListener('mousemove', this.dragListeners.handleMouseMove);
       document.removeEventListener('mouseup', this.dragListeners.handleMouseUp);
     }
