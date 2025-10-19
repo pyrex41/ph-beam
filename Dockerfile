@@ -1,0 +1,112 @@
+# Find eligible builder and runner images on Docker Hub. We use Debian
+# instead of Alpine to avoid DNS issues in production.
+#
+# https://hub.docker.com/_/elixir - Official Elixir images
+# https://hub.docker.com/_/debian - Official Debian images
+#
+# This file is based on these images:
+#
+#   - https://hub.docker.com/_/elixir - for the build image
+#   - https://hub.docker.com/_/debian - for the release image
+#   - https://pkgs.org/ - resource for finding needed packages
+#
+ARG ELIXIR_VERSION=1.15
+ARG DEBIAN_VERSION=bookworm-slim
+
+ARG BUILDER_IMAGE="elixir:${ELIXIR_VERSION}-slim"
+ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+
+FROM ${BUILDER_IMAGE} as builder
+
+# install build dependencies (including Node.js for npm)
+RUN apt-get update -y && apt-get install -y build-essential git curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# prepare build dir
+WORKDIR /app
+
+# install hex + rebar
+RUN mix local.hex --force && \
+    mix local.rebar --force
+
+# set build ENV
+ENV MIX_ENV="prod"
+
+# install mix dependencies
+COPY collab_canvas/mix.exs collab_canvas/mix.lock ./
+RUN mix deps.get --only $MIX_ENV
+RUN mkdir config
+
+# copy compile-time config files before we compile dependencies
+# to ensure any relevant config change will trigger the dependencies
+# to be re-compiled.
+COPY collab_canvas/config/config.exs collab_canvas/config/${MIX_ENV}.exs config/
+RUN mix deps.compile
+
+COPY collab_canvas/priv priv
+
+COPY collab_canvas/lib lib
+
+# Install npm dependencies before copying all assets
+COPY collab_canvas/assets/package.json collab_canvas/assets/package-lock.json ./assets/
+RUN cd assets && npm install --prefer-offline --no-audit --progress=false --include=optional
+
+COPY collab_canvas/assets assets
+
+# compile assets
+RUN mix assets.deploy
+
+# Compile the release
+RUN mix compile
+
+# Changes to config/runtime.exs don't require recompiling the code
+COPY collab_canvas/config/runtime.exs config/
+
+COPY collab_canvas/rel rel
+RUN mix release
+
+# start a new build stage so that the final image will only contain
+# the compiled release and other runtime necessities
+FROM ${RUNNER_IMAGE}
+
+RUN apt-get update -y && \
+  apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \
+  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# Set the locale
+RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US:en
+ENV LC_ALL en_US.UTF-8
+
+WORKDIR "/app"
+RUN chown nobody /app
+
+# set runner ENV
+ENV MIX_ENV="prod"
+
+# Only copy the final release from the build stage
+COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/collab_canvas ./
+
+USER nobody
+
+# If using an environment that doesn't automatically reap zombie processes, it is
+# advised to add an init process such as tini via `apt-get install`
+# above and adding an entrypoint. See https://github.com/krallin/tini for details
+# ENV TINI_VERSION v0.19.0
+# ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
+# RUN chmod +x /tini
+# ENTRYPOINT ["/tini", "--"]
+
+# Appended by flyctl for IPv6 support
+ENV ECTO_IPV6="true"
+ENV ERL_AFLAGS="-proto_dist inet6_tcp"
+
+# Ensure Phoenix server starts
+ENV PHX_SERVER="true"
+
+# Start the Phoenix server
+CMD ["/app/bin/collab_canvas", "start"]
