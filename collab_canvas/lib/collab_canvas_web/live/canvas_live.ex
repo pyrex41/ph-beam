@@ -516,16 +516,14 @@ defmodule CollabCanvasWeb.CanvasLive do
               {:object_updated, updated_object, user_id}
             )
 
-            # Update local state and push to JavaScript immediately
+            # Update local state only (no push_event - client already has optimistic update)
+            # Other clients will receive update via handle_info broadcast
             objects =
               Enum.map(socket.assigns.objects, fn obj ->
                 if obj.id == updated_object.id, do: updated_object, else: obj
               end)
 
-            {:noreply,
-             socket
-             |> assign(:objects, objects)
-             |> push_event("object_updated", %{object: updated_object})}
+            {:noreply, assign(socket, :objects, objects)}
 
           {:error, :not_found} ->
             {:noreply, put_flash(socket, :error, "Object not found")}
