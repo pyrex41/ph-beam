@@ -25,6 +25,7 @@ export default {
     // State tracking
     this.isRecording = false;
     this.isTranscribing = false;
+    this.isCancelled = false;
     this.mediaRecorder = null;
     this.audioChunks = [];
     this.audioContext = null;
@@ -258,8 +259,9 @@ export default {
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Reset audio chunks and logging flag
+      // Reset audio chunks, cancellation, and logging flag
       this.audioChunks = [];
+      this.isCancelled = false;
       this.hasLoggedAudio = false;
       this.stream = stream;
 
@@ -295,8 +297,8 @@ export default {
         // Hide dialog
         this.dialog.classList.add('hidden');
 
-        // Only process audio if we have chunks (not cancelled)
-        if (this.audioChunks.length > 0) {
+        // Only process audio if we have chunks and recording wasn't cancelled
+        if (this.audioChunks.length > 0 && !this.isCancelled) {
           // Create audio blob from chunks
           const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
 
@@ -426,6 +428,7 @@ export default {
     try {
       // Stop the recording without processing
       this.isRecording = false;
+      this.isCancelled = true; // Mark as cancelled to prevent transcription
       this.audioChunks = []; // Clear audio chunks so they won't be processed
 
       if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
