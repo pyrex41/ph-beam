@@ -111,7 +111,7 @@ export default {
     this.dialog.style.right = savedPosition.right;
 
     this.dialog.innerHTML = `
-      <div id="voice-dialog-content" class="bg-white/95 backdrop-blur-sm rounded-lg p-6 shadow-2xl w-80 border border-gray-200 cursor-move">
+      <div id="voice-dialog-content" class="bg-white/95 backdrop-blur-sm rounded-lg p-6 shadow-2xl w-80 border border-gray-200 cursor-grab active:cursor-grabbing">
         <div class="text-center">
           <h3 class="text-lg font-semibold mb-4" id="dialog-header">Recording...</h3>
           <div id="audio-visualizer" class="flex items-center justify-center gap-1 h-24 mb-4"></div>
