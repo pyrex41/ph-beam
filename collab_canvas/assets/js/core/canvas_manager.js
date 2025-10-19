@@ -2173,14 +2173,29 @@ export class CanvasManager {
       }
 
       // Select all objects that intersect with the lasso rectangle
-      this.objects.forEach((obj, objectId) => {
-        const bounds = obj.getBounds();
+      console.log('[CanvasManager] Lasso checking', this.objects.size, 'objects in lasso rect:', minX, minY, 'to', maxX, maxY);
 
-        // Check if object intersects with lasso rectangle
-        if (this.rectanglesIntersect(
+      this.objects.forEach((obj, objectId) => {
+        // Safety check: ensure object has required properties
+        if (!obj || !obj.getBounds || !obj.objectId) {
+          console.warn('[CanvasManager] Skipping malformed object:', objectId, 'has getBounds:', !!obj?.getBounds, 'has objectId:', !!obj?.objectId);
+          return;
+        }
+
+        const bounds = obj.getBounds();
+        const intersects = this.rectanglesIntersect(
           minX, minY, maxX, maxY,
           bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height
-        )) {
+        );
+
+        // Log all objects being checked for debugging
+        if (bounds.width < 1 || bounds.height < 1) {
+          console.warn('[CanvasManager] Object', objectId, 'has invalid bounds:', bounds);
+        }
+
+        // Check if object intersects with lasso rectangle
+        if (intersects) {
+          console.log('[CanvasManager] Object', objectId, 'intersects! Bounds:', bounds);
           if (!this.selectedObjects.has(obj)) {
             // Reparent object to selection container
             this.addToSelection(obj);
