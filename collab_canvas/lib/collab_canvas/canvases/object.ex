@@ -82,7 +82,17 @@ defmodule CollabCanvas.Canvases.Object do
       :z_index
     ])
     |> validate_required([:type, :canvas_id])
-    |> validate_inclusion(:type, ["rectangle", "circle", "ellipse", "text", "line", "path", "star", "triangle", "polygon"])
+    |> validate_inclusion(:type, [
+      "rectangle",
+      "circle",
+      "ellipse",
+      "text",
+      "line",
+      "path",
+      "star",
+      "triangle",
+      "polygon"
+    ])
     |> validate_position()
     |> foreign_key_constraint(:canvas_id, name: "objects_canvas_id_fkey")
     |> foreign_key_constraint(:component_id, name: "objects_component_id_fkey")

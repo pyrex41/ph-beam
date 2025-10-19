@@ -122,7 +122,8 @@ defmodule CollabCanvas.AI.ToolRegistry do
       iex> ToolRegistry.execute("create_shape", params, context)
       {:ok, %CollabCanvas.Canvases.Object{...}}
   """
-  def execute(name, params, context) when is_binary(name) and is_map(params) and is_map(context) do
+  def execute(name, params, context)
+      when is_binary(name) and is_map(params) and is_map(context) do
     case get_tool(name) do
       {:ok, tool_module} ->
         Logger.debug("Executing tool: #{name} via #{inspect(tool_module)}")

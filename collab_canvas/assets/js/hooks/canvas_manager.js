@@ -181,10 +181,22 @@ export default {
         // Get selected object IDs from canvas manager
         const selectedIds = this.canvasManager.getSelectedObjectIds();
 
-        // Push event to server with both command and selected IDs
+        // Get current viewport state for semantic positioning
+        const viewport = this.canvasManager.getViewportState();
+        const canvasWidth = this.el.clientWidth;
+        const canvasHeight = this.el.clientHeight;
+
+        // Push event to server with command, selected IDs, and viewport
         this.safePushEvent('execute_ai_command', {
           command: command,
-          selected_ids: selectedIds
+          selected_ids: selectedIds,
+          viewport: {
+            x: viewport.x,
+            y: viewport.y,
+            zoom: viewport.zoom,
+            canvas_width: canvasWidth,
+            canvas_height: canvasHeight
+          }
         });
       }, true); // Use capture phase to run before any other handlers
     }
@@ -299,6 +311,11 @@ export default {
       this.canvasManager.setCurrentColor(data.color);
     });
 
+    // Handle reset view command (fit all objects on screen)
+    this.handleEvent('reset_view', () => {
+      this.canvasManager.resetView();
+    });
+
     // Handle layer reordering (bring to front, send to back, etc.)
     this.handleEvent('objects_reordered', (data) => {
       console.log('[Hook] objects_reordered event received:', data.objects.length, 'objects');
@@ -309,6 +326,12 @@ export default {
     this.handleEvent('select_object_from_layer', (data) => {
       console.log('[Hook] select_object_from_layer event received:', data.object_id);
       this.canvasManager.selectObjectById(data.object_id);
+    });
+
+    // Handle multi-object selection (e.g., from semantic AI selection)
+    this.handleEvent('select_objects', (data) => {
+      console.log('[Hook] select_objects event received:', data.object_ids);
+      this.canvasManager.selectObjectsByIds(data.object_ids);
     });
 
     // Setup debounced viewport saving

@@ -161,6 +161,7 @@ defmodule CollabCanvas.CanvasesBatchTest do
       time_seconds = time_microseconds / 1_000_000
 
       assert length(objects) == 100
+
       assert time_seconds < 1.0,
              "Expected <1s, got #{Float.round(time_seconds, 3)}s for 100 objects"
 
@@ -185,6 +186,7 @@ defmodule CollabCanvas.CanvasesBatchTest do
       time_seconds = time_microseconds / 1_000_000
 
       assert length(objects) == 500
+
       assert time_seconds < 2.0,
              "Expected <2s, got #{Float.round(time_seconds, 3)}s for 500 objects"
 

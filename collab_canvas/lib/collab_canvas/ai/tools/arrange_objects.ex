@@ -130,10 +130,11 @@ defmodule CollabCanvas.AI.Tools.ArrangeObjects do
       broadcast_updates(results, canvas_id)
 
       # Check if any updates failed
-      failed = Enum.any?(results, fn
-        {:error, _} -> true
-        _ -> false
-      end)
+      failed =
+        Enum.any?(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
 
       # Calculate and log performance metrics
       duration_ms = System.monotonic_time(:millisecond) - start_time

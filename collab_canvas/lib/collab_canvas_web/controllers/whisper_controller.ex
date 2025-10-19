@@ -20,7 +20,7 @@ defmodule CollabCanvasWeb.WhisperController do
   require Logger
 
   @groq_whisper_url "https://api.groq.com/openai/v1/audio/transcriptions"
-  @whisper_model "whisper-large-v3"
+  @whisper_model "whisper-large-v3-turbo"
 
   @doc """
   Transcribes audio to text using Groq's Whisper API.
@@ -68,16 +68,28 @@ defmodule CollabCanvasWeb.WhisperController do
   # Private functions
 
   defp call_whisper_api(file_path, filename, api_key) do
-    # Prepare multipart form data using Req's built-in support
-    multipart_body = [
-      file: file_path,
-      model: @whisper_model
-    ]
+    # Read the file content
+    {:ok, file_content} = File.read(file_path)
 
-    # Make HTTP request to Groq
+    # Build multipart body manually
+    boundary = "------------------------#{:erlang.unique_integer([:positive])}"
+
+    body = [
+      "--#{boundary}\r\n",
+      "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"\r\n",
+      "Content-Type: audio/webm\r\n\r\n",
+      file_content,
+      "\r\n--#{boundary}\r\n",
+      "Content-Disposition: form-data; name=\"model\"\r\n\r\n",
+      @whisper_model,
+      "\r\n--#{boundary}--\r\n"
+    ] |> IO.iodata_to_binary()
+
+    # Make HTTP request to Groq with manual multipart
     case Req.post(@groq_whisper_url,
            auth: {:bearer, api_key},
-           form_multipart: multipart_body
+           headers: [{"content-type", "multipart/form-data; boundary=#{boundary}"}],
+           body: body
          ) do
       {:ok, %{status: 200, body: response_body}} when is_binary(response_body) ->
         # Groq returns JSON with "text" field

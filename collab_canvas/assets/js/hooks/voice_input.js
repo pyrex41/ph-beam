@@ -1,11 +1,15 @@
 /**
  * Voice Input Hook for AI Command Interface
  *
- * Provides push-to-talk microphone input using Groq's Whisper API.
+ * Provides click-to-record microphone input using Groq's Whisper API.
  * Allows users to dictate AI commands using their voice with transcription.
  *
  * Features:
- * - Push-to-talk microphone button
+ * - Click to start/stop recording
+ * - Spacebar to stop recording
+ * - Visual dialog with animated audio bars
+ * - Draggable dialog
+ * - Blurred background
  * - Audio recording using MediaRecorder API
  * - Transcription via Groq Whisper API (backend endpoint)
  * - Visual feedback for recording/transcribing states
@@ -23,26 +27,191 @@ export default {
     this.isTranscribing = false;
     this.mediaRecorder = null;
     this.audioChunks = [];
+    this.audioContext = null;
+    this.analyser = null;
+    this.dataArray = null;
+    this.animationId = null;
+    this.isDragging = false;
+    this.dragOffset = { x: 0, y: 0 };
+    this.hasLoggedAudio = false;
 
     // Get references to elements
     this.inputField = document.getElementById('ai-command-input');
     this.micIcon = this.el.querySelector('.mic-icon');
     this.listeningIndicator = this.el.querySelector('.listening-indicator');
 
-    // Handle button clicks
-    this.el.addEventListener('mousedown', this.startRecording.bind(this));
-    this.el.addEventListener('mouseup', this.stopRecording.bind(this));
-    this.el.addEventListener('mouseleave', this.stopRecording.bind(this));
+    // Create dialog modal
+    this.createDialog();
 
-    // Handle touch events for mobile
-    this.el.addEventListener('touchstart', (e) => {
+    // Handle button clicks (toggle recording)
+    this.el.addEventListener('click', (e) => {
       e.preventDefault();
-      this.startRecording();
+      if (this.isRecording) {
+        this.stopRecording();
+      } else if (!this.isTranscribing) {
+        this.startRecording();
+      }
     });
-    this.el.addEventListener('touchend', (e) => {
+
+    // Handle keyboard shortcuts
+    this.handleKeyDown = (e) => {
+      // Escape to cancel recording
+      if (e.code === 'Escape' && this.isRecording) {
+        e.preventDefault();
+        this.cancelRecording();
+        return;
+      }
+
+      // Space to start/stop recording (not in input fields)
+      if (e.code === 'Space') {
+        const target = e.target;
+        const isInputField = target.tagName === 'INPUT' ||
+                           target.tagName === 'TEXTAREA' ||
+                           target.id === 'ai-command-input' ||
+                           target.isContentEditable;
+
+        if (isInputField) {
+          return; // Let spacebar work normally in input fields
+        }
+
+        e.preventDefault();
+
+        if (this.isRecording) {
+          this.stopRecording();
+        } else if (!this.isTranscribing) {
+          this.startRecording();
+        }
+      }
+    };
+    document.addEventListener('keydown', this.handleKeyDown);
+  },
+
+  createDialog() {
+    // Add CSS animation for pulsing bars
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes bar-pulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+      }
+      .audio-bar {
+        animation: bar-pulse 1.5s infinite;
+      }
+    `;
+    document.head.appendChild(style);
+
+    // Create floating panel (not a blocking modal)
+    this.dialog = document.createElement('div');
+    this.dialog.className = 'fixed hidden z-50';
+    this.dialog.style.top = '20px';
+    this.dialog.style.right = '20px';
+    this.dialog.style.pointerEvents = 'auto';
+    this.dialog.innerHTML = `
+      <div id="voice-dialog-content" class="bg-white/95 backdrop-blur-sm rounded-lg p-6 shadow-2xl w-80 border border-gray-200">
+        <div class="text-center">
+          <h3 class="text-lg font-semibold mb-4 cursor-move" id="dialog-header">Recording...</h3>
+          <div id="audio-visualizer" class="flex items-center justify-center gap-1 h-24 mb-4"></div>
+          <p class="text-sm text-gray-600 mb-4">
+            <kbd class="px-2 py-1 bg-gray-200 rounded">Space</kbd> to stop
+            <span class="mx-2">•</span>
+            <kbd class="px-2 py-1 bg-gray-200 rounded">Esc</kbd> to cancel
+          </p>
+          <button id="stop-recording-btn" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors">
+            Stop Recording
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(this.dialog);
+
+    // Get references
+    this.dialogContent = this.dialog.querySelector('#voice-dialog-content');
+    this.visualizer = this.dialog.querySelector('#audio-visualizer');
+    this.dialogHeader = this.dialog.querySelector('#dialog-header');
+    const stopBtn = this.dialog.querySelector('#stop-recording-btn');
+    stopBtn.addEventListener('click', () => this.stopRecording());
+
+    // Create audio bars for visualizer (10 left + 10 right mirrored)
+    this.bars = [];
+    for (let i = 0; i < 10; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'audio-bar rounded-full transition-all duration-75';
+      bar.style.width = '8px';
+      bar.style.height = '30px';
+      bar.style.minHeight = '10px';
+      bar.style.background = 'linear-gradient(180deg, #4a90e2, #50c4b7)';
+      bar.style.animationDelay = `${i * 0.05}s`;
+      this.bars.push(bar);
+      this.visualizer.appendChild(bar);
+    }
+
+    // Add center gap
+    const gap = document.createElement('div');
+    gap.style.width = '8px';
+    this.visualizer.appendChild(gap);
+
+    // Add mirrored right side bars
+    for (let i = 9; i >= 0; i--) {
+      const bar = document.createElement('div');
+      bar.className = 'audio-bar rounded-full transition-all duration-75';
+      bar.style.width = '8px';
+      bar.style.height = '30px';
+      bar.style.minHeight = '10px';
+      bar.style.background = 'linear-gradient(180deg, #4a90e2, #50c4b7)';
+      bar.style.animationDelay = `${i * 0.05}s`;
+      this.bars.push(bar);
+      this.visualizer.appendChild(bar);
+    }
+
+    // Make dialog draggable
+    this.setupDragFunctionality();
+  },
+
+  setupDragFunctionality() {
+    const handleMouseDown = (e) => {
+      if (e.target !== this.dialogHeader) return;
+
+      this.isDragging = true;
+      const rect = this.dialogContent.getBoundingClientRect();
+      this.dragOffset = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+
+      this.dialogContent.style.position = 'fixed';
+      this.dialogContent.style.left = `${rect.left}px`;
+      this.dialogContent.style.top = `${rect.top}px`;
+      this.dialogContent.style.margin = '0';
+
       e.preventDefault();
-      this.stopRecording();
-    });
+    };
+
+    const handleMouseMove = (e) => {
+      if (!this.isDragging) return;
+
+      const newX = e.clientX - this.dragOffset.x;
+      const newY = e.clientY - this.dragOffset.y;
+
+      // Keep dialog within viewport
+      const maxX = window.innerWidth - this.dialogContent.offsetWidth;
+      const maxY = window.innerHeight - this.dialogContent.offsetHeight;
+
+      this.dialogContent.style.left = `${Math.max(0, Math.min(newX, maxX))}px`;
+      this.dialogContent.style.top = `${Math.max(0, Math.min(newY, maxY))}px`;
+
+      e.preventDefault();
+    };
+
+    const handleMouseUp = () => {
+      this.isDragging = false;
+    };
+
+    this.dialogHeader.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    // Store for cleanup
+    this.dragListeners = { handleMouseDown, handleMouseMove, handleMouseUp };
   },
 
   async startRecording() {
@@ -52,8 +221,10 @@ export default {
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Reset audio chunks
+      // Reset audio chunks and logging flag
       this.audioChunks = [];
+      this.hasLoggedAudio = false;
+      this.stream = stream;
 
       // Create MediaRecorder
       this.mediaRecorder = new MediaRecorder(stream, {
@@ -72,17 +243,47 @@ export default {
         // Stop all tracks to release microphone
         stream.getTracks().forEach(track => track.stop());
 
-        // Create audio blob from chunks
-        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+        // Stop audio analysis
+        if (this.animationId) {
+          cancelAnimationFrame(this.animationId);
+          this.animationId = null;
+        }
 
-        // Send to transcription endpoint
-        await this.transcribeAudio(audioBlob);
+        // Close audio context
+        if (this.audioContext) {
+          this.audioContext.close();
+          this.audioContext = null;
+        }
+
+        // Hide dialog
+        this.dialog.classList.add('hidden');
+
+        // Reset dialog position
+        this.dialogContent.style.position = '';
+        this.dialogContent.style.left = '';
+        this.dialogContent.style.top = '';
+        this.dialogContent.style.margin = '';
+
+        // Only process audio if we have chunks (not cancelled)
+        if (this.audioChunks.length > 0) {
+          // Create audio blob from chunks
+          const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+
+          // Send to transcription endpoint
+          await this.transcribeAudio(audioBlob);
+        }
       };
 
-      // Start recording
+      // Show dialog
+      this.dialog.classList.remove('hidden');
+
+      // Start recording - MUST set isRecording BEFORE setupAudioVisualization
       this.mediaRecorder.start();
       this.isRecording = true;
       this.updateUI();
+
+      // Setup audio visualization AFTER isRecording is true
+      this.setupAudioVisualization(stream);
     } catch (error) {
       console.error('Failed to start recording:', error);
 
@@ -94,6 +295,88 @@ export default {
     }
   },
 
+  setupAudioVisualization(stream) {
+    // Create audio context and analyser
+    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    this.analyser = this.audioContext.createAnalyser();
+    this.analyser.fftSize = 256; // Increased for better frequency resolution
+    this.analyser.smoothingTimeConstant = 0.3; // Less smoothing for more responsive bars
+    this.analyser.minDecibels = -90;
+    this.analyser.maxDecibels = -10;
+
+    const source = this.audioContext.createMediaStreamSource(stream);
+    source.connect(this.analyser);
+
+    const bufferLength = this.analyser.frequencyBinCount;
+    this.dataArray = new Uint8Array(bufferLength);
+
+    console.log('Audio visualization setup complete:', {
+      fftSize: this.analyser.fftSize,
+      bufferLength: bufferLength,
+      sampleRate: this.audioContext.sampleRate
+    });
+
+    // Start visualization loop
+    this.animateBars();
+  },
+
+  animateBars() {
+    if (!this.isRecording || !this.analyser || !this.dataArray) {
+      console.log('Animation stopped:', { isRecording: this.isRecording, hasAnalyser: !!this.analyser });
+      return;
+    }
+
+    this.animationId = requestAnimationFrame(() => this.animateBars());
+
+    // Get frequency data
+    this.analyser.getByteFrequencyData(this.dataArray);
+
+    // Calculate average volume for logging
+    const avg = this.dataArray.reduce((a, b) => a + b, 0) / this.dataArray.length;
+
+    // Log first frame to verify data
+    if (!this.hasLoggedAudio) {
+      console.log('Audio data:', {
+        avg,
+        sample: Array.from(this.dataArray.slice(0, 10)),
+        barsCount: this.bars.length
+      });
+      this.hasLoggedAudio = true;
+    }
+
+    // Classic waveform: each bar responds to its own frequency bin
+    // Pattern: tall edges, short middle (mirrored left/right AND top/bottom)
+    const halfBars = this.bars.length / 2;
+
+    this.bars.forEach((bar, index) => {
+      // For mirrored bars, use the same frequency data
+      const mirrorIndex = index < halfBars ? index : (this.bars.length - 1 - index);
+
+      // Sample frequency data - spread across the frequency spectrum
+      const dataIndex = Math.floor((mirrorIndex / halfBars) * this.dataArray.length);
+      const frequencyValue = this.dataArray[dataIndex] || 0;
+
+      // Calculate position from center (0 = center, 1 = edge)
+      const positionFromCenter = index < halfBars
+        ? (halfBars - index) / halfBars  // Left side
+        : (index - halfBars + 1) / halfBars;  // Right side
+
+      // Base shape: tall on edges (60px), short in middle (15px)
+      const baseHeight = 15 + (positionFromCenter * 45);
+
+      // Audio reactivity - BOOSTED for middle bars!
+      // Middle bars get 2x boost, edges get normal response
+      const reactivityBoost = 1 + (1 - positionFromCenter); // 2.0 at center, 1.0 at edges
+      const audioHeight = (frequencyValue / 255) * 50 * reactivityBoost;
+
+      // Combine: base shape + audio response
+      const height = Math.max(10, baseHeight + audioHeight);
+
+      // Update bar height
+      bar.style.height = `${Math.round(height)}px`;
+    });
+  },
+
   stopRecording() {
     if (!this.isRecording || !this.mediaRecorder) return;
 
@@ -103,6 +386,50 @@ export default {
       this.updateUI();
     } catch (error) {
       console.error('Failed to stop recording:', error);
+    }
+  },
+
+  cancelRecording() {
+    if (!this.isRecording) return;
+
+    try {
+      // Stop the recording without processing
+      this.isRecording = false;
+      this.audioChunks = []; // Clear audio chunks so they won't be processed
+
+      if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+        this.mediaRecorder.stop();
+      }
+
+      // Stop all tracks immediately
+      if (this.stream) {
+        this.stream.getTracks().forEach(track => track.stop());
+      }
+
+      // Stop audio analysis
+      if (this.animationId) {
+        cancelAnimationFrame(this.animationId);
+        this.animationId = null;
+      }
+
+      // Close audio context
+      if (this.audioContext) {
+        this.audioContext.close();
+        this.audioContext = null;
+      }
+
+      // Hide dialog
+      this.dialog.classList.add('hidden');
+
+      // Reset dialog position
+      this.dialogContent.style.position = '';
+      this.dialogContent.style.left = '';
+      this.dialogContent.style.top = '';
+      this.dialogContent.style.margin = '';
+
+      this.updateUI();
+    } catch (error) {
+      console.error('Failed to cancel recording:', error);
     }
   },
 
@@ -141,6 +468,12 @@ export default {
 
         // Trigger input event for any listeners
         this.inputField.dispatchEvent(new Event('input', { bubbles: true }));
+
+        // Focus the input field so user can immediately press Enter
+        this.inputField.focus();
+
+        // Move cursor to end of text
+        this.inputField.setSelectionRange(newValue.length, newValue.length);
       }
     } catch (error) {
       console.error('Transcription error:', error);
@@ -194,6 +527,17 @@ export default {
   },
 
   destroyed() {
+    // Remove keydown listener
+    if (this.handleKeyDown) {
+      document.removeEventListener('keydown', this.handleKeyDown);
+    }
+
+    // Remove drag listeners
+    if (this.dragListeners) {
+      document.removeEventListener('mousemove', this.dragListeners.handleMouseMove);
+      document.removeEventListener('mouseup', this.dragListeners.handleMouseUp);
+    }
+
     // Clean up media recorder
     if (this.mediaRecorder) {
       try {
@@ -204,6 +548,25 @@ export default {
         // Ignore errors when stopping
       }
       this.mediaRecorder = null;
+    }
+
+    // Clean up audio visualization
+    if (this.animationId) {
+      cancelAnimationFrame(this.animationId);
+    }
+
+    if (this.audioContext) {
+      this.audioContext.close();
+    }
+
+    // Clean up dialog
+    if (this.dialog && this.dialog.parentNode) {
+      this.dialog.parentNode.removeChild(this.dialog);
+    }
+
+    // Stop stream if still active
+    if (this.stream) {
+      this.stream.getTracks().forEach(track => track.stop());
     }
   }
 };

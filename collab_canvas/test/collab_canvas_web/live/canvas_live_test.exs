@@ -529,7 +529,8 @@ defmodule CollabCanvasWeb.CanvasLiveTest do
       # User count should increase
       html = render(view)
       # Should show at least 2 users (original + other)
-      assert html =~ ~r/\d+/ # Should have user count displayed
+      # Should have user count displayed
+      assert html =~ ~r/\d+/
     end
 
     test "avoids duplicate objects from broadcasts", %{conn: conn, canvas: canvas} do

@@ -10,6 +10,7 @@ import Config
 # Load .env file in development
 if config_env() == :dev do
   env_file = Path.expand("../.env", __DIR__)
+
   if File.exists?(env_file) do
     # Load .env file into System environment
     env_file
@@ -24,7 +25,9 @@ if config_env() == :dev do
             key = String.trim(key)
             value = String.trim(value)
             System.put_env(key, value)
-          _ -> :ok
+
+          _ ->
+            :ok
         end
       end
     end)

@@ -72,12 +72,24 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
           input: %{
             "description" => "all red objects",
             "objects_context" => [
-              %{"id" => 1, "type" => "rectangle", "position" => %{"x" => 10, "y" => 10},
-                "data" => %{"color" => "#FF0000", "width" => 100}},
-              %{"id" => 2, "type" => "circle", "position" => %{"x" => 200, "y" => 10},
-                "data" => %{"color" => "#0000FF", "width" => 80}},
-              %{"id" => 4, "type" => "circle", "position" => %{"x" => 300, "y" => 300},
-                "data" => %{"color" => "#FF0000", "width" => 50}}
+              %{
+                "id" => 1,
+                "type" => "rectangle",
+                "position" => %{"x" => 10, "y" => 10},
+                "data" => %{"color" => "#FF0000", "width" => 100}
+              },
+              %{
+                "id" => 2,
+                "type" => "circle",
+                "position" => %{"x" => 200, "y" => 10},
+                "data" => %{"color" => "#0000FF", "width" => 80}
+              },
+              %{
+                "id" => 4,
+                "type" => "circle",
+                "position" => %{"x" => 300, "y" => 300},
+                "data" => %{"color" => "#FF0000", "width" => 50}
+              }
             ]
           }
         }
@@ -179,9 +191,17 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
           input: %{
             "description" => "small red circles",
             "objects_context" => [
-              %{"id" => 1, "type" => "rectangle", "data" => %{"color" => "#FF0000", "width" => 100}},
+              %{
+                "id" => 1,
+                "type" => "rectangle",
+                "data" => %{"color" => "#FF0000", "width" => 100}
+              },
               %{"id" => 2, "type" => "circle", "data" => %{"color" => "#0000FF", "width" => 80}},
-              %{"id" => 3, "type" => "rectangle", "data" => %{"color" => "#00FF00", "width" => 60}},
+              %{
+                "id" => 3,
+                "type" => "rectangle",
+                "data" => %{"color" => "#00FF00", "width" => 60}
+              },
               %{"id" => 4, "type" => "circle", "data" => %{"color" => "#FF0000", "width" => 50}}
             ]
           }
@@ -292,10 +312,11 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
       results = Agent.process_tool_calls(tool_calls, canvas.id)
       assert length(results) == 3
 
-      types = Enum.map(results, fn r ->
-        {:ok, obj} = r.result
-        obj.type
-      end)
+      types =
+        Enum.map(results, fn r ->
+          {:ok, obj} = r.result
+          obj.type
+        end)
 
       assert types == ["rectangle", "circle", "rectangle"]
     end
@@ -395,20 +416,23 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
   describe "Layout and Arrangement Commands" do
     test "arrange objects horizontally", %{canvas: canvas} do
       # Create objects first
-      {:ok, obj1} = Canvases.create_object(canvas.id, "rectangle", %{
-        position: %{x: 0, y: 50},
-        data: Jason.encode!(%{width: 50, height: 50})
-      })
+      {:ok, obj1} =
+        Canvases.create_object(canvas.id, "rectangle", %{
+          position: %{x: 0, y: 50},
+          data: Jason.encode!(%{width: 50, height: 50})
+        })
 
-      {:ok, obj2} = Canvases.create_object(canvas.id, "rectangle", %{
-        position: %{x: 100, y: 100},
-        data: Jason.encode!(%{width: 50, height: 50})
-      })
+      {:ok, obj2} =
+        Canvases.create_object(canvas.id, "rectangle", %{
+          position: %{x: 100, y: 100},
+          data: Jason.encode!(%{width: 50, height: 50})
+        })
 
-      {:ok, obj3} = Canvases.create_object(canvas.id, "rectangle", %{
-        position: %{x: 200, y: 25},
-        data: Jason.encode!(%{width: 50, height: 50})
-      })
+      {:ok, obj3} =
+        Canvases.create_object(canvas.id, "rectangle", %{
+          position: %{x: 200, y: 25},
+          data: Jason.encode!(%{width: 50, height: 50})
+        })
 
       tool_calls = [
         %{
@@ -437,13 +461,16 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
 
     test "arrange objects vertically", %{canvas: canvas} do
       # Create objects
-      object_ids = for i <- 1..3 do
-        {:ok, obj} = Canvases.create_object(canvas.id, "circle", %{
-          position: %{x: i * 100, y: i * 50},
-          data: Jason.encode!(%{width: 40, height: 40})
-        })
-        obj.id
-      end
+      object_ids =
+        for i <- 1..3 do
+          {:ok, obj} =
+            Canvases.create_object(canvas.id, "circle", %{
+              position: %{x: i * 100, y: i * 50},
+              data: Jason.encode!(%{width: 40, height: 40})
+            })
+
+          obj.id
+        end
 
       tool_calls = [
         %{
@@ -469,13 +496,16 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
 
     test "arrange objects in grid", %{canvas: canvas} do
       # Create 6 objects
-      object_ids = for i <- 1..6 do
-        {:ok, obj} = Canvases.create_object(canvas.id, "rectangle", %{
-          position: %{x: i * 30, y: i * 30},
-          data: Jason.encode!(%{width: 40, height: 40})
-        })
-        obj.id
-      end
+      object_ids =
+        for i <- 1..6 do
+          {:ok, obj} =
+            Canvases.create_object(canvas.id, "rectangle", %{
+              position: %{x: i * 30, y: i * 30},
+              data: Jason.encode!(%{width: 40, height: 40})
+            })
+
+          obj.id
+        end
 
       tool_calls = [
         %{
@@ -506,13 +536,16 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
 
     test "arrange objects in circular layout", %{canvas: canvas} do
       # Create 5 objects
-      object_ids = for i <- 1..5 do
-        {:ok, obj} = Canvases.create_object(canvas.id, "circle", %{
-          position: %{x: i * 20, y: i * 20},
-          data: Jason.encode!(%{width: 30, height: 30})
-        })
-        obj.id
-      end
+      object_ids =
+        for i <- 1..5 do
+          {:ok, obj} =
+            Canvases.create_object(canvas.id, "circle", %{
+              position: %{x: i * 20, y: i * 20},
+              data: Jason.encode!(%{width: 30, height: 30})
+            })
+
+          obj.id
+        end
 
       tool_calls = [
         %{
@@ -605,7 +638,8 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
 
       decoded_data = Jason.decode!(updated.data)
       assert decoded_data["width"] == 120
-      assert decoded_data["height"] == 120  # Original was 60x60, so same aspect ratio
+      # Original was 60x60, so same aspect ratio
+      assert decoded_data["height"] == 120
     end
 
     test "rotate object - various angles", %{red_circle: red_circle, canvas: canvas} do
@@ -833,26 +867,29 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
   describe "Complex Multi-Step Commands" do
     test "create and arrange multiple shapes", %{canvas: canvas} do
       # Step 1: Create shapes
-      create_calls = for i <- 1..5 do
-        %{
-          id: "create_#{i}",
-          name: "create_shape",
-          input: %{
-            "type" => if(rem(i, 2) == 0, do: "circle", else: "rectangle"),
-            "x" => i * 30,
-            "y" => i * 30,
-            "width" => 50,
-            "height" => 50,
-            "color" => Enum.at(["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF"], i - 1)
+      create_calls =
+        for i <- 1..5 do
+          %{
+            id: "create_#{i}",
+            name: "create_shape",
+            input: %{
+              "type" => if(rem(i, 2) == 0, do: "circle", else: "rectangle"),
+              "x" => i * 30,
+              "y" => i * 30,
+              "width" => 50,
+              "height" => 50,
+              "color" => Enum.at(["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF"], i - 1)
+            }
           }
-        }
-      end
+        end
 
       create_results = Agent.process_tool_calls(create_calls, canvas.id)
-      object_ids = Enum.map(create_results, fn r ->
-        {:ok, obj} = r.result
-        obj.id
-      end)
+
+      object_ids =
+        Enum.map(create_results, fn r ->
+          {:ok, obj} = r.result
+          obj.id
+        end)
 
       # Step 2: Arrange them
       arrange_calls = [
@@ -911,7 +948,11 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
       end
     end
 
-    test "select and manipulate objects", %{canvas: canvas, red_rect: red_rect, red_circle: red_circle} do
+    test "select and manipulate objects", %{
+      canvas: canvas,
+      red_rect: red_rect,
+      red_circle: red_circle
+    } do
       # Step 1: Select red objects
       select_calls = [
         %{
@@ -931,19 +972,21 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
       {:ok, %{selected_ids: selected_ids}} = List.first(select_results).result
 
       # Step 2: Move selected objects
-      move_calls = Enum.map(selected_ids, fn id ->
-        %{
-          id: "move_#{id}",
-          name: "move_object",
-          input: %{
-            "object_id" => id,
-            "delta_x" => 50,
-            "delta_y" => 50
+      move_calls =
+        Enum.map(selected_ids, fn id ->
+          %{
+            id: "move_#{id}",
+            name: "move_object",
+            input: %{
+              "object_id" => id,
+              "delta_x" => 50,
+              "delta_y" => 50
+            }
           }
-        }
-      end)
+        end)
 
       move_results = Agent.process_tool_calls(move_calls, canvas.id)
+
       Enum.each(move_results, fn r ->
         assert {:ok, _} = r.result
       end)
@@ -960,7 +1003,10 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
         %{name: "resize_object", input: %{"object_id" => invalid_id, "width" => 100}},
         %{name: "rotate_object", input: %{"object_id" => invalid_id, "angle" => 45}},
         %{name: "delete_object", input: %{"object_id" => invalid_id}},
-        %{name: "change_style", input: %{"object_id" => invalid_id, "property" => "fill", "value" => "#000"}}
+        %{
+          name: "change_style",
+          input: %{"object_id" => invalid_id, "property" => "fill", "value" => "#000"}
+        }
       ]
 
       Enum.each(operations, fn op ->
@@ -1031,19 +1077,20 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
   describe "Performance and Batch Operations" do
     test "create many objects efficiently", %{canvas: canvas} do
       # Create 20 objects in one batch
-      tool_calls = for i <- 1..20 do
-        %{
-          id: "call_batch_#{i}",
-          name: "create_shape",
-          input: %{
-            "type" => if(rem(i, 2) == 0, do: "circle", else: "rectangle"),
-            "x" => rem(i - 1, 5) * 60,
-            "y" => div(i - 1, 5) * 60,
-            "width" => 50,
-            "height" => 50
+      tool_calls =
+        for i <- 1..20 do
+          %{
+            id: "call_batch_#{i}",
+            name: "create_shape",
+            input: %{
+              "type" => if(rem(i, 2) == 0, do: "circle", else: "rectangle"),
+              "x" => rem(i - 1, 5) * 60,
+              "y" => div(i - 1, 5) * 60,
+              "width" => 50,
+              "height" => 50
+            }
           }
-        }
-      end
+        end
 
       results = Agent.process_tool_calls(tool_calls, canvas.id)
       assert length(results) == 20
@@ -1060,13 +1107,16 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
 
     test "select and manipulate multiple objects", %{canvas: canvas} do
       # Create 10 rectangles
-      object_ids = for i <- 1..10 do
-        {:ok, obj} = Canvases.create_object(canvas.id, "rectangle", %{
-          position: %{x: i * 10, y: i * 10},
-          data: Jason.encode!(%{width: 40, height: 40, color: "#0000FF"})
-        })
-        obj.id
-      end
+      object_ids =
+        for i <- 1..10 do
+          {:ok, obj} =
+            Canvases.create_object(canvas.id, "rectangle", %{
+              position: %{x: i * 10, y: i * 10},
+              data: Jason.encode!(%{width: 40, height: 40, color: "#0000FF"})
+            })
+
+          obj.id
+        end
 
       # Select all blue objects
       select_calls = [
@@ -1075,9 +1125,10 @@ defmodule CollabCanvas.AI.AIFeaturesTest do
           name: "select_objects_by_description",
           input: %{
             "description" => "blue rectangles",
-            "objects_context" => Enum.map(object_ids, fn id ->
-              %{"id" => id, "type" => "rectangle", "data" => %{"color" => "#0000FF"}}
-            end)
+            "objects_context" =>
+              Enum.map(object_ids, fn id ->
+                %{"id" => id, "type" => "rectangle", "data" => %{"color" => "#0000FF"}}
+              end)
           }
         }
       ]

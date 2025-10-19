@@ -373,7 +373,11 @@ defmodule CollabCanvasWeb.ComponentsPanelLiveTest do
       {:ok, component: component}
     end
 
-    test "receives component:created broadcast", %{canvas: canvas, objects: [obj1, _obj2], component: setup_component} do
+    test "receives component:created broadcast", %{
+      canvas: canvas,
+      objects: [obj1, _obj2],
+      component: setup_component
+    } do
       # Flush any broadcasts from setup
       receive do
         {:created, _, _} -> :ok
@@ -443,7 +447,10 @@ defmodule CollabCanvasWeb.ComponentsPanelLiveTest do
       assert received.name == "Realtime Update"
     end
 
-    test "component instantiation is broadcast to all clients", %{canvas: canvas, component: component} do
+    test "component instantiation is broadcast to all clients", %{
+      canvas: canvas,
+      component: component
+    } do
       # Subscribe to instantiation events
       Phoenix.PubSub.subscribe(CollabCanvas.PubSub, "component:instantiated")
 
@@ -484,7 +491,11 @@ defmodule CollabCanvasWeb.ComponentsPanelLiveTest do
       end)
     end
 
-    test "maintains relative positions of objects in component", %{canvas: canvas, component: component, objects: [obj1, obj2]} do
+    test "maintains relative positions of objects in component", %{
+      canvas: canvas,
+      component: component,
+      objects: [obj1, obj2]
+    } do
       # Calculate expected offset
       original_pos1 = obj1.position
       original_pos2 = obj2.position

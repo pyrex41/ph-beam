@@ -107,9 +107,14 @@ defmodule CollabCanvas.AI.AgentErrorHandlingTest do
   describe "API error codes" do
     test "formats API errors for users" do
       # Test error formatting
-      assert "authentication failed" =~ String.downcase(Agent.format_error_for_user({:api_error, 401, %{}}, "test"))
-      assert "rate limited" =~ String.downcase(Agent.format_error_for_user({:api_error, 429, %{}}, "test"))
-      assert "unavailable" =~ String.downcase(Agent.format_error_for_user({:api_error, 500, %{}}, "test"))
+      assert "authentication failed" =~
+               String.downcase(Agent.format_error_for_user({:api_error, 401, %{}}, "test"))
+
+      assert "rate limited" =~
+               String.downcase(Agent.format_error_for_user({:api_error, 429, %{}}, "test"))
+
+      assert "unavailable" =~
+               String.downcase(Agent.format_error_for_user({:api_error, 500, %{}}, "test"))
     end
 
     test "formats validation errors for users" do

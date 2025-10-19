@@ -656,9 +656,10 @@ defmodule CollabCanvas.Canvases do
     group_id = Ecto.UUID.generate()
 
     # Fetch all objects first to verify they exist
-    objects = Object
-    |> where([o], o.id in ^object_ids)
-    |> Repo.all()
+    objects =
+      Object
+      |> where([o], o.id in ^object_ids)
+      |> Repo.all()
 
     if length(objects) == length(object_ids) do
       # Update all objects with the group_id
@@ -667,9 +668,10 @@ defmodule CollabCanvas.Canvases do
       |> Repo.update_all(set: [group_id: group_id, updated_at: DateTime.utc_now()])
 
       # Fetch updated objects
-      updated_objects = Object
-      |> where([o], o.id in ^object_ids)
-      |> Repo.all()
+      updated_objects =
+        Object
+        |> where([o], o.id in ^object_ids)
+        |> Repo.all()
 
       {:ok, group_id, updated_objects}
     else
@@ -700,22 +702,29 @@ defmodule CollabCanvas.Canvases do
 
   """
   def ungroup(group_id, object_ids \\ nil) do
-    query = Object
-    |> where([o], o.group_id == ^group_id)
+    query =
+      Object
+      |> where([o], o.group_id == ^group_id)
 
-    query = if object_ids do
-      where(query, [o], o.id in ^object_ids)
-    else
+    query =
+      if object_ids do
+        where(query, [o], o.id in ^object_ids)
+      else
+        query
+      end
+
+    {count, _} =
       query
-    end
-
-    {count, _} = query
-    |> Repo.update_all(set: [group_id: nil, updated_at: DateTime.utc_now()])
+      |> Repo.update_all(set: [group_id: nil, updated_at: DateTime.utc_now()])
 
     if count > 0 do
-      updated_objects = Object
-      |> where([o], o.id in ^(if object_ids, do: object_ids, else: subquery(query |> select([o], o.id))))
-      |> Repo.all()
+      updated_objects =
+        Object
+        |> where(
+          [o],
+          o.id in ^if(object_ids, do: object_ids, else: subquery(query |> select([o], o.id)))
+        )
+        |> Repo.all()
 
       {:ok, updated_objects}
     else
@@ -786,31 +795,34 @@ defmodule CollabCanvas.Canvases do
     with {:ok, object} <- {:ok, Repo.get(Object, id)},
          false <- is_nil(object) do
       # Get max z_index for the canvas
-      max_z = Object
-      |> where([o], o.canvas_id == ^object.canvas_id)
-      |> select([o], max(o.z_index))
-      |> Repo.one()
-      |> Kernel.||(0.0)
+      max_z =
+        Object
+        |> where([o], o.canvas_id == ^object.canvas_id)
+        |> select([o], max(o.z_index))
+        |> Repo.one()
+        |> Kernel.||(0.0)
 
       new_z = max_z + 1.0
 
       # Update object and any objects in its group
-      ids_to_update = if object.group_id do
-        Object
-        |> where([o], o.group_id == ^object.group_id)
-        |> select([o], o.id)
-        |> Repo.all()
-      else
-        [id]
-      end
+      ids_to_update =
+        if object.group_id do
+          Object
+          |> where([o], o.group_id == ^object.group_id)
+          |> select([o], o.id)
+          |> Repo.all()
+        else
+          [id]
+        end
 
       Object
       |> where([o], o.id in ^ids_to_update)
       |> Repo.update_all(set: [z_index: new_z, updated_at: DateTime.utc_now()])
 
-      updated_objects = Object
-      |> where([o], o.id in ^ids_to_update)
-      |> Repo.all()
+      updated_objects =
+        Object
+        |> where([o], o.id in ^ids_to_update)
+        |> Repo.all()
 
       {:ok, updated_objects}
     else
@@ -839,31 +851,34 @@ defmodule CollabCanvas.Canvases do
     with {:ok, object} <- {:ok, Repo.get(Object, id)},
          false <- is_nil(object) do
       # Get min z_index for the canvas
-      min_z = Object
-      |> where([o], o.canvas_id == ^object.canvas_id)
-      |> select([o], min(o.z_index))
-      |> Repo.one()
-      |> Kernel.||(0.0)
+      min_z =
+        Object
+        |> where([o], o.canvas_id == ^object.canvas_id)
+        |> select([o], min(o.z_index))
+        |> Repo.one()
+        |> Kernel.||(0.0)
 
       new_z = min_z - 1.0
 
       # Update object and any objects in its group
-      ids_to_update = if object.group_id do
-        Object
-        |> where([o], o.group_id == ^object.group_id)
-        |> select([o], o.id)
-        |> Repo.all()
-      else
-        [id]
-      end
+      ids_to_update =
+        if object.group_id do
+          Object
+          |> where([o], o.group_id == ^object.group_id)
+          |> select([o], o.id)
+          |> Repo.all()
+        else
+          [id]
+        end
 
       Object
       |> where([o], o.id in ^ids_to_update)
       |> Repo.update_all(set: [z_index: new_z, updated_at: DateTime.utc_now()])
 
-      updated_objects = Object
-      |> where([o], o.id in ^ids_to_update)
-      |> Repo.all()
+      updated_objects =
+        Object
+        |> where([o], o.id in ^ids_to_update)
+        |> Repo.all()
 
       {:ok, updated_objects}
     else
@@ -893,10 +908,11 @@ defmodule CollabCanvas.Canvases do
     with {:ok, object} <- {:ok, Repo.get(Object, id)},
          false <- is_nil(object) do
       # Get all objects on canvas ordered by z_index
-      canvas_objects = Object
-      |> where([o], o.canvas_id == ^object.canvas_id)
-      |> order_by([o], asc: o.z_index)
-      |> Repo.all()
+      canvas_objects =
+        Object
+        |> where([o], o.canvas_id == ^object.canvas_id)
+        |> order_by([o], asc: o.z_index)
+        |> Repo.all()
 
       # Find objects above this one
       objects_above = Enum.filter(canvas_objects, fn obj -> obj.z_index > object.z_index end)
@@ -912,14 +928,15 @@ defmodule CollabCanvas.Canvases do
         next_z = next_object.z_index
 
         # Update both objects (and their groups if they exist)
-        ids_to_update_current = if object.group_id do
-          Object
-          |> where([o], o.group_id == ^object.group_id)
-          |> select([o], o.id)
-          |> Repo.all()
-        else
-          [id]
-        end
+        ids_to_update_current =
+          if object.group_id do
+            Object
+            |> where([o], o.group_id == ^object.group_id)
+            |> select([o], o.id)
+            |> Repo.all()
+          else
+            [id]
+          end
 
         Object
         |> where([o], o.id in ^ids_to_update_current)
@@ -930,9 +947,10 @@ defmodule CollabCanvas.Canvases do
         |> Repo.update_all(set: [z_index: current_z, updated_at: DateTime.utc_now()])
 
         # Return all affected objects
-        updated_objects = Object
-        |> where([o], o.id in ^(ids_to_update_current ++ [next_object.id]))
-        |> Repo.all()
+        updated_objects =
+          Object
+          |> where([o], o.id in ^(ids_to_update_current ++ [next_object.id]))
+          |> Repo.all()
 
         {:ok, updated_objects}
       end
@@ -963,10 +981,11 @@ defmodule CollabCanvas.Canvases do
     with {:ok, object} <- {:ok, Repo.get(Object, id)},
          false <- is_nil(object) do
       # Get all objects on canvas ordered by z_index
-      canvas_objects = Object
-      |> where([o], o.canvas_id == ^object.canvas_id)
-      |> order_by([o], asc: o.z_index)
-      |> Repo.all()
+      canvas_objects =
+        Object
+        |> where([o], o.canvas_id == ^object.canvas_id)
+        |> order_by([o], asc: o.z_index)
+        |> Repo.all()
 
       # Find objects below this one
       objects_below = Enum.filter(canvas_objects, fn obj -> obj.z_index < object.z_index end)
@@ -982,14 +1001,15 @@ defmodule CollabCanvas.Canvases do
         prev_z = prev_object.z_index
 
         # Update both objects (and their groups if they exist)
-        ids_to_update_current = if object.group_id do
-          Object
-          |> where([o], o.group_id == ^object.group_id)
-          |> select([o], o.id)
-          |> Repo.all()
-        else
-          [id]
-        end
+        ids_to_update_current =
+          if object.group_id do
+            Object
+            |> where([o], o.group_id == ^object.group_id)
+            |> select([o], o.id)
+            |> Repo.all()
+          else
+            [id]
+          end
 
         Object
         |> where([o], o.id in ^ids_to_update_current)
@@ -1000,9 +1020,10 @@ defmodule CollabCanvas.Canvases do
         |> Repo.update_all(set: [z_index: current_z, updated_at: DateTime.utc_now()])
 
         # Return all affected objects
-        updated_objects = Object
-        |> where([o], o.id in ^(ids_to_update_current ++ [prev_object.id]))
-        |> Repo.all()
+        updated_objects =
+          Object
+          |> where([o], o.id in ^(ids_to_update_current ++ [prev_object.id]))
+          |> Repo.all()
 
         {:ok, updated_objects}
       end

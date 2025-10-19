@@ -4114,7 +4114,7 @@
         "testStrategy": "Unit tests for cache put/get operations, integration tests to verify TTL expiration, and performance tests to ensure caching reduces API calls by >20% in simulated sessions.",
         "priority": "high",
         "dependencies": [],
-        "status": "pending",
+        "status": "cancelled",
         "subtasks": []
       },
       {
@@ -4125,7 +4125,7 @@
         "testStrategy": "Manual review of tool descriptions, integration tests with mocked LLM to verify improved parameter consistency, and measure AI Command Success Rate increase to >95% in test scenarios.",
         "priority": "medium",
         "dependencies": [],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4136,7 +4136,7 @@
         "testStrategy": "Unit tests for batch insertion with valid/invalid attrs, database transaction tests for atomicity, and performance benchmarks for bulk creation (e.g., 10 objects in <2s).",
         "priority": "high",
         "dependencies": [],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4149,7 +4149,7 @@
         "dependencies": [
           3
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4162,7 +4162,7 @@
         "dependencies": [
           4
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4173,7 +4173,7 @@
         "testStrategy": "Unit tests for pattern matching various commands, integration tests to verify bypass of LLM and direct execution, and latency tests for <300ms completion.",
         "priority": "high",
         "dependencies": [],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4186,7 +4186,7 @@
         "dependencies": [
           6
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4199,7 +4199,7 @@
         "dependencies": [
           3
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4212,7 +4212,7 @@
         "dependencies": [
           8
         ],
-        "status": "pending",
+        "status": "deferred",
         "subtasks": []
       },
       {
@@ -4225,7 +4225,7 @@
         "dependencies": [
           1
         ],
-        "status": "pending",
+        "status": "cancelled",
         "subtasks": []
       },
       {
@@ -4239,7 +4239,7 @@
           4,
           8
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4252,7 +4252,7 @@
         "dependencies": [
           2
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4263,18 +4263,17 @@
         "testStrategy": "Benchmark tests for agent startup time, latency tests for first commands, and profiling reports.",
         "priority": "low",
         "dependencies": [],
-        "status": "pending",
+        "status": "deferred",
         "subtasks": []
       },
       {
         "id": 14,
         "title": "End-to-end integration testing",
-        "description": "Create comprehensive tests for the entire AI agent flow including short-circuiting, caching, batching, and parallel processing.",
+        "description": "Create comprehensive tests for the entire AI agent flow including short-circuiting, batching, and error handling.",
         "details": "Write Elixir tests simulating user commands, verifying latency, success rates, and canvas updates. Use ExUnit with async and database sandboxes.",
-        "testStrategy": "Run full test suite, measure P95 latency <300ms for simple commands, bulk speed <2s, success rate >95%, and API reduction >20%.",
+        "testStrategy": "Run full test suite, measure P95 latency <300ms for simple commands, bulk speed <2s, success rate >95%.",
         "priority": "high",
         "dependencies": [
-          1,
           2,
           3,
           4,
@@ -4282,12 +4281,10 @@
           6,
           7,
           8,
-          9,
-          10,
           11,
           12
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -4300,7 +4297,7 @@
         "dependencies": [
           14
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       }
     ],

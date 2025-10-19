@@ -27,7 +27,9 @@ defmodule CollabCanvas.AI.BatchProcessorTest do
       }
 
       normalize_color = fn color -> color end
-      {attrs_list, count} = BatchProcessor.build_object_attrs_from_tool_call(tool_call, "#000000", normalize_color)
+
+      {attrs_list, count} =
+        BatchProcessor.build_object_attrs_from_tool_call(tool_call, "#000000", normalize_color)
 
       assert length(attrs_list) == 1
       assert count == 1
@@ -45,11 +47,20 @@ defmodule CollabCanvas.AI.BatchProcessorTest do
     test "builds multiple shape attrs with count parameter" do
       tool_call = %{
         name: "create_shape",
-        input: %{"type" => "circle", "x" => 0, "y" => 0, "width" => 50, "height" => 50, "count" => 3}
+        input: %{
+          "type" => "circle",
+          "x" => 0,
+          "y" => 0,
+          "width" => 50,
+          "height" => 50,
+          "count" => 3
+        }
       }
 
       normalize_color = fn color -> color end
-      {attrs_list, count} = BatchProcessor.build_object_attrs_from_tool_call(tool_call, "#FF0000", normalize_color)
+
+      {attrs_list, count} =
+        BatchProcessor.build_object_attrs_from_tool_call(tool_call, "#FF0000", normalize_color)
 
       assert length(attrs_list) == 3
       assert count == 3
@@ -57,7 +68,8 @@ defmodule CollabCanvas.AI.BatchProcessorTest do
       # Verify each shape has proper spacing
       [first, second, third] = attrs_list
       assert first.position.x == 0
-      assert second.position.x == 125  # 50 * 2.5 spacing
+      # 50 * 2.5 spacing
+      assert second.position.x == 125
       assert third.position.x == 250
     end
 
@@ -68,7 +80,9 @@ defmodule CollabCanvas.AI.BatchProcessorTest do
       }
 
       normalize_color = fn color -> color end
-      {attrs_list, count} = BatchProcessor.build_object_attrs_from_tool_call(tool_call, "#333333", normalize_color)
+
+      {attrs_list, count} =
+        BatchProcessor.build_object_attrs_from_tool_call(tool_call, "#333333", normalize_color)
 
       assert length(attrs_list) == 1
       assert count == 1
@@ -106,7 +120,9 @@ defmodule CollabCanvas.AI.BatchProcessorTest do
       ]
 
       normalize_color = fn color -> String.upcase(color) end
-      results = BatchProcessor.execute_batched_creates(tool_calls, canvas.id, "#ff0000", normalize_color)
+
+      results =
+        BatchProcessor.execute_batched_creates(tool_calls, canvas.id, "#ff0000", normalize_color)
 
       assert length(results) == 2
 
@@ -130,18 +146,30 @@ defmodule CollabCanvas.AI.BatchProcessorTest do
         %{
           id: "t1",
           name: "create_shape",
-          input: %{"type" => "rectangle", "x" => 0, "y" => 0, "width" => 50, "height" => 30, "count" => 5}
+          input: %{
+            "type" => "rectangle",
+            "x" => 0,
+            "y" => 0,
+            "width" => 50,
+            "height" => 30,
+            "count" => 5
+          }
         }
       ]
 
       normalize_color = fn color -> color end
-      results = BatchProcessor.execute_batched_creates(tool_calls, canvas.id, "#0000ff", normalize_color)
+
+      results =
+        BatchProcessor.execute_batched_creates(tool_calls, canvas.id, "#0000ff", normalize_color)
 
       assert length(results) == 1
 
       # Verify result has multiple objects
       [result] = results
-      assert %{tool: "create_shape", result: {:ok, %{count: 5, total: 5, objects: objects}}} = result
+
+      assert %{tool: "create_shape", result: {:ok, %{count: 5, total: 5, objects: objects}}} =
+               result
+
       assert length(objects) == 5
 
       # Verify objects were created
@@ -164,7 +192,9 @@ defmodule CollabCanvas.AI.BatchProcessorTest do
       ]
 
       normalize_color = fn color -> color end
-      results = BatchProcessor.execute_batched_creates(tool_calls, canvas.id, "#000000", normalize_color)
+
+      results =
+        BatchProcessor.execute_batched_creates(tool_calls, canvas.id, "#000000", normalize_color)
 
       assert length(results) == 2
 
@@ -197,7 +227,8 @@ defmodule CollabCanvas.AI.BatchProcessorTest do
         %{tool: "delete_object", input: %{"object_id" => 2}, result: {:ok, %{}}}
       ]
 
-      combined = BatchProcessor.combine_results_in_order(original_calls, batch_results, other_results)
+      combined =
+        BatchProcessor.combine_results_in_order(original_calls, batch_results, other_results)
 
       assert length(combined) == 5
       assert Enum.at(combined, 0).tool == "create_shape"

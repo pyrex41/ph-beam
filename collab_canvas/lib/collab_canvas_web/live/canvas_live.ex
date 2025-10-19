@@ -141,12 +141,12 @@ defmodule CollabCanvasWeb.CanvasLive do
       # Track user presence (cursor will be set when user first moves mouse)
       # Handle both success and already_tracked cases (can happen on page reload)
       case Presence.track(self(), topic, user_id, %{
-          online_at: System.system_time(:second),
-          cursor: nil,
-          color: generate_user_color(),
-          name: user.name || user.email,
-          email: user.email
-        }) do
+             online_at: System.system_time(:second),
+             cursor: nil,
+             color: generate_user_color(),
+             name: user.name || user.email,
+             email: user.email
+           }) do
         {:ok, _} -> :ok
         {:error, {:already_tracked, _, _, _}} -> :ok
       end
@@ -307,16 +307,17 @@ defmodule CollabCanvasWeb.CanvasLive do
         presences = Presence.list(socket.assigns.topic)
         user_presence = Map.get(presences, user_id, %{})
         user_meta = user_presence[:metas] |> List.first() || %{}
-        
+
         # Broadcast to all connected clients with user info
         Phoenix.PubSub.broadcast(
           CollabCanvas.PubSub,
           socket.assigns.topic,
-          {:object_locked, locked_object, %{
-            name: user_meta[:name] || "Unknown",
-            color: user_meta[:color] || "#000000",
-            avatar: user_meta[:avatar] || nil
-          }}
+          {:object_locked, locked_object,
+           %{
+             name: user_meta[:name] || "Unknown",
+             color: user_meta[:color] || "#000000",
+             avatar: user_meta[:avatar] || nil
+           }}
         )
 
         # Update local state
@@ -471,7 +472,10 @@ defmodule CollabCanvasWeb.CanvasLive do
         # Log warning if object not found during partial update (aids debugging)
         if is_nil(existing_object) do
           require Logger
-          Logger.warning("Object #{object_id} not found during partial update for user #{socket.assigns.current_user.id}")
+
+          Logger.warning(
+            "Object #{object_id} not found during partial update for user #{socket.assigns.current_user.id}"
+          )
         end
 
         # Extract update attributes and handle partial data updates
@@ -562,36 +566,43 @@ defmodule CollabCanvasWeb.CanvasLive do
   `{:noreply, socket}` with updated objects list or error flash message.
   """
   @impl true
-  def handle_event("update_objects_batch", %{"updates" => updates}, socket) when is_list(updates) do
+  def handle_event("update_objects_batch", %{"updates" => updates}, socket)
+      when is_list(updates) do
     user_id = socket.assigns.user_id
 
     # Execute all updates in a transaction
-    result = CollabCanvas.Repo.transaction(fn ->
-      Enum.map(updates, fn update_params ->
-        # Extract object_id from params
-        object_id = update_params["object_id"] || update_params["id"]
-        object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+    result =
+      CollabCanvas.Repo.transaction(fn ->
+        Enum.map(updates, fn update_params ->
+          # Extract object_id from params
+          object_id = update_params["object_id"] || update_params["id"]
+          object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
 
-        # Check if object is locked by another user
-        case Canvases.check_lock(object_id) do
-          {:locked, locked_by} when locked_by != user_id ->
-            CollabCanvas.Repo.rollback({:error, :locked_by_another_user, object_id})
+          # Check if object is locked by another user
+          case Canvases.check_lock(object_id) do
+            {:locked, locked_by} when locked_by != user_id ->
+              CollabCanvas.Repo.rollback({:error, :locked_by_another_user, object_id})
 
-          {:error, :not_found} ->
-            CollabCanvas.Repo.rollback({:error, :not_found, object_id})
+            {:error, :not_found} ->
+              CollabCanvas.Repo.rollback({:error, :not_found, object_id})
 
-          _ ->
-            # Object is unlocked or locked by current user, proceed with update
-            attrs = %{position: update_params["position"]}
+            _ ->
+              # Object is unlocked or locked by current user, proceed with update
+              attrs = %{position: update_params["position"]}
 
-            case Canvases.update_object(object_id, attrs) do
-              {:ok, updated_object} -> updated_object
-              {:error, :not_found} -> CollabCanvas.Repo.rollback({:error, :not_found, object_id})
-              {:error, _changeset} -> CollabCanvas.Repo.rollback({:error, :update_failed, object_id})
-            end
-        end
+              case Canvases.update_object(object_id, attrs) do
+                {:ok, updated_object} ->
+                  updated_object
+
+                {:error, :not_found} ->
+                  CollabCanvas.Repo.rollback({:error, :not_found, object_id})
+
+                {:error, _changeset} ->
+                  CollabCanvas.Repo.rollback({:error, :update_failed, object_id})
+              end
+          end
+        end)
       end)
-    end)
 
     case result do
       {:ok, updated_objects} ->
@@ -604,6 +615,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         # Update local state
         updated_ids = MapSet.new(updated_objects, & &1.id)
+
         objects =
           Enum.map(socket.assigns.objects, fn obj ->
             if MapSet.member?(updated_ids, obj.id) do
@@ -618,12 +630,14 @@ defmodule CollabCanvasWeb.CanvasLive do
         {:noreply, assign(socket, :objects, objects)}
 
       {:error, {error_type, object_id}} ->
-        message = case error_type do
-          :locked_by_another_user -> "Object #{object_id} is locked by another user"
-          :not_found -> "Object #{object_id} not found"
-          :update_failed -> "Failed to update object #{object_id}"
-          _ -> "Batch update failed"
-        end
+        message =
+          case error_type do
+            :locked_by_another_user -> "Object #{object_id} is locked by another user"
+            :not_found -> "Object #{object_id} not found"
+            :update_failed -> "Failed to update object #{object_id}"
+            _ -> "Batch update failed"
+          end
+
         {:noreply, put_flash(socket, :error, message)}
 
       {:error, _reason} ->
@@ -710,9 +724,10 @@ defmodule CollabCanvasWeb.CanvasLive do
   @impl true
   def handle_event("create_group", %{"object_ids" => object_ids}, socket) do
     # Convert string IDs to integers
-    object_ids = Enum.map(object_ids, fn id -> 
-      if is_binary(id), do: String.to_integer(id), else: id 
-    end)
+    object_ids =
+      Enum.map(object_ids, fn id ->
+        if is_binary(id), do: String.to_integer(id), else: id
+      end)
 
     case Canvases.create_group(object_ids) do
       {:ok, group_id, updated_objects} ->
@@ -724,14 +739,15 @@ defmodule CollabCanvasWeb.CanvasLive do
         )
 
         # Update local state
-        socket = update(socket, :objects, fn current_objects ->
-          # Replace updated objects in the list
-          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
-          
-          Enum.map(current_objects, fn obj ->
-            Map.get(updated_map, obj.id, obj)
+        socket =
+          update(socket, :objects, fn current_objects ->
+            # Replace updated objects in the list
+            updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+            Enum.map(current_objects, fn obj ->
+              Map.get(updated_map, obj.id, obj)
+            end)
           end)
-        end)
 
         {:noreply, put_flash(socket, :info, "Objects grouped successfully")}
 
@@ -759,9 +775,10 @@ defmodule CollabCanvasWeb.CanvasLive do
   @impl true
   def handle_event("ungroup", %{"object_ids" => object_ids}, socket) do
     # Convert string IDs to integers
-    object_ids = Enum.map(object_ids, fn id -> 
-      if is_binary(id), do: String.to_integer(id), else: id 
-    end)
+    object_ids =
+      Enum.map(object_ids, fn id ->
+        if is_binary(id), do: String.to_integer(id), else: id
+      end)
 
     # Get the first object to find its group_id
     case Canvases.get_object(List.first(object_ids)) do
@@ -779,13 +796,14 @@ defmodule CollabCanvasWeb.CanvasLive do
             )
 
             # Update local state
-            socket = update(socket, :objects, fn current_objects ->
-              updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
-              
-              Enum.map(current_objects, fn obj ->
-                Map.get(updated_map, obj.id, obj)
+            socket =
+              update(socket, :objects, fn current_objects ->
+                updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+                Enum.map(current_objects, fn obj ->
+                  Map.get(updated_map, obj.id, obj)
+                end)
               end)
-            end)
 
             {:noreply, put_flash(socket, :info, "Objects ungrouped successfully")}
 
@@ -817,7 +835,7 @@ defmodule CollabCanvasWeb.CanvasLive do
   def handle_event("duplicate_object", params, socket) do
     object_id = params["object_id"]
     object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
-    
+
     offset = params["offset"] || %{"x" => 20, "y" => 20}
     offset_x = offset["x"] || 20
     offset_y = offset["y"] || 20
@@ -828,11 +846,12 @@ defmodule CollabCanvasWeb.CanvasLive do
 
       object ->
         # Parse the data JSON if it's a string
-        data = if is_binary(object.data) do
-          Jason.decode!(object.data)
-        else
-          object.data
-        end
+        data =
+          if is_binary(object.data) do
+            Jason.decode!(object.data)
+          else
+            object.data
+          end
 
         # Create new object with offset position
         new_position = %{
@@ -892,13 +911,14 @@ defmodule CollabCanvasWeb.CanvasLive do
         )
 
         # Update local state
-        socket = update(socket, :objects, fn current_objects ->
-          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
-          
-          Enum.map(current_objects, fn obj ->
-            Map.get(updated_map, obj.id, obj)
+        socket =
+          update(socket, :objects, fn current_objects ->
+            updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+            Enum.map(current_objects, fn obj ->
+              Map.get(updated_map, obj.id, obj)
+            end)
           end)
-        end)
 
         {:noreply, socket}
 
@@ -932,13 +952,14 @@ defmodule CollabCanvasWeb.CanvasLive do
         )
 
         # Update local state
-        socket = update(socket, :objects, fn current_objects ->
-          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
-          
-          Enum.map(current_objects, fn obj ->
-            Map.get(updated_map, obj.id, obj)
+        socket =
+          update(socket, :objects, fn current_objects ->
+            updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+
+            Enum.map(current_objects, fn obj ->
+              Map.get(updated_map, obj.id, obj)
+            end)
           end)
-        end)
 
         {:noreply, socket}
 
@@ -972,13 +993,14 @@ defmodule CollabCanvasWeb.CanvasLive do
         )
 
         # Update local state
-        socket = update(socket, :objects, fn current_objects ->
-          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+        socket =
+          update(socket, :objects, fn current_objects ->
+            updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
 
-          Enum.map(current_objects, fn obj ->
-            Map.get(updated_map, obj.id, obj)
+            Enum.map(current_objects, fn obj ->
+              Map.get(updated_map, obj.id, obj)
+            end)
           end)
-        end)
 
         {:noreply, socket}
 
@@ -1015,13 +1037,14 @@ defmodule CollabCanvasWeb.CanvasLive do
         )
 
         # Update local state
-        socket = update(socket, :objects, fn current_objects ->
-          updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
+        socket =
+          update(socket, :objects, fn current_objects ->
+            updated_map = Map.new(updated_objects, fn obj -> {obj.id, obj} end)
 
-          Enum.map(current_objects, fn obj ->
-            Map.get(updated_map, obj.id, obj)
+            Enum.map(current_objects, fn obj ->
+              Map.get(updated_map, obj.id, obj)
+            end)
           end)
-        end)
 
         {:noreply, socket}
 
@@ -1050,23 +1073,31 @@ defmodule CollabCanvasWeb.CanvasLive do
   `{:noreply, socket}` with updated objects.
   """
   @impl true
-  def handle_event("align_objects", %{"object_ids" => object_ids, "alignment" => alignment}, socket) do
+  def handle_event(
+        "align_objects",
+        %{"object_ids" => object_ids, "alignment" => alignment},
+        socket
+      ) do
     # Convert string IDs to integers
-    object_ids = Enum.map(object_ids, fn id -> 
-      if is_binary(id), do: String.to_integer(id), else: id 
-    end)
+    object_ids =
+      Enum.map(object_ids, fn id ->
+        if is_binary(id), do: String.to_integer(id), else: id
+      end)
 
     # Fetch the objects
-    objects = Enum.map(object_ids, fn id ->
-      case Canvases.get_object(id) do
-        nil -> nil
-        obj ->
-          # Parse data if it's a string
-          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
-          %{id: obj.id, position: obj.position, data: data}
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
+    objects =
+      Enum.map(object_ids, fn id ->
+        case Canvases.get_object(id) do
+          nil ->
+            nil
+
+          obj ->
+            # Parse data if it's a string
+            data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
+            %{id: obj.id, position: obj.position, data: data}
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
 
     if length(objects) < 2 do
       {:noreply, put_flash(socket, :error, "Need at least 2 objects to align")}
@@ -1080,9 +1111,10 @@ defmodule CollabCanvasWeb.CanvasLive do
       end)
 
       # Broadcast to all clients (include originating user_id to prevent self-update)
-      updated_objects = Enum.map(updates, fn update ->
-        Canvases.get_object(update.id)
-      end)
+      updated_objects =
+        Enum.map(updates, fn update ->
+          Canvases.get_object(update.id)
+        end)
 
       Phoenix.PubSub.broadcast(
         CollabCanvas.PubSub,
@@ -1110,33 +1142,42 @@ defmodule CollabCanvasWeb.CanvasLive do
   `{:noreply, socket}` with updated objects.
   """
   @impl true
-  def handle_event("distribute_objects", %{"object_ids" => object_ids, "direction" => direction}, socket) do
+  def handle_event(
+        "distribute_objects",
+        %{"object_ids" => object_ids, "direction" => direction},
+        socket
+      ) do
     # Convert string IDs to integers
-    object_ids = Enum.map(object_ids, fn id -> 
-      if is_binary(id), do: String.to_integer(id), else: id 
-    end)
+    object_ids =
+      Enum.map(object_ids, fn id ->
+        if is_binary(id), do: String.to_integer(id), else: id
+      end)
 
     # Fetch the objects
-    objects = Enum.map(object_ids, fn id ->
-      case Canvases.get_object(id) do
-        nil -> nil
-        obj ->
-          # Parse data if it's a string
-          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
-          %{id: obj.id, position: obj.position, data: data}
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
+    objects =
+      Enum.map(object_ids, fn id ->
+        case Canvases.get_object(id) do
+          nil ->
+            nil
+
+          obj ->
+            # Parse data if it's a string
+            data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data
+            %{id: obj.id, position: obj.position, data: data}
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
 
     if length(objects) < 3 do
       {:noreply, put_flash(socket, :error, "Need at least 3 objects to distribute")}
     else
       # Calculate new positions using Layout module
-      updates = case direction do
-        "horizontal" -> CollabCanvas.AI.Layout.distribute_horizontally(objects)
-        "vertical" -> CollabCanvas.AI.Layout.distribute_vertically(objects)
-        _ -> []
-      end
+      updates =
+        case direction do
+          "horizontal" -> CollabCanvas.AI.Layout.distribute_horizontally(objects)
+          "vertical" -> CollabCanvas.AI.Layout.distribute_vertically(objects)
+          _ -> []
+        end
 
       # Apply updates to database
       Enum.each(updates, fn update ->
@@ -1144,9 +1185,10 @@ defmodule CollabCanvasWeb.CanvasLive do
       end)
 
       # Broadcast to all clients (include originating user_id to prevent self-update)
-      updated_objects = Enum.map(updates, fn update ->
-        Canvases.get_object(update.id)
-      end)
+      updated_objects =
+        Enum.map(updates, fn update ->
+          Canvases.get_object(update.id)
+        end)
 
       Phoenix.PubSub.broadcast(
         CollabCanvas.PubSub,
@@ -1265,10 +1307,16 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         # Start async task with timeout (Task.async automatically links to current process)
         current_color = socket.assigns.current_color
+        viewport = Map.get(params, "viewport")
+
         Logger.info("CanvasLive: Passing current_color to AI: #{current_color}")
+        if viewport, do: Logger.info("CanvasLive: Passing viewport to AI: #{inspect(viewport)}")
+
         task =
           Task.async(fn ->
-            Agent.execute_command(command, canvas_id, selected_ids, current_color: current_color)
+            opts = [current_color: current_color]
+            opts = if viewport, do: Keyword.put(opts, :viewport, viewport), else: opts
+            Agent.execute_command(command, canvas_id, selected_ids, opts)
           end)
 
         # Set loading state and store task reference for timeout monitoring
@@ -1424,14 +1472,18 @@ defmodule CollabCanvasWeb.CanvasLive do
   @impl true
   def handle_event("instantiate_component", params, socket) do
     component_id = params["component_id"]
-    component_id = if is_binary(component_id), do: String.to_integer(component_id), else: component_id
+
+    component_id =
+      if is_binary(component_id), do: String.to_integer(component_id), else: component_id
 
     position = params["position"]
     position = %{x: position["x"], y: position["y"]}
 
     canvas_id = socket.assigns.canvas_id
 
-    case CollabCanvas.Components.instantiate_component(component_id, position, canvas_id: canvas_id) do
+    case CollabCanvas.Components.instantiate_component(component_id, position,
+           canvas_id: canvas_id
+         ) do
       {:ok, instances} ->
         # Broadcast to all connected clients
         Enum.each(instances, fn instance ->
@@ -1495,6 +1547,15 @@ defmodule CollabCanvasWeb.CanvasLive do
   @impl true
   def handle_event("toggle_color_picker", _params, socket) do
     {:noreply, assign(socket, :show_color_picker, !socket.assigns.show_color_picker)}
+  end
+
+  @doc """
+  Handles reset view request to fit all objects on screen.
+
+  Sends a push_event to the client canvas manager to calculate and apply the optimal viewport.
+  """
+  def handle_event("reset_view", _params, socket) do
+    {:noreply, push_event(socket, "reset_view", %{})}
   end
 
   @doc """
@@ -1631,6 +1692,33 @@ defmodule CollabCanvasWeb.CanvasLive do
     else
       {:noreply, push_event(socket, "object_updated", %{object: updated_object})}
     end
+  end
+
+  @doc """
+  Handles object_updated broadcasts from PubSub without originating_user_id.
+
+  This handler is for AI-generated updates and other cases where we don't track
+  a specific originating user. Always pushes the update to all clients.
+
+  ## Parameters
+
+  - `updated_object` - Updated canvas object struct
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:object_updated, updated_object}, socket) do
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        if obj.id == updated_object.id, do: updated_object, else: obj
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("object_updated", %{object: updated_object})}
   end
 
   @doc """
@@ -2080,7 +2168,13 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     tool_categories = %{
       creation: ["create_shape", "create_text", "create_component"],
-      manipulation: ["move_shape", "move_object", "resize_shape", "resize_object", "rotate_object"],
+      manipulation: [
+        "move_shape",
+        "move_object",
+        "resize_shape",
+        "resize_object",
+        "rotate_object"
+      ],
       styling: ["change_style", "update_text"],
       organization: ["arrange_objects", "distribute_objects", "group_objects"],
       deletion: ["delete_object", "clear_canvas"]
@@ -2094,59 +2188,65 @@ defmodule CollabCanvasWeb.CanvasLive do
     **🎨 Creating Objects**
     """
 
-    creation_tools = tools
-    |> Enum.filter(fn t -> t.name in tool_categories.creation end)
-    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
-    |> Enum.join("\n")
+    creation_tools =
+      tools
+      |> Enum.filter(fn t -> t.name in tool_categories.creation end)
+      |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+      |> Enum.join("\n")
 
     output = output <> "\n" <> creation_tools
 
     output = output <> "\n\n**🔧 Manipulating Objects**\n"
 
-    manipulation_tools = tools
-    |> Enum.filter(fn t -> t.name in tool_categories.manipulation end)
-    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
-    |> Enum.join("\n")
+    manipulation_tools =
+      tools
+      |> Enum.filter(fn t -> t.name in tool_categories.manipulation end)
+      |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+      |> Enum.join("\n")
 
     output = output <> manipulation_tools
 
     output = output <> "\n\n**🎭 Styling**\n"
 
-    styling_tools = tools
-    |> Enum.filter(fn t -> t.name in tool_categories.styling end)
-    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
-    |> Enum.join("\n")
+    styling_tools =
+      tools
+      |> Enum.filter(fn t -> t.name in tool_categories.styling end)
+      |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+      |> Enum.join("\n")
 
     output = output <> styling_tools
 
     output = output <> "\n\n**📐 Organizing Objects**\n"
 
-    organization_tools = tools
-    |> Enum.filter(fn t -> t.name in tool_categories.organization end)
-    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
-    |> Enum.join("\n")
+    organization_tools =
+      tools
+      |> Enum.filter(fn t -> t.name in tool_categories.organization end)
+      |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+      |> Enum.join("\n")
 
     output = output <> organization_tools
 
     output = output <> "\n\n**🗑️ Deleting Objects**\n"
 
-    deletion_tools = tools
-    |> Enum.filter(fn t -> t.name in tool_categories.deletion end)
-    |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
-    |> Enum.join("\n")
+    deletion_tools =
+      tools
+      |> Enum.filter(fn t -> t.name in tool_categories.deletion end)
+      |> Enum.map(fn t -> "  • #{format_tool_name(t.name)}: #{t.description}" end)
+      |> Enum.join("\n")
 
     output = output <> deletion_tools
 
-    output <> """
+    output <>
+      """
 
 
-    **Example Commands:**
-    - "Create a blue rectangle at x:100 y:200"
-    - "Add 3 red circles in a row"
-    - "Arrange selected objects in a grid"
-    - "Create a login form with email and password fields"
-    - "Move the selected shape 50 pixels right"
-    """
+      **Example Commands:**
+      - "Create a blue rectangle at x:100 y:200"
+      - "Add 3 red circles in a row"
+      - "Arrange selected objects in a grid"
+      - "Create a login form with email and password fields"
+      - "Move the selected shape 50 pixels right"
+      """
   end
 
   # Helper to format tool names for display
@@ -2182,15 +2282,17 @@ defmodule CollabCanvasWeb.CanvasLive do
 
       {:api_error, status, body} ->
         # Try to extract helpful information from API error
-        error_message = case body do
-          %{"error" => %{"message" => msg}} when is_binary(msg) -> msg
-          %{"error" => msg} when is_binary(msg) -> msg
-          _ -> "API error (status #{status})"
-        end
+        error_message =
+          case body do
+            %{"error" => %{"message" => msg}} when is_binary(msg) -> msg
+            %{"error" => msg} when is_binary(msg) -> msg
+            _ -> "API error (status #{status})"
+          end
 
         cond do
           # Handle common validation errors
-          String.contains?(error_message, "Invalid") or String.contains?(error_message, "validation") ->
+          String.contains?(error_message, "Invalid") or
+              String.contains?(error_message, "validation") ->
             """
             Your command "#{command}" couldn't be processed because of a validation error:
             #{error_message}
@@ -2266,6 +2368,7 @@ defmodule CollabCanvasWeb.CanvasLive do
         content: response_text,
         timestamp: DateTime.utc_now()
       }
+
       history = [new_interaction | socket.assigns.ai_interaction_history]
       # Keep only last 20 interactions
       history = Enum.take(history, 20)
@@ -2287,6 +2390,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         # Push event to JavaScript to render labels
         response = if(show, do: "✅ Object labels shown", else: "✅ Object labels hidden")
+
         socket
         |> add_ai_response.(response)
         |> push_event("toggle_object_labels", %{show: show, labels: object_labels})
@@ -2298,7 +2402,10 @@ defmodule CollabCanvasWeb.CanvasLive do
         # AI returned no tool calls - it either doesn't understand or can't perform the action
         socket
         |> assign(:ai_command, "")
-        |> put_flash(:warning, "I couldn't perform that action. Try rephrasing your command or check if I have the right tools available.")
+        |> put_flash(
+          :warning,
+          "I couldn't perform that action. Try rephrasing your command or check if I have the right tools available."
+        )
 
       {:ok, results} when is_list(results) ->
         # Check if this is a special non-object result (like toggle_labels)
@@ -2313,9 +2420,15 @@ defmodule CollabCanvasWeb.CanvasLive do
             |> assign(:show_labels, show)
             |> put_flash(:info, if(show, do: "Object labels shown", else: "Object labels hidden"))
 
-          [%{tool: "select_objects_by_description", result: {:ok, %{selected_ids: selected_ids, description: description}}}] ->
+          [
+            %{
+              tool: tool_name,
+              result: {:ok, %{selected_ids: selected_ids, description: description}}
+            }
+          ] when tool_name in ["select_objects_by_description", "select_objects_by_filter_criteria"] ->
             # Handle semantic selection - select objects matching the description
             response = "✅ Selected #{length(selected_ids)} objects matching: #{description}"
+
             socket
             |> add_ai_response.(response)
             |> push_event("select_objects", %{object_ids: selected_ids})
@@ -2325,117 +2438,186 @@ defmodule CollabCanvasWeb.CanvasLive do
 
           _ ->
             # Separate created objects from updated objects
+            Logger.info("[AI Result] Processing #{length(results)} tool results")
+            Enum.each(results, fn result ->
+              Logger.debug("[AI Result] Tool result structure: #{inspect(Map.keys(result))}")
+              Logger.debug("[AI Result] Tool: #{Map.get(result, :tool)}")
+              if Map.has_key?(result, :created_objects) do
+                Logger.debug("[AI Result] Has created_objects field with #{length(Map.get(result, :created_objects))} items")
+              end
+            end)
+
             {created_objects, updated_objects} =
               results
               |> Enum.reduce({[], []}, fn result, {created, updated} ->
                 case result do
-                  # Handle batch create operations (count > 1)
-                  %{tool: tool, created_objects: batch_results} when tool in ["create_shape", "create_text"] and is_list(batch_results) ->
+                  # Handle batch create operations from BatchProcessor (count > 1)
+                  %{tool: tool, result: {:ok, %{objects: batch_objects}}}
+                  when tool in ["create_shape", "create_text"] and is_list(batch_objects) ->
+                    Logger.info("[AI Result] Batch create for #{tool}: extracted #{length(batch_objects)} objects")
+                    {batch_objects ++ created, updated}
+
+                  # Handle batch create operations from legacy code (count > 1)
+                  %{tool: tool, created_objects: batch_results}
+                  when tool in ["create_shape", "create_text"] and is_list(batch_results) ->
                     # Extract successful objects from batch creation
-                    batch_objects = Enum.flat_map(batch_results, fn
-                      {:ok, object} -> [object]
-                      _ -> []
-                    end)
+                    Logger.debug("[AI Result] Legacy batch create for #{tool}: #{length(batch_results)} results")
+                    batch_objects =
+                      Enum.flat_map(batch_results, fn
+                        {:ok, object} ->
+                          Logger.debug("[AI Result] Extracted batch object #{object.id}")
+                          [object]
+                        _ -> []
+                      end)
+                    Logger.info("[AI Result] Extracted #{length(batch_objects)} objects from legacy batch")
                     {batch_objects ++ created, updated}
 
                   # Handle single create operations
-                  %{tool: tool, result: {:ok, object}} when tool in ["create_shape", "create_text", "create_component"] and is_map(object) and is_map_key(object, :id) ->
+                  %{tool: tool, result: {:ok, object}}
+                  when tool in ["create_shape", "create_text", "create_component"] and
+                         is_map(object) and is_map_key(object, :id) ->
                     {[object | created], updated}
 
                   # Handle update/move/arrange operations
-                  %{tool: tool, result: {:ok, object}} when tool in ["move_object", "move_shape", "resize_object", "resize_shape", "rotate_object", "change_style", "update_text"] and is_map(object) and is_map_key(object, :id) ->
+                  %{tool: tool, result: {:ok, object}}
+                  when tool in [
+                         "move_object",
+                         "move_shape",
+                         "resize_object",
+                         "resize_shape",
+                         "rotate_object",
+                         "change_style",
+                         "update_text"
+                       ] and is_map(object) and is_map_key(object, :id) ->
                     {created, [object | updated]}
+
+                  # Handle move_objects_batch which returns updated_objects in result
+                  %{tool: "move_objects_batch", result: {:ok, %{updated_objects: batch_updated}}}
+                  when is_list(batch_updated) ->
+                    Logger.info("[AI Result] Batch move: extracted #{length(batch_updated)} objects")
+                    {created, batch_updated ++ updated}
 
                   # Handle arrange_objects which returns a success map
                   %{tool: "arrange_objects", result: {:ok, _success_map}, input: input} ->
                     # Fetch the actual updated objects from the database
                     object_ids = Map.get(input, "object_ids", [])
-                    arranged_objects = Enum.map(object_ids, fn id ->
-                      Canvases.get_object(id)
-                    end) |> Enum.reject(&is_nil/1)
+
+                    arranged_objects =
+                      Enum.map(object_ids, fn id ->
+                        Canvases.get_object(id)
+                      end)
+                      |> Enum.reject(&is_nil/1)
+
                     {created, arranged_objects ++ updated}
+
+                  # Handle change_layer_order which broadcasts :objects_reordered itself
+                  # No need to include in updated list, just acknowledge success
+                  %{tool: "change_layer_order", result: {:ok, _updated_objects}} ->
+                    {created, updated}
 
                   _ ->
                     {created, updated}
                 end
               end)
 
-        # Broadcast created objects
-        Enum.each(created_objects, fn object ->
-          Phoenix.PubSub.broadcast(
-            CollabCanvas.PubSub,
-            socket.assigns.topic,
-            {:object_created, object}
-          )
-        end)
+            # Broadcast created objects
+            Logger.info("[AI Broadcast] Broadcasting #{length(created_objects)} created objects")
+            Enum.each(created_objects, fn object ->
+              Logger.debug("[AI Broadcast] Broadcasting object #{object.id}")
+              Phoenix.PubSub.broadcast(
+                CollabCanvas.PubSub,
+                socket.assigns.topic,
+                {:object_created, object}
+              )
+            end)
 
-        # Broadcast updated objects (include originating user_id to prevent self-update)
-        user_id = socket.assigns.user_id
-        Enum.each(updated_objects, fn object ->
-          Phoenix.PubSub.broadcast(
-            CollabCanvas.PubSub,
-            socket.assigns.topic,
-            {:object_updated, object, user_id}
-          )
-        end)
+            # Broadcast updated objects (include originating user_id to prevent self-update)
+            user_id = socket.assigns.user_id
 
-        # Update local state - merge created and updated
-        new_created = created_objects
-        existing_objects = socket.assigns.objects
+            Enum.each(updated_objects, fn object ->
+              Phoenix.PubSub.broadcast(
+                CollabCanvas.PubSub,
+                socket.assigns.topic,
+                {:object_updated, object, user_id}
+              )
+            end)
 
-        # Update existing objects with new data, add new objects
-        updated_ids = MapSet.new(updated_objects, & &1.id)
-        merged_objects =
-          Enum.map(existing_objects, fn obj ->
-            if MapSet.member?(updated_ids, obj.id) do
-              Enum.find(updated_objects, obj, fn updated -> updated.id == obj.id end)
-            else
-              obj
-            end
-          end)
+            # Update local state - merge created and updated
+            new_created = created_objects
+            existing_objects = socket.assigns.objects
 
-        final_objects = new_created ++ merged_objects
+            # Update existing objects with new data, add new objects
+            updated_ids = MapSet.new(updated_objects, & &1.id)
 
-        total_count = length(created_objects) + length(updated_objects)
+            merged_objects =
+              Enum.map(existing_objects, fn obj ->
+                if MapSet.member?(updated_ids, obj.id) do
+                  Enum.find(updated_objects, obj, fn updated -> updated.id == obj.id end)
+                else
+                  obj
+                end
+              end)
 
-        message =
-          if total_count > 0 do
-            parts = []
-            parts = if length(created_objects) > 0, do: ["created #{length(created_objects)}" | parts], else: parts
-            parts = if length(updated_objects) > 0, do: ["updated #{length(updated_objects)}" | parts], else: parts
-            "AI #{Enum.join(Enum.reverse(parts), " and ")} object(s) successfully"
-          else
-            "AI command processed (check canvas for results)"
-          end
+            final_objects = new_created ++ merged_objects
 
-        # Push created objects to JavaScript
-        socket_with_created = Enum.reduce(created_objects, socket, fn object, acc_socket ->
-          push_event(acc_socket, "object_created", %{object: object})
-        end)
+            total_count = length(created_objects) + length(updated_objects)
 
-        # Push updated objects to JavaScript for immediate rendering with animation
-        socket_with_all = Enum.reduce(updated_objects, socket_with_created, fn object, acc_socket ->
-          push_event(acc_socket, "object_updated", %{object: object, animate: true})
-        end)
+            message =
+              if total_count > 0 do
+                parts = []
 
-        socket_with_all
-        |> add_ai_response.(message)
-        |> assign(:objects, final_objects)
-        |> assign(:ai_command, "")
-        |> put_flash(:info, message)
+                parts =
+                  if length(created_objects) > 0,
+                    do: ["created #{length(created_objects)}" | parts],
+                    else: parts
+
+                parts =
+                  if length(updated_objects) > 0,
+                    do: ["updated #{length(updated_objects)}" | parts],
+                    else: parts
+
+                "AI #{Enum.join(Enum.reverse(parts), " and ")} object(s) successfully"
+              else
+                "AI command processed (check canvas for results)"
+              end
+
+            # Push created objects to JavaScript
+            socket_with_created =
+              Enum.reduce(created_objects, socket, fn object, acc_socket ->
+                push_event(acc_socket, "object_created", %{object: object})
+              end)
+
+            # Push updated objects to JavaScript for immediate rendering with animation
+            socket_with_all =
+              Enum.reduce(updated_objects, socket_with_created, fn object, acc_socket ->
+                push_event(acc_socket, "object_updated", %{object: object, animate: true})
+              end)
+
+            socket_with_all
+            |> add_ai_response.(message)
+            |> assign(:objects, final_objects)
+            |> assign(:ai_command, "")
+            |> put_flash(:info, message)
         end
 
       {:error, :canvas_not_found} ->
-        clarifying_question = generate_clarifying_question(:canvas_not_found, socket.assigns.ai_command)
+        clarifying_question =
+          generate_clarifying_question(:canvas_not_found, socket.assigns.ai_command)
+
         socket
         |> add_ai_response.(clarifying_question)
         |> put_flash(:error, "Canvas not found")
 
       {:error, :missing_api_key} ->
-        clarifying_question = generate_clarifying_question(:missing_api_key, socket.assigns.ai_command)
+        clarifying_question =
+          generate_clarifying_question(:missing_api_key, socket.assigns.ai_command)
+
         socket
         |> add_ai_response.(clarifying_question)
-        |> put_flash(:error, "AI API key not configured. Please set CLAUDE_API_KEY environment variable.")
+        |> put_flash(
+          :error,
+          "AI API key not configured. Please set CLAUDE_API_KEY environment variable."
+        )
 
       {:error, {:api_error, status, body}} ->
         Logger.error("AI API error: #{status} - #{inspect(body)}")
@@ -2447,20 +2629,27 @@ defmodule CollabCanvasWeb.CanvasLive do
             _ -> "AI API error (#{status})"
           end
 
-        clarifying_question = generate_clarifying_question({:api_error, status, body}, socket.assigns.ai_command)
+        clarifying_question =
+          generate_clarifying_question({:api_error, status, body}, socket.assigns.ai_command)
+
         socket
         |> add_ai_response.(clarifying_question)
         |> put_flash(:error, error_msg)
 
       {:error, {:request_failed, reason}} ->
         Logger.error("AI request failed: #{inspect(reason)}")
-        clarifying_question = generate_clarifying_question({:request_failed, reason}, socket.assigns.ai_command)
+
+        clarifying_question =
+          generate_clarifying_question({:request_failed, reason}, socket.assigns.ai_command)
+
         socket
         |> add_ai_response.(clarifying_question)
         |> put_flash(:error, "AI request failed: #{inspect(reason)}")
 
       {:error, :invalid_response_format} ->
-        clarifying_question = generate_clarifying_question(:invalid_response_format, socket.assigns.ai_command)
+        clarifying_question =
+          generate_clarifying_question(:invalid_response_format, socket.assigns.ai_command)
+
         socket
         |> add_ai_response.(clarifying_question)
         |> put_flash(:error, "AI returned invalid response format")
@@ -2468,6 +2657,7 @@ defmodule CollabCanvasWeb.CanvasLive do
       {:error, reason} ->
         Logger.error("AI command failed: #{inspect(reason)}")
         clarifying_question = generate_clarifying_question(reason, socket.assigns.ai_command)
+
         socket
         |> add_ai_response.(clarifying_question)
         |> put_flash(:error, "AI command failed: #{inspect(reason)}")
@@ -2493,8 +2683,8 @@ defmodule CollabCanvasWeb.CanvasLive do
       <.flash kind={:info} flash={@flash} />
       <.flash kind={:error} flash={@flash} />
       <.flash kind={:warning} flash={@flash} />
-
-      <!-- Toolbar -->
+      
+    <!-- Toolbar -->
       <div class="w-16 bg-white border-r border-gray-200 flex flex-col items-center py-4 space-y-2">
         <button
           phx-click="select_tool"
@@ -2585,11 +2775,11 @@ defmodule CollabCanvasWeb.CanvasLive do
           </svg>
           <span class="absolute right-1 bottom-1 text-[10px] font-bold opacity-50">D</span>
         </button>
-
-        <!-- Divider -->
+        
+    <!-- Divider -->
         <div class="w-10 h-px bg-gray-300 my-2"></div>
-
-        <!-- Color Picker Button -->
+        
+    <!-- Color Picker Button -->
         <button
           phx-click="toggle_color_picker"
           class={[
@@ -2600,7 +2790,12 @@ defmodule CollabCanvasWeb.CanvasLive do
           title="Color Picker"
           style={"background-color: #{@current_color}"}
         >
-          <svg class="w-6 h-6 text-white drop-shadow-md" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            class="w-6 h-6 text-white drop-shadow-md"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
@@ -2610,19 +2805,40 @@ defmodule CollabCanvasWeb.CanvasLive do
           </svg>
         </button>
 
+        <!-- Reset View Button (Fit All) -->
+        <button
+          phx-click="reset_view"
+          class="w-12 h-12 rounded-lg flex items-center justify-center transition-colors hover:bg-gray-100 active:bg-gray-200"
+          title="Reset View (Fit All Objects)"
+        >
+          <svg
+            class="w-6 h-6 text-gray-600"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+            />
+          </svg>
+        </button>
+
         <div class="flex-1"></div>
 
-        <!-- Keyboard shortcuts help -->
+    <!-- Keyboard shortcuts help -->
         <div class="text-[10px] text-gray-400 text-center px-1 leading-tight mb-2">
-          <div class="mb-1">Space + Drag = Pan</div>
-          <div class="mb-1">2-Finger Scroll = Pan</div>
-          <div>Ctrl + Scroll = Zoom</div>
+          <div class="mb-1">Middle Click + Drag = Pan</div>
+          <div class="mb-1">Shift + Scroll = Pan</div>
+          <div>Scroll = Zoom</div>
         </div>
-
-        <!-- Online Users -->
+        
+    <!-- Online Users -->
         <div class="border-t border-gray-200 pt-2 mt-2">
           <div class="text-[10px] text-gray-500 text-center mb-2 font-medium">
-            ONLINE (<%= map_size(@presences) %>)
+            ONLINE ({map_size(@presences)})
           </div>
           <%= for {user_id, %{metas: [meta | _]}} <- @presences do %>
             <div
@@ -2630,21 +2846,22 @@ defmodule CollabCanvasWeb.CanvasLive do
               style={"background-color: #{meta.color}"}
               title={"#{meta.email}#{if user_id == @user_id, do: " (You)", else: ""}"}
             >
-              <%= String.first(meta.email || meta.name || "?") %>
+              {String.first(meta.email || meta.name || "?")}
               <%= if user_id == @user_id do %>
-                <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+                <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white">
+                </div>
               <% end %>
             </div>
           <% end %>
         </div>
       </div>
-
-      <!-- Layers Panel -->
+      
+    <!-- Layers Panel -->
       <div class="w-64 bg-white border-r border-gray-200 flex flex-col">
         <div class="p-3 border-b border-gray-200">
           <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-gray-800">Layers</h2>
-            <span class="text-xs text-gray-500"><%= length(@objects) %> total</span>
+            <span class="text-xs text-gray-500">{length(@objects)} total</span>
           </div>
           <!-- Search/Filter Input -->
           <input
@@ -2655,31 +2872,34 @@ defmodule CollabCanvasWeb.CanvasLive do
             phx-debounce="300"
           />
         </div>
-
-        <!-- Layer List -->
+        
+    <!-- Layer List -->
         <div class="flex-1 overflow-y-auto p-2">
           <%= if length(@objects) == 0 do %>
             <p class="text-xs text-gray-500 text-center mt-4">No objects yet</p>
           <% else %>
-            <%
-              # Sort all objects by z-index (descending = front to back)
-              sorted_objects = @objects
-                |> Enum.sort_by(& &1.z_index, :desc)
+            <% # Sort all objects by z-index (descending = front to back)
+            sorted_objects =
+              @objects
+              |> Enum.sort_by(& &1.z_index, :desc)
 
-              # Add position numbers (1 = front-most)
-              objects_with_position = sorted_objects
-                |> Enum.with_index(1)
-                |> Enum.map(fn {obj, pos} -> {obj, pos} end)
+            # Add position numbers (1 = front-most)
+            objects_with_position =
+              sorted_objects
+              |> Enum.with_index(1)
+              |> Enum.map(fn {obj, pos} -> {obj, pos} end)
 
-              # Get selected object IDs
-              selected_ids = @selected_object_ids
+            # Get selected object IDs
+            selected_ids = @selected_object_ids
 
-              # Determine which objects to show
-              # If there's a selected object, show context around it (10 before, 10 after)
-              # Otherwise show top 50
-              objects_to_display = if MapSet.size(selected_ids) > 0 do
+            # Determine which objects to show
+            # If there's a selected object, show context around it (10 before, 10 after)
+            # Otherwise show top 50
+            objects_to_display =
+              if MapSet.size(selected_ids) > 0 do
                 # Find first selected object's position
-                selected_pos = objects_with_position
+                selected_pos =
+                  objects_with_position
                   |> Enum.find_index(fn {obj, _pos} -> MapSet.member?(selected_ids, obj.id) end)
 
                 if selected_pos do
@@ -2694,27 +2914,24 @@ defmodule CollabCanvasWeb.CanvasLive do
                 Enum.take(objects_with_position, 50)
               end
 
-              total_count = length(objects_with_position)
-              showing_count = length(objects_to_display)
-              hidden_count = total_count - showing_count
-            %>
-
-            <!-- Layer stacking info -->
+            total_count = length(objects_with_position)
+            showing_count = length(objects_to_display)
+            hidden_count = total_count - showing_count %>
+            
+    <!-- Layer stacking info -->
             <div class="mb-2 px-1">
               <div class="text-[10px] text-gray-500">
-                Showing <%= showing_count %> of <%= total_count %> layers
+                Showing {showing_count} of {total_count} layers
                 <%= if hidden_count > 0 do %>
-                  <span class="text-gray-400">(+<%= hidden_count %> hidden)</span>
+                  <span class="text-gray-400">(+{hidden_count} hidden)</span>
                 <% end %>
               </div>
             </div>
-
-            <!-- All Objects by Layer Order -->
+            
+    <!-- All Objects by Layer Order -->
             <%= for {object, position} <- objects_to_display do %>
-              <%
-                decoded_data = Jason.decode!(object.data)
-                is_selected = MapSet.member?(selected_ids, object.id)
-              %>
+              <% decoded_data = Jason.decode!(object.data)
+              is_selected = MapSet.member?(selected_ids, object.id) %>
               <div
                 id={"layer-item-#{object.id}"}
                 phx-click="select_layer"
@@ -2722,7 +2939,10 @@ defmodule CollabCanvasWeb.CanvasLive do
                 class={[
                   "layer-item group relative px-2 py-2 mb-1 rounded-md cursor-pointer transition-colors",
                   "hover:bg-gray-100 flex items-center gap-2",
-                  if(is_selected, do: "bg-blue-50 border border-blue-300", else: "border border-transparent")
+                  if(is_selected,
+                    do: "bg-blue-50 border border-blue-300",
+                    else: "border border-transparent"
+                  )
                 ]}
                 data-layer-id={object.id}
               >
@@ -2732,38 +2952,66 @@ defmodule CollabCanvasWeb.CanvasLive do
                     "text-[10px] font-mono font-semibold",
                     if(is_selected, do: "text-blue-600", else: "text-gray-400")
                   ]}>
-                    #<%= position %>
+                    #{position}
                   </span>
                 </div>
-
-                <!-- Object Type Icon -->
+                
+    <!-- Object Type Icon -->
                 <div class="flex-shrink-0 w-5 h-5 flex items-center justify-center">
                   <%= case object.type do %>
                     <% "rectangle" -> %>
-                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg
+                        class="w-4 h-4 text-gray-600"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
                         <rect x="4" y="6" width="16" height="12" stroke-width="2" rx="2" />
                       </svg>
                     <% "circle" -> %>
-                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg
+                        class="w-4 h-4 text-gray-600"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
                         <circle cx="12" cy="12" r="8" stroke-width="2" />
                       </svg>
                     <% "text" -> %>
-                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+                      <svg
+                        class="w-4 h-4 text-gray-600"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
+                        />
                       </svg>
                     <% _ -> %>
-                      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg
+                        class="w-4 h-4 text-gray-600"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
                         <rect x="3" y="3" width="18" height="18" stroke-width="2" rx="2" />
                       </svg>
                   <% end %>
                 </div>
-
-                <!-- Object Info -->
+                
+    <!-- Object Info -->
                 <div class="flex-1 min-w-0">
                   <div class="text-xs font-medium text-gray-800 truncate">
-                    <%= String.capitalize(object.type) %>
+                    {String.capitalize(object.type)}
                     <%= if object.type == "text" && decoded_data["text"] do %>
-                      - "<%= String.slice(decoded_data["text"], 0..15) %><%= if String.length(decoded_data["text"]) > 15, do: "..." %>"
+                      - "{String.slice(decoded_data["text"], 0..15)}{if String.length(
+                                                                          decoded_data["text"]
+                                                                        ) > 15,
+                                                                        do: "..."}"
                     <% end %>
                   </div>
                   <div class="text-[10px] text-gray-500">
@@ -2773,17 +3021,21 @@ defmodule CollabCanvasWeb.CanvasLive do
                       <%= if position == total_count do %>
                         <span class="text-orange-600 font-semibold">Back</span>
                       <% else %>
-                        z: <%= Float.round(object.z_index, 1) %>
+                        z: {Float.round(object.z_index, 1)}
                       <% end %>
                     <% end %>
                   </div>
                 </div>
-
-                <!-- Lock Indicator -->
+                
+    <!-- Lock Indicator -->
                 <%= if object.locked_by do %>
                   <div class="flex-shrink-0">
                     <svg class="w-3 h-3 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-                      <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+                      <path
+                        fill-rule="evenodd"
+                        d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+                        clip-rule="evenodd"
+                      />
                     </svg>
                   </div>
                 <% end %>
@@ -2791,8 +3043,8 @@ defmodule CollabCanvasWeb.CanvasLive do
             <% end %>
           <% end %>
         </div>
-
-        <!-- Layer Controls Help -->
+        
+    <!-- Layer Controls Help -->
         <div class="border-t border-gray-200 p-3">
           <div class="text-[10px] text-gray-500 space-y-1">
             <div>Right-click for options</div>
@@ -2803,15 +3055,15 @@ defmodule CollabCanvasWeb.CanvasLive do
           </div>
         </div>
       </div>
-
-      <!-- Main Canvas Area -->
+      
+    <!-- Main Canvas Area -->
       <div class="flex-1 flex flex-col">
         <!-- Top Bar -->
         <div class="h-14 bg-white border-b border-gray-200 flex items-center px-4">
-          <h1 class="text-lg font-semibold text-gray-800"><%= @canvas.name %></h1>
+          <h1 class="text-lg font-semibold text-gray-800">{@canvas.name}</h1>
           <div class="flex-1"></div>
           <span class="text-sm text-gray-500">
-            Canvas ID: <%= @canvas_id %>
+            Canvas ID: {@canvas_id}
           </span>
         </div>
         <!-- Canvas Container -->
@@ -2839,11 +3091,13 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         <div class="flex-1 flex flex-col">
           <!-- AI Interaction History -->
-          <div class="flex-1 p-4 overflow-y-auto border-b border-gray-200">
+          <div class="p-4 border-b border-gray-200 max-h-96 overflow-y-auto">
             <h3 class="text-sm font-medium text-gray-700 mb-3">AI Interaction History</h3>
             <div class="space-y-2 flex flex-col-reverse">
               <%= if length(@ai_interaction_history) == 0 do %>
-                <p class="text-sm text-gray-500 italic">No interactions yet. Enter a command below to get started.</p>
+                <p class="text-sm text-gray-500 italic">
+                  No interactions yet. Enter a command below to get started.
+                </p>
               <% else %>
                 <%= for interaction <- @ai_interaction_history do %>
                   <div class={[
@@ -2863,184 +3117,185 @@ defmodule CollabCanvasWeb.CanvasLive do
                           AI:
                         <% end %>
                       </span>
-                      <span class="flex-1 text-gray-700"><%= interaction.content %></span>
+                      <span class="flex-1 text-gray-700">{interaction.content}</span>
                     </div>
                     <div class="text-xs text-gray-500 mt-1">
-                      <%= Calendar.strftime(interaction.timestamp, "%H:%M:%S") %>
+                      {Calendar.strftime(interaction.timestamp, "%H:%M:%S")}
                     </div>
                   </div>
                 <% end %>
               <% end %>
             </div>
           </div>
-
-          <!-- AI Command Input -->
+          
+    <!-- AI Command Input -->
           <div class="p-4">
             <div class="space-y-4">
               <!-- AI Command Input -->
-            <form phx-change="ai_command_change">
-              <label class="block text-sm font-medium text-gray-700 mb-2">
-                Command
-              </label>
-              <div class="relative">
-                <textarea
-                  id="ai-command-input"
-                  name="value"
-                  value={@ai_command}
-                  disabled={@ai_loading}
-                  phx-hook="AICommandInput"
-                  class={[
-                    "w-full px-3 py-2 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none",
-                    @ai_loading && "bg-gray-50 cursor-not-allowed"
-                  ]}
-                  rows="4"
-                  placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle' (Enter to submit, Shift+Enter for new line)"
-                ><%= @ai_command %></textarea>
+              <form phx-change="ai_command_change">
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                  Command
+                </label>
+                <div class="relative">
+                  <textarea
+                    id="ai-command-input"
+                    name="value"
+                    value={@ai_command}
+                    disabled={@ai_loading}
+                    phx-hook="AICommandInput"
+                    class={[
+                      "w-full px-3 py-2 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none",
+                      @ai_loading && "bg-gray-50 cursor-not-allowed"
+                    ]}
+                    rows="4"
+                    placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle' (Enter to submit, Shift+Enter for new line)"
+                  ><%= @ai_command %></textarea>
+                  
+    <!-- Voice Input Button (Push-to-Talk) -->
+                  <button
+                    type="button"
+                    id="voice-input-button"
+                    phx-hook="VoiceInput"
+                    class="absolute right-2 top-2 p-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+                    title="Hold to speak (push-to-talk)"
+                    disabled={@ai_loading}
+                  >
+                    <svg
+                      class="w-5 h-5 mic-icon"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                      />
+                    </svg>
+                    <span class="listening-indicator hidden absolute -top-1 -right-1 h-3 w-3">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75">
+                      </span>
+                      <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                    </span>
+                  </button>
+                </div>
+              </form>
 
-                <!-- Voice Input Button (Push-to-Talk) -->
-                <button
-                  type="button"
-                  id="voice-input-button"
-                  phx-hook="VoiceInput"
-                  class="absolute right-2 top-2 p-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors"
-                  title="Hold to speak (push-to-talk)"
-                  disabled={@ai_loading}
-                >
+              <button
+                id="ai-execute-button"
+                phx-click="execute_ai_command"
+                phx-value-command={@ai_command}
+                disabled={@ai_command == "" || @ai_loading}
+                class={[
+                  "w-full py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2",
+                  (@ai_command == "" || @ai_loading) &&
+                    "bg-gray-300 text-gray-500 cursor-not-allowed",
+                  @ai_command != "" && !@ai_loading &&
+                    "bg-blue-600 text-white hover:bg-blue-700"
+                ]}
+              >
+                <%= if @ai_loading do %>
                   <svg
-                    class="w-5 h-5 mic-icon"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                    class="animate-spin h-5 w-5"
                     xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
                   >
+                    <circle
+                      class="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      stroke-width="4"
+                    >
+                    </circle>
                     <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                    />
+                      class="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    >
+                    </path>
                   </svg>
-                  <span class="listening-indicator hidden absolute -top-1 -right-1 h-3 w-3">
-                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                    <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                  </span>
-                </button>
+                  Processing...
+                <% else %>
+                  Generate
+                <% end %>
+              </button>
+            </div>
+            <!-- Example Commands -->
+            <div class="mt-6">
+              <h3 class="text-sm font-medium text-gray-700 mb-2">Example Commands:</h3>
+              <ul class="text-sm text-gray-600 space-y-1">
+                <li>• "Create a rectangle"</li>
+                <li>• "Add a circle"</li>
+                <li>• "Make a blue square"</li>
+                <li class="text-blue-600 font-medium">• "Arrange selected horizontally"</li>
+                <li class="text-blue-600 font-medium">• "Align selected objects to top"</li>
+                <li class="text-blue-600 font-medium">• "Distribute vertically with 20px spacing"</li>
+              </ul>
+              <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p class="text-xs text-blue-700">
+                  Tip: Select multiple objects (Shift+click) before using layout commands!
+                </p>
               </div>
-            </form>
-
-            <button
-              id="ai-execute-button"
-              phx-click="execute_ai_command"
-              phx-value-command={@ai_command}
-              disabled={@ai_command == "" || @ai_loading}
-              class={[
-                "w-full py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2",
-                (@ai_command == "" || @ai_loading) &&
-                  "bg-gray-300 text-gray-500 cursor-not-allowed",
-                @ai_command != "" && !@ai_loading &&
-                  "bg-blue-600 text-white hover:bg-blue-700"
-              ]}
-            >
-              <%= if @ai_loading do %>
-                <svg
-                  class="animate-spin h-5 w-5"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    class="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    stroke-width="4"
-                  >
-                  </circle>
-                  <path
-                    class="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  >
-                  </path>
-                </svg>
-                Processing...
-              <% else %>
-                Generate
-              <% end %>
-            </button>
+            </div>
           </div>
-          <!-- Example Commands -->
-          <div class="mt-6">
-            <h3 class="text-sm font-medium text-gray-700 mb-2">Example Commands:</h3>
-            <ul class="text-sm text-gray-600 space-y-1">
-              <li>• "Create a rectangle"</li>
-              <li>• "Add a circle"</li>
-              <li>• "Make a blue square"</li>
-              <li class="text-blue-600 font-medium">• "Arrange selected horizontally"</li>
-              <li class="text-blue-600 font-medium">• "Align selected objects to top"</li>
-              <li class="text-blue-600 font-medium">• "Distribute vertically with 20px spacing"</li>
-            </ul>
-            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <p class="text-xs text-blue-700">
-                Tip: Select multiple objects (Shift+click) before using layout commands!
-              </p>
+          <!-- Objects List -->
+          <div class="border-t border-gray-200 p-4">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-medium text-gray-700">
+                Objects ({length(@objects)})
+              </h3>
+              <!-- Show Labels Toggle -->
+              <button
+                phx-click="toggle_labels"
+                class="flex items-center gap-2 group"
+                title={if @show_labels, do: "Hide object labels", else: "Show object labels"}
+              >
+                <span class="text-xs text-gray-600 group-hover:text-gray-900">Labels</span>
+                <div class={[
+                  "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                  @show_labels && "bg-blue-600",
+                  !@show_labels && "bg-gray-300"
+                ]}>
+                  <span class={[
+                    "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                    @show_labels && "translate-x-5",
+                    !@show_labels && "translate-x-1"
+                  ]} />
+                </div>
+              </button>
+            </div>
+            <div class="space-y-1 max-h-40 overflow-y-auto">
+              <%= for object <- @objects do %>
+                <div class="flex items-center justify-between text-sm py-1">
+                  <span class="text-gray-600">{object.type}</span>
+                  <button
+                    phx-click="delete_object"
+                    phx-value-id={object.id}
+                    class="text-red-600 hover:text-red-800"
+                    title="Delete"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              <% end %>
             </div>
           </div>
         </div>
-        <!-- Objects List -->
-        <div class="border-t border-gray-200 p-4">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-medium text-gray-700">
-              Objects (<%= length(@objects) %>)
-            </h3>
-            <!-- Show Labels Toggle -->
-            <button
-              phx-click="toggle_labels"
-              class="flex items-center gap-2 group"
-              title={if @show_labels, do: "Hide object labels", else: "Show object labels"}
-            >
-              <span class="text-xs text-gray-600 group-hover:text-gray-900">Labels</span>
-              <div class={[
-                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-                @show_labels && "bg-blue-600",
-                !@show_labels && "bg-gray-300"
-              ]}>
-                <span class={[
-                  "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
-                  @show_labels && "translate-x-5",
-                  !@show_labels && "translate-x-1"
-                ]} />
-              </div>
-            </button>
-          </div>
-          <div class="space-y-1 max-h-40 overflow-y-auto">
-            <%= for object <- @objects do %>
-              <div class="flex items-center justify-between text-sm py-1">
-                <span class="text-gray-600"><%= object.type %></span>
-                <button
-                  phx-click="delete_object"
-                  phx-value-id={object.id}
-                  class="text-red-600 hover:text-red-800"
-                  title="Delete"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-              </div>
-            <% end %>
-          </div>
-        </div>
       </div>
-    </div>
-
-      <!-- Color Picker Popup -->
+      
+    <!-- Color Picker Popup -->
       <%= if @show_color_picker do %>
         <div class="fixed inset-0 z-50">
           <div class="absolute inset-0 bg-black opacity-25" phx-click="toggle_color_picker"></div>

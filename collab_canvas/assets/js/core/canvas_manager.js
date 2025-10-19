@@ -947,7 +947,10 @@ export class CanvasManager {
 
             this.addToSelection(recreatedObject);
             this.selectedObjects.add(recreatedObject);
-            // Don't create selection box - it should already exist
+
+            // Recreate selection box to match new object properties (rotation, size, etc.)
+            // The old selection box may not match if the object was rotated/resized
+            this.createSelectionBox(recreatedObject);
           }
         }
 
@@ -1794,15 +1797,28 @@ export class CanvasManager {
   }
 
   /**
-   * Handle mouse wheel for zoom and pan
+   * Handle mouse wheel for zoom and pan (Figma-like controls)
    * @param {WheelEvent} event
    */
   handleWheel(event) {
     event.preventDefault();
 
-    // Ctrl/Cmd+wheel = zoom, otherwise pan
-    if (event.ctrlKey || event.metaKey) {
-      // Zoom
+    // Shift+wheel = pan, otherwise zoom (like Figma)
+    if (event.shiftKey) {
+      // Pan with Shift held
+      this.viewOffset.x -= event.deltaX || event.deltaY;
+      this.viewOffset.y -= event.deltaY;
+      this.objectContainer.x = this.viewOffset.x;
+      this.objectContainer.y = this.viewOffset.y;
+      this.labelContainer.x = this.viewOffset.x;
+      this.labelContainer.y = this.viewOffset.y;
+      this.cursorContainer.x = this.viewOffset.x;
+      this.cursorContainer.y = this.viewOffset.y;
+
+      // Emit viewport changed event for saving
+      this.emit('viewport_changed');
+    } else {
+      // Zoom with scroll wheel (default behavior, like Figma)
       const delta = event.deltaY > 0 ? 0.9 : 1.1;
       const newZoom = Math.min(Math.max(this.zoomLevel * delta, 0.1), 5);
 
@@ -1815,22 +1831,6 @@ export class CanvasManager {
       this.emit('viewport_changed');
 
       // Debounced culling during zoom (disabled for now)
-      // this.debouncedCullUpdate();
-    } else {
-      // Pan with trackpad scroll or mouse wheel
-      this.viewOffset.x -= event.deltaX;
-      this.viewOffset.y -= event.deltaY;
-      this.objectContainer.x = this.viewOffset.x;
-      this.objectContainer.y = this.viewOffset.y;
-      this.labelContainer.x = this.viewOffset.x;
-      this.labelContainer.y = this.viewOffset.y;
-      this.cursorContainer.x = this.viewOffset.x;
-      this.cursorContainer.y = this.viewOffset.y;
-
-      // Emit viewport changed event for saving
-      this.emit('viewport_changed');
-
-      // Debounced culling during pan (disabled for now)
       // this.debouncedCullUpdate();
     }
   }
@@ -2509,6 +2509,40 @@ export class CanvasManager {
     // Clear current selection and select this object
     this.clearSelection();
     this.setSelection(object);
+  }
+
+  /**
+   * Select multiple objects by their IDs (for semantic selection)
+   * @param {number[]} objectIds - Array of object IDs to select
+   */
+  selectObjectsByIds(objectIds) {
+    console.log('[CanvasManager] selectObjectsByIds:', objectIds);
+
+    // Clear current selection first
+    this.clearSelection();
+
+    // Select each object
+    objectIds.forEach(objectId => {
+      const object = this.objects.get(objectId);
+
+      if (!object) {
+        console.warn('[CanvasManager] selectObjectsByIds: Object not found:', objectId);
+        return;
+      }
+
+      // Skip if already selected
+      if (this.selectedObjects.has(object)) {
+        return;
+      }
+
+      // Add to selection (same pattern as lasso selection)
+      this.addToSelection(object);
+      this.selectedObjects.add(object);
+      this.emit('lock_object', { object_id: object.objectId });
+      this.createSelectionBox(object);
+    });
+
+    console.log('[CanvasManager] Multi-selection complete, selected', this.selectedObjects.size, 'objects');
   }
 
   /**
@@ -4089,5 +4123,92 @@ export class CanvasManager {
 
     // Clear all event listeners
     this.eventListeners.clear();
+  }
+
+  /**
+   * Reset view to fit all objects on screen (Figma-style "Zoom to Fit")
+   * Calculates bounding box of all objects and adjusts viewport to show them all
+   */
+  resetView() {
+    // Get all objects
+    const objects = Array.from(this.objects.values());
+
+    if (objects.length === 0) {
+      // No objects - reset to default view
+      this.zoomLevel = 1;
+      this.viewOffset = { x: 0, y: 0 };
+
+      this.objectContainer.scale.set(1, 1);
+      this.objectContainer.x = 0;
+      this.objectContainer.y = 0;
+
+      this.labelContainer.scale.set(1, 1);
+      this.labelContainer.x = 0;
+      this.labelContainer.y = 0;
+
+      this.cursorContainer.scale.set(1, 1);
+      this.cursorContainer.x = 0;
+      this.cursorContainer.y = 0;
+
+      this.emit('viewport_changed');
+      return;
+    }
+
+    // Calculate bounding box of all objects
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    objects.forEach(obj => {
+      const bounds = obj.pixiSprite.getBounds();
+      minX = Math.min(minX, bounds.x);
+      minY = Math.min(minY, bounds.y);
+      maxX = Math.max(maxX, bounds.x + bounds.width);
+      maxY = Math.max(maxY, bounds.y + bounds.height);
+    });
+
+    // Add padding (50px on each side)
+    const padding = 50;
+    minX -= padding;
+    minY -= padding;
+    maxX += padding;
+    maxY += padding;
+
+    // Calculate required zoom to fit all objects
+    const boundsWidth = maxX - minX;
+    const boundsHeight = maxY - minY;
+    const canvasWidth = this.canvasEl.clientWidth;
+    const canvasHeight = this.canvasEl.clientHeight;
+
+    const zoomX = canvasWidth / boundsWidth;
+    const zoomY = canvasHeight / boundsHeight;
+    const newZoom = Math.min(zoomX, zoomY, 1); // Max zoom of 1x (100%)
+
+    // Calculate center position
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    // Calculate offset to center the bounding box
+    const offsetX = (canvasWidth / 2) - (centerX * newZoom);
+    const offsetY = (canvasHeight / 2) - (centerY * newZoom);
+
+    // Apply zoom and offset
+    this.zoomLevel = newZoom;
+    this.viewOffset = { x: offsetX, y: offsetY };
+
+    this.objectContainer.scale.set(newZoom, newZoom);
+    this.objectContainer.x = offsetX;
+    this.objectContainer.y = offsetY;
+
+    this.labelContainer.scale.set(newZoom, newZoom);
+    this.labelContainer.x = offsetX;
+    this.labelContainer.y = offsetY;
+
+    this.cursorContainer.scale.set(newZoom, newZoom);
+    this.cursorContainer.x = offsetX;
+    this.cursorContainer.y = offsetY;
+
+    this.emit('viewport_changed');
   }
 }

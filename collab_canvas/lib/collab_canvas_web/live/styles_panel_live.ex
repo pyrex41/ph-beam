@@ -351,8 +351,8 @@ defmodule CollabCanvasWeb.StylesPanelLive do
         </div>
         <p class="text-sm text-gray-500">Manage colors, text styles, and effects</p>
       </div>
-
-      <!-- Export Format Selector -->
+      
+    <!-- Export Format Selector -->
       <div class="px-4 py-2 border-b border-gray-200 bg-gray-50">
         <label class="block text-xs font-medium text-gray-700 mb-1">Export Format</label>
         <select
@@ -366,8 +366,8 @@ defmodule CollabCanvasWeb.StylesPanelLive do
           <option value="js" selected={@export_format == "js"}>JavaScript/TypeScript</option>
         </select>
       </div>
-
-      <!-- Styles List -->
+      
+    <!-- Styles List -->
       <div class="flex-1 overflow-y-auto">
         <!-- Color Styles Section -->
         <div class="p-4 border-b border-gray-200">
@@ -393,7 +393,8 @@ defmodule CollabCanvasWeb.StylesPanelLive do
                   "aspect-square rounded-lg cursor-pointer border-2 transition-all group relative",
                   @selected_style && @selected_style.id == style.id &&
                     "border-blue-500 ring-2 ring-blue-200",
-                  (!@selected_style || @selected_style.id != style.id) && "border-gray-200 hover:border-gray-300"
+                  (!@selected_style || @selected_style.id != style.id) &&
+                    "border-gray-200 hover:border-gray-300"
                 ]}
                 style={"background-color: #{format_color(style)}"}
                 title={style.name}
@@ -405,7 +406,12 @@ defmodule CollabCanvasWeb.StylesPanelLive do
                   class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white rounded-full p-0.5 shadow-sm"
                   title="Delete"
                 >
-                  <svg class="w-3 h-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    class="w-3 h-3 text-red-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
                     <path
                       stroke-linecap="round"
                       stroke-linejoin="round"
@@ -422,8 +428,8 @@ defmodule CollabCanvasWeb.StylesPanelLive do
             <p class="text-sm text-gray-400 text-center py-4">No color styles yet</p>
           <% end %>
         </div>
-
-        <!-- Text Styles Section -->
+        
+    <!-- Text Styles Section -->
         <div class="p-4 border-b border-gray-200">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Text Styles</h3>
@@ -453,7 +459,7 @@ defmodule CollabCanvasWeb.StylesPanelLive do
               >
                 <div class="flex items-start justify-between">
                   <div class="flex-1">
-                    <div class="text-sm font-medium text-gray-900 mb-1"><%= style.name %></div>
+                    <div class="text-sm font-medium text-gray-900 mb-1">{style.name}</div>
                     <div class="text-xs text-gray-500" style={format_text_preview(style)}>
                       The quick brown fox
                     </div>
@@ -483,8 +489,8 @@ defmodule CollabCanvasWeb.StylesPanelLive do
             <p class="text-sm text-gray-400 text-center py-4">No text styles yet</p>
           <% end %>
         </div>
-
-        <!-- Effect Styles Section -->
+        
+    <!-- Effect Styles Section -->
         <div class="p-4">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Effects</h3>
@@ -513,7 +519,7 @@ defmodule CollabCanvasWeb.StylesPanelLive do
                 ]}
               >
                 <div class="flex items-center justify-between">
-                  <div class="text-sm font-medium text-gray-900"><%= style.name %></div>
+                  <div class="text-sm font-medium text-gray-900">{style.name}</div>
                   <button
                     phx-click="delete_style"
                     phx-value-id={style.id}
@@ -540,14 +546,14 @@ defmodule CollabCanvasWeb.StylesPanelLive do
           <% end %>
         </div>
       </div>
-
-      <!-- Style Creation Modal -->
+      
+    <!-- Style Creation Modal -->
       <%= if @show_modal do %>
         <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
             <div class="p-4 border-b border-gray-200 flex items-center justify-between">
               <h3 class="text-lg font-semibold text-gray-900">
-                Create <%= String.capitalize(@modal_type) %> Style
+                Create {String.capitalize(@modal_type)} Style
               </h3>
               <button
                 phx-click="close_modal"
@@ -567,8 +573,8 @@ defmodule CollabCanvasWeb.StylesPanelLive do
 
             <form phx-submit="create_style" phx-target={@myself} class="p-4 space-y-4">
               <input type="hidden" name="type" value={@modal_type} />
-
-              <!-- Name Field -->
+              
+    <!-- Name Field -->
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
                 <input
@@ -579,8 +585,8 @@ defmodule CollabCanvasWeb.StylesPanelLive do
                   placeholder="e.g., Primary Blue"
                 />
               </div>
-
-              <!-- Category Field -->
+              
+    <!-- Category Field -->
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Category</label>
                 <select
@@ -604,8 +610,8 @@ defmodule CollabCanvasWeb.StylesPanelLive do
                   <% end %>
                 </select>
               </div>
-
-              <!-- Type-specific Fields -->
+              
+    <!-- Type-specific Fields -->
               <%= if @modal_type == "color" do %>
                 <div class="grid grid-cols-4 gap-2">
                   <div>
@@ -756,8 +762,8 @@ defmodule CollabCanvasWeb.StylesPanelLive do
                   />
                 </div>
               <% end %>
-
-              <!-- Actions -->
+              
+    <!-- Actions -->
               <div class="flex items-center justify-end gap-2 pt-4">
                 <button
                   type="button"

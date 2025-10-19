@@ -317,7 +317,7 @@ defmodule CollabCanvasWeb.DashboardLive do
           <div>
             <h1 class="text-3xl font-bold text-gray-900">My Canvases</h1>
             <p class="text-gray-600 mt-1">
-              Welcome back, <%= @current_user.name || @current_user.email %>
+              Welcome back, {@current_user.name || @current_user.email}
             </p>
           </div>
 
@@ -333,18 +333,18 @@ defmodule CollabCanvasWeb.DashboardLive do
             </a>
           </div>
         </header>
-
-        <!-- Create Canvas Button -->
+        
+    <!-- Create Canvas Button -->
         <div class="mb-6">
           <button
             phx-click="toggle_create_form"
             class="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-semibold"
           >
-            <%= if @show_create_form, do: "Cancel", else: "+ New Canvas" %>
+            {if @show_create_form, do: "Cancel", else: "+ New Canvas"}
           </button>
         </div>
-
-        <!-- Create Canvas Form -->
+        
+    <!-- Create Canvas Form -->
         <%= if @show_create_form do %>
           <div class="bg-white p-6 rounded-lg shadow-md mb-8">
             <h3 class="text-xl font-semibold mb-4">Create New Canvas</h3>
@@ -367,8 +367,8 @@ defmodule CollabCanvasWeb.DashboardLive do
             </form>
           </div>
         <% end %>
-
-        <!-- Canvas List -->
+        
+    <!-- Canvas List -->
         <%= if Enum.empty?(@canvases) do %>
           <div class="bg-white p-12 rounded-lg shadow-md text-center">
             <div class="text-6xl mb-4">🎨</div>
@@ -387,12 +387,12 @@ defmodule CollabCanvasWeb.DashboardLive do
           <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             <%= for canvas <- @canvases do %>
               <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
-                <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= canvas.name %></h3>
+                <h3 class="text-xl font-semibold text-gray-900 mb-2">{canvas.name}</h3>
                 <p class="text-sm text-gray-600 mb-1">
-                  Created by <%= canvas.user.name || canvas.user.email %>
+                  Created by {canvas.user.name || canvas.user.email}
                 </p>
                 <p class="text-sm text-gray-500 mb-4">
-                  Updated <%= Calendar.strftime(canvas.updated_at, "%B %d, %Y") %>
+                  Updated {Calendar.strftime(canvas.updated_at, "%B %d, %Y")}
                 </p>
 
                 <div class="flex gap-2">

@@ -41,23 +41,12 @@ export default {
       }
     });
 
-    // Optional: Add visual feedback when ready to submit
+    // Update LiveView state and button on input
     this.el.addEventListener('input', () => {
-      const hasContent = this.el.value.trim().length > 0;
+      const command = this.el.value;
 
-      // Update the submit button state if it exists
-      const submitButton = document.getElementById('ai-execute-button');
-      if (submitButton) {
-        if (hasContent) {
-          submitButton.classList.remove('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
-          submitButton.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700');
-          submitButton.disabled = false;
-        } else {
-          submitButton.classList.add('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
-          submitButton.classList.remove('bg-blue-600', 'text-white', 'hover:bg-blue-700');
-          submitButton.disabled = true;
-        }
-      }
+      // Update LiveView state so @ai_command stays in sync
+      this.pushEvent('update_ai_command', { command: command });
     });
   },
 

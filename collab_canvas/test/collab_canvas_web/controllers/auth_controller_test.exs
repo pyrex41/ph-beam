@@ -54,12 +54,13 @@ defmodule CollabCanvasWeb.AuthControllerTest do
 
     test "finds existing user instead of creating duplicate", %{conn: conn} do
       # Create initial user
-      {:ok, user1} = Accounts.create_user(%{
-        email: "existing@example.com",
-        name: "Existing",
-        provider: "auth0",
-        provider_uid: "auth0|existing"
-      })
+      {:ok, user1} =
+        Accounts.create_user(%{
+          email: "existing@example.com",
+          name: "Existing",
+          provider: "auth0",
+          provider_uid: "auth0|existing"
+        })
 
       # Try to "create" again using find_or_create
       user_params = %{
@@ -81,12 +82,13 @@ defmodule CollabCanvasWeb.AuthControllerTest do
     end
 
     test "updates last_login when user logs in again", %{conn: conn} do
-      {:ok, user} = Accounts.create_user(%{
-        email: "login@example.com",
-        name: "Login Test",
-        provider: "auth0",
-        provider_uid: "auth0|login"
-      })
+      {:ok, user} =
+        Accounts.create_user(%{
+          email: "login@example.com",
+          name: "Login Test",
+          provider: "auth0",
+          provider_uid: "auth0|login"
+        })
 
       original_login = user.last_login
 

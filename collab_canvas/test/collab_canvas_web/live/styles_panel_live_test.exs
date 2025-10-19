@@ -67,7 +67,12 @@ defmodule CollabCanvasWeb.StylesPanelLiveTest do
       }
     end
 
-    test "renders styles panel with all style types", %{canvas: canvas, color_style: color_style, text_style: text_style, effect_style: effect_style} do
+    test "renders styles panel with all style types", %{
+      canvas: canvas,
+      color_style: color_style,
+      text_style: text_style,
+      effect_style: effect_style
+    } do
       # Render component
       html =
         render_component(CollabCanvasWeb.StylesPanelLive,
@@ -531,7 +536,10 @@ defmodule CollabCanvasWeb.StylesPanelLiveTest do
       assert html =~ "line-height: 1.2"
     end
 
-    test "performance: style application completes within 50ms", %{canvas: canvas, color_style: color_style} do
+    test "performance: style application completes within 50ms", %{
+      canvas: canvas,
+      color_style: color_style
+    } do
       # Create a test object
       {:ok, object} =
         Canvases.create_object(canvas.id, "rectangle", %{

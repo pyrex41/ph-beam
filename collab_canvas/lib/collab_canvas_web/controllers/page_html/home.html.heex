@@ -9,7 +9,7 @@
       <%= if assigns[:current_user] do %>
         <div class="flex items-center gap-4">
           <span class="text-gray-700">
-            Welcome, <strong><%= @current_user.name || @current_user.email %></strong>
+            Welcome, <strong>{@current_user.name || @current_user.email}</strong>
           </span>
           <%= if @current_user.avatar do %>
             <img src={@current_user.avatar} alt="Avatar" class="w-10 h-10 rounded-full" />
@@ -36,8 +36,8 @@
         </a>
       <% end %>
     </header>
-
-    <!-- Hero Section -->
+    
+<!-- Hero Section -->
     <div class="text-center py-16">
       <h2 class="text-5xl font-bold text-gray-900 mb-6">
         Real-time Collaborative Canvas
@@ -56,8 +56,8 @@
         </a>
       <% end %>
     </div>
-
-    <!-- Features Section -->
+    
+<!-- Features Section -->
     <div class="grid md:grid-cols-3 gap-8 mt-16">
       <div class="bg-white p-8 rounded-xl shadow-md">
         <div class="text-4xl mb-4">🎨</div>
@@ -86,8 +86,8 @@
         </p>
       </div>
     </div>
-
-    <!-- Quick Start Section -->
+    
+<!-- Quick Start Section -->
     <%= if assigns[:current_user] do %>
       <div class="mt-16 bg-white p-8 rounded-xl shadow-lg">
         <h3 class="text-3xl font-bold mb-4">Quick Start</h3>

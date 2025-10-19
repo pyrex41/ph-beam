@@ -221,7 +221,9 @@ defmodule CollabCanvasWeb.ComponentsPanelLive do
   """
   @impl true
   def handle_event("drag_start", %{"component_id" => component_id}, socket) do
-    component_id = if is_binary(component_id), do: String.to_integer(component_id), else: component_id
+    component_id =
+      if is_binary(component_id), do: String.to_integer(component_id), else: component_id
+
     component = Enum.find(socket.assigns.components, &(&1.id == component_id))
 
     {:noreply, assign(socket, :dragging_component, component)}
@@ -312,7 +314,9 @@ defmodule CollabCanvasWeb.ComponentsPanelLive do
   @impl true
   def handle_event("update_component", params, socket) do
     component_id = params["component_id"]
-    component_id = if is_binary(component_id), do: String.to_integer(component_id), else: component_id
+
+    component_id =
+      if is_binary(component_id), do: String.to_integer(component_id), else: component_id
 
     changes =
       params
@@ -728,8 +732,8 @@ defmodule CollabCanvasWeb.ComponentsPanelLive do
                       d="M9 5l7 7-7 7"
                     />
                   </svg>
-                  <span class="font-medium text-gray-700 capitalize"><%= category %></span>
-                  <span class="text-xs text-gray-500">(<%= length(components) %>)</span>
+                  <span class="font-medium text-gray-700 capitalize">{category}</span>
+                  <span class="text-xs text-gray-500">({length(components)})</span>
                 </div>
               </button>
               <!-- Component Cards -->
@@ -782,8 +786,10 @@ defmodule CollabCanvasWeb.ComponentsPanelLive do
       <!-- Footer Info -->
       <div class="p-4 border-t border-gray-200 bg-gray-50">
         <div class="flex items-center justify-between text-xs text-gray-600">
-          <span><%= length(@filtered_components) %> components</span>
-          <span class="text-gray-500">Showing <%= length(@filtered_components) %> of <%= length(@components) %></span>
+          <span>{length(@filtered_components)} components</span>
+          <span class="text-gray-500">
+            Showing {length(@filtered_components)} of {length(@components)}
+          </span>
         </div>
       </div>
     </div>

@@ -88,7 +88,8 @@ defmodule CollabCanvas.AI.Themes do
           sidebar_item_border: "#86efac"
         }
 
-      _ -> # "light" or default
+      # "light" or default
+      _ ->
         %{
           bg: "#ffffff",
           border: "#e5e7eb",

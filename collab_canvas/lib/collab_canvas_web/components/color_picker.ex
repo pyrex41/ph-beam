@@ -40,7 +40,7 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     palettes = ColorPalettes.list_user_palettes(user_id)
 
     # Parse current color from hex to HSL if provided
-    {h, s, l} = assigns[:current_color] && hex_to_hsl(assigns[:current_color]) || {0, 100, 50}
+    {h, s, l} = (assigns[:current_color] && hex_to_hsl(assigns[:current_color])) || {0, 100, 50}
 
     {:ok,
      socket
@@ -143,7 +143,10 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     require Logger
 
     try do
-      Logger.info("select_color event - user_id: #{inspect(socket.assigns.user_id)}, color: #{color}")
+      Logger.info(
+        "select_color event - user_id: #{inspect(socket.assigns.user_id)}, color: #{color}"
+      )
+
       {h, s, l} = hex_to_hsl(color)
 
       # Save immediately for deliberate color selection (not slider dragging)
@@ -191,7 +194,11 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
   end
 
   @impl true
-  def handle_event("picker_square_changed", %{"saturation" => sat_str, "lightness" => light_str}, socket) do
+  def handle_event(
+        "picker_square_changed",
+        %{"saturation" => sat_str, "lightness" => light_str},
+        socket
+      ) do
     saturation = String.to_float(sat_str) |> round()
     lightness = String.to_float(light_str) |> round()
 
@@ -203,7 +210,11 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     # Schedule debounced database save
     socket = schedule_save(socket, hex_color)
 
-    {:noreply, socket |> assign(:saturation, saturation) |> assign(:lightness, lightness) |> assign(:hex_color, hex_color)}
+    {:noreply,
+     socket
+     |> assign(:saturation, saturation)
+     |> assign(:lightness, lightness)
+     |> assign(:hex_color, hex_color)}
   end
 
   @impl true
@@ -216,7 +227,12 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     case ColorPalettes.create_palette(socket.assigns.user_id, name) do
       {:ok, _palette} ->
         palettes = ColorPalettes.list_user_palettes(socket.assigns.user_id)
-        {:noreply, socket |> assign(:palettes, palettes) |> assign(:show_new_palette_form, false) |> assign(:new_palette_name, "")}
+
+        {:noreply,
+         socket
+         |> assign(:palettes, palettes)
+         |> assign(:show_new_palette_form, false)
+         |> assign(:new_palette_name, "")}
 
       {:error, _} ->
         send(self(), {:show_error, "Failed to create palette"})
@@ -309,7 +325,11 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="color-picker bg-white rounded-lg shadow-lg p-4 w-80" phx-hook="ColorPicker" id="color-picker-hook">
+    <div
+      class="color-picker bg-white rounded-lg shadow-lg p-4 w-80"
+      phx-hook="ColorPicker"
+      id="color-picker-hook"
+    >
       <div class="mb-4">
         <div class="text-sm font-medium text-gray-700 mb-2">Current Color</div>
         <div class="flex items-center gap-3">
@@ -330,8 +350,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
           </form>
         </div>
       </div>
-
-      <!-- 2D Color Picker -->
+      
+    <!-- 2D Color Picker -->
       <div class="mb-4">
         <!-- Saturation/Lightness Square -->
         <div
@@ -350,8 +370,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
           >
           </div>
         </div>
-
-        <!-- Hue Slider -->
+        
+    <!-- Hue Slider -->
         <div>
           <label class="text-xs font-medium text-gray-600 mb-1 block">Hue: {@hue}°</label>
           <form phx-change="hue_changed" phx-target={@myself}>
@@ -367,8 +387,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
           </form>
         </div>
       </div>
-
-      <!-- Action Buttons -->
+      
+    <!-- Action Buttons -->
       <div class="mb-4">
         <button
           phx-click="add_to_favorites"
@@ -378,8 +398,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
           ★ Add to Favorites
         </button>
       </div>
-
-      <!-- Recent Colors -->
+      
+    <!-- Recent Colors -->
       <%= if length(@recent_colors) > 0 do %>
         <div class="mb-4">
           <div class="text-xs font-medium text-gray-600 mb-2">Recent Colors</div>
@@ -398,8 +418,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
           </div>
         </div>
       <% end %>
-
-      <!-- Favorite Colors -->
+      
+    <!-- Favorite Colors -->
       <%= if length(@favorite_colors) > 0 do %>
         <div class="mb-4">
           <div class="text-xs font-medium text-gray-600 mb-2">Favorite Colors</div>
@@ -428,8 +448,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
           </div>
         </div>
       <% end %>
-
-      <!-- Color Palettes -->
+      
+    <!-- Color Palettes -->
       <div class="border-t border-gray-200 pt-4">
         <div class="flex items-center justify-between mb-2">
           <div class="text-xs font-medium text-gray-600">Color Palettes</div>
@@ -441,8 +461,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
             + New
           </button>
         </div>
-
-        <!-- New Palette Form -->
+        
+    <!-- New Palette Form -->
         <%= if @show_new_palette_form do %>
           <div class="mb-3 p-2 bg-gray-50 rounded border border-gray-200">
             <form phx-submit="create_palette" phx-target={@myself}>
@@ -473,10 +493,12 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
             </form>
           </div>
         <% end %>
-
-        <!-- Palettes List -->
+        
+    <!-- Palettes List -->
         <%= if length(@palettes) == 0 && !@show_new_palette_form do %>
-          <div class="text-xs text-gray-400 italic py-2">No palettes yet. Create one to get started!</div>
+          <div class="text-xs text-gray-400 italic py-2">
+            No palettes yet. Create one to get started!
+          </div>
         <% end %>
 
         <%= for palette <- @palettes do %>
@@ -509,7 +531,7 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
                   </button>
                 </form>
               <% else %>
-                <div class="text-xs font-medium text-gray-700"><%= palette.name %></div>
+                <div class="text-xs font-medium text-gray-700">{palette.name}</div>
                 <div class="flex gap-1">
                   <button
                     phx-click="add_color_to_palette"
@@ -542,8 +564,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
                 </div>
               <% end %>
             </div>
-
-            <!-- Palette Colors -->
+            
+    <!-- Palette Colors -->
             <%= if length(palette.colors) > 0 do %>
               <div class="flex flex-wrap gap-1">
                 <%= for color <- Enum.sort_by(palette.colors, & &1.position) do %>
@@ -604,29 +626,31 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     l = (max_val + min_val) / 2
 
     # Saturation
-    s = if delta == 0 do
-      0
-    else
-      delta / (1 - abs(2 * l - 1))
-    end
+    s =
+      if delta == 0 do
+        0
+      else
+        delta / (1 - abs(2 * l - 1))
+      end
 
     # Hue
-    h = if delta == 0 do
-      0
-    else
-      cond do
-        max_val == r ->
-          h_temp = (g - b) / delta
-          h_temp = if g < b, do: h_temp + 6, else: h_temp
-          60 * h_temp
+    h =
+      if delta == 0 do
+        0
+      else
+        cond do
+          max_val == r ->
+            h_temp = (g - b) / delta
+            h_temp = if g < b, do: h_temp + 6, else: h_temp
+            60 * h_temp
 
-        max_val == g ->
-          60 * ((b - r) / delta + 2)
+          max_val == g ->
+            60 * ((b - r) / delta + 2)
 
-        max_val == b ->
-          60 * ((r - g) / delta + 4)
+          max_val == b ->
+            60 * ((r - g) / delta + 4)
+        end
       end
-    end
 
     h = rem(round(h), 360)
     h = if h < 0, do: h + 360, else: h
@@ -646,16 +670,18 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     x = c * (1 - abs(:math.fmod(h_normalized, 2) - 1))
     m = l - c / 2
 
-    {r1, g1, b1} = case trunc(h_normalized) do
-      0 -> {c, x, 0}
-      1 -> {x, c, 0}
-      2 -> {0, c, x}
-      3 -> {0, x, c}
-      4 -> {x, 0, c}
-      5 -> {c, 0, x}
-      6 -> {c, 0, 0}  # Handle 360 degrees
-      _ -> {0, 0, 0}
-    end
+    {r1, g1, b1} =
+      case trunc(h_normalized) do
+        0 -> {c, x, 0}
+        1 -> {x, c, 0}
+        2 -> {0, c, x}
+        3 -> {0, x, c}
+        4 -> {x, 0, c}
+        5 -> {c, 0, x}
+        # Handle 360 degrees
+        6 -> {c, 0, 0}
+        _ -> {0, 0, 0}
+      end
 
     r = round((r1 + m) * 255)
     g = round((g1 + m) * 255)
@@ -670,10 +696,10 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
   end
 
   defp rgb_to_hex({r, g, b}) do
-    "#" <>
-      (r |> Integer.to_string(16) |> String.pad_leading(2, "0")) <>
-      (g |> Integer.to_string(16) |> String.pad_leading(2, "0")) <>
-      (b |> Integer.to_string(16) |> String.pad_leading(2, "0"))
+    ("#" <>
+       (r |> Integer.to_string(16) |> String.pad_leading(2, "0")) <>
+       (g |> Integer.to_string(16) |> String.pad_leading(2, "0")) <>
+       (b |> Integer.to_string(16) |> String.pad_leading(2, "0")))
     |> String.upcase()
   end
 

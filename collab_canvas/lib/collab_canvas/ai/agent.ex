@@ -83,6 +83,7 @@ defmodule CollabCanvas.AI.Agent do
   alias CollabCanvas.AI.ComponentBuilder
   alias CollabCanvas.AI.Layout
   alias CollabCanvas.AI.BatchProcessor
+  alias CollabCanvas.AI.CanvasStats
 
   @claude_api_url "https://api.anthropic.com/v1/messages"
   @claude_model "claude-3-5-sonnet-20241022"
@@ -95,7 +96,7 @@ defmodule CollabCanvas.AI.Agent do
   @default_openai_model "gpt-4o"
 
   @doc """
-  Executes a natural language command on a canvas.
+  Executes a natural language command on a canvas with optional viewport context.
 
   ## Parameters
     * `command` - Natural language command string (e.g., "create a red rectangle at 100,100")
@@ -124,8 +125,9 @@ defmodule CollabCanvas.AI.Agent do
 
   """
   def execute_command(command, canvas_id, selected_ids \\ [], opts \\ []) do
-    # Extract current color from options
+    # Extract options
     current_color = Keyword.get(opts, :current_color, "#000000")
+    viewport = Keyword.get(opts, :viewport, nil)
 
     # Verify canvas exists
     case Canvases.get_canvas(canvas_id) do
@@ -133,13 +135,19 @@ defmodule CollabCanvas.AI.Agent do
         {:error, :canvas_not_found}
 
       _canvas ->
-        # Build enhanced command with selection context if provided
-        enhanced_command = build_command_with_context(command, selected_ids, canvas_id, current_color)
+        # Get object count for conditional tool selection
+        all_objects = Canvases.list_objects(canvas_id)
+        object_count = length(all_objects)
+        Logger.debug("Canvas has #{object_count} objects, selecting appropriate tools")
+
+        # Build enhanced command with selection context and viewport if provided
+        enhanced_command =
+          build_command_with_context(command, selected_ids, canvas_id, current_color, viewport)
 
         Logger.info("Calling AI API with command: #{command}")
 
         # Call Claude API with function calling
-        case call_claude_api(enhanced_command) do
+        case call_claude_api(enhanced_command, object_count) do
           {:ok, {:text_response, text}} ->
             # AI returned text (e.g., asking for clarification)
             Logger.info("AI returned text response: #{text}")
@@ -202,18 +210,19 @@ defmodule CollabCanvas.AI.Agent do
       iex> call_claude_api("create shape")
       {:error, :missing_api_key}
   """
-  def call_claude_api(command) do
+  def call_claude_api(command, object_count \\ 0) do
     provider = get_ai_provider()
 
     case provider do
-      "openai" -> call_openai_api(command)
-      "groq" -> call_groq_api(command)
-      "claude" -> call_anthropic_api(command)
-      _ -> call_anthropic_api(command)  # Default to Claude
+      "openai" -> call_openai_api(command, object_count)
+      "groq" -> call_groq_api(command, object_count)
+      "claude" -> call_anthropic_api(command, object_count)
+      # Default to Claude
+      _ -> call_anthropic_api(command, object_count)
     end
   end
 
-  defp call_anthropic_api(command) do
+  defp call_anthropic_api(command, object_count) do
     api_key = System.get_env("CLAUDE_API_KEY")
 
     if is_nil(api_key) or api_key == "" or api_key == "your_key_here" do
@@ -228,7 +237,7 @@ defmodule CollabCanvas.AI.Agent do
       body = %{
         model: @claude_model,
         max_tokens: 1024,
-        tools: Tools.get_tool_definitions(),
+        tools: Tools.get_tool_definitions(object_count),
         messages: [
           %{
             role: "user",
@@ -239,6 +248,9 @@ defmodule CollabCanvas.AI.Agent do
 
       case Req.post(@claude_api_url, json: body, headers: headers) do
         {:ok, %{status: 200, body: response_body}} ->
+          Logger.info("========== RAW CLAUDE API RESPONSE ==========")
+          Logger.info(Jason.encode!(response_body, pretty: true))
+          Logger.info("=============================================")
           parse_claude_response(response_body)
 
         {:ok, %{status: status, body: body}} ->
@@ -252,7 +264,7 @@ defmodule CollabCanvas.AI.Agent do
     end
   end
 
-  defp call_groq_api(command) do
+  defp call_groq_api(command, object_count) do
     api_key = System.get_env("GROQ_API_KEY")
     model = System.get_env("GROQ_MODEL") || @default_groq_model
 
@@ -267,20 +279,25 @@ defmodule CollabCanvas.AI.Agent do
       ]
 
       # Convert Claude tool format to OpenAI function format (Groq uses OpenAI-compatible format)
-      tools = Enum.map(Tools.get_tool_definitions(), fn tool ->
-        %{
-          type: "function",
-          function: %{
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.input_schema
+      tools =
+        Enum.map(Tools.get_tool_definitions(object_count), fn tool ->
+          %{
+            type: "function",
+            function: %{
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.input_schema
+            }
           }
-        }
-      end)
+        end)
 
       body = %{
         model: model,
         messages: [
+          %{
+            role: "system",
+            content: "You are a helpful canvas assistant. Use the provided tools to create shapes, arrange objects, and manipulate the canvas based on user requests. Always use the appropriate tool for the task."
+          },
           %{
             role: "user",
             content: command
@@ -292,16 +309,26 @@ defmodule CollabCanvas.AI.Agent do
         temperature: 0.5
       }
 
-      Logger.debug("Sending request to Groq API...")
+      Logger.info("========== GROQ API REQUEST ==========")
+      Logger.info("Model: #{model}")
+      Logger.info("Messages: #{Jason.encode!(body.messages, pretty: true)}")
+      Logger.info("Tools count: #{length(tools)}")
+      Logger.info("First tool example: #{Jason.encode!(Enum.at(tools, 0), pretty: true)}")
+      Logger.info("======================================")
 
       case Req.post(@groq_api_url, json: body, headers: headers) do
         {:ok, %{status: 200, body: response_body}} ->
-          Logger.debug("Groq API responded successfully")
+          Logger.info("========== RAW GROQ API RESPONSE (SUCCESS) ==========")
+          Logger.info(Jason.encode!(response_body, pretty: true))
+          Logger.info("=====================================================")
           parse_openai_response(response_body)
 
-        {:ok, %{status: status, body: body}} ->
-          Logger.error("Groq API error: #{status} - #{inspect(body)}")
-          {:error, {:api_error, status, body}}
+        {:ok, %{status: status, body: error_body}} ->
+          Logger.error("========== RAW GROQ API RESPONSE (ERROR) ==========")
+          Logger.error("Status: #{status}")
+          Logger.error(Jason.encode!(error_body, pretty: true))
+          Logger.error("===================================================")
+          {:error, {:api_error, status, error_body}}
 
         {:error, reason} ->
           Logger.error("Groq API request failed: #{inspect(reason)}")
@@ -310,7 +337,7 @@ defmodule CollabCanvas.AI.Agent do
     end
   end
 
-  defp call_openai_api(command) do
+  defp call_openai_api(command, object_count) do
     api_key = System.get_env("OPENAI_API_KEY")
     model = System.get_env("OPENAI_MODEL") || @default_openai_model
 
@@ -323,16 +350,17 @@ defmodule CollabCanvas.AI.Agent do
       ]
 
       # Convert Claude tool format to OpenAI function format
-      tools = Enum.map(Tools.get_tool_definitions(), fn tool ->
-        %{
-          type: "function",
-          function: %{
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.input_schema
+      tools =
+        Enum.map(Tools.get_tool_definitions(object_count), fn tool ->
+          %{
+            type: "function",
+            function: %{
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.input_schema
+            }
           }
-        }
-      end)
+        end)
 
       body = %{
         model: model,
@@ -403,17 +431,24 @@ defmodule CollabCanvas.AI.Agent do
     normalized_calls = Enum.map(tool_calls, &normalize_tool_input/1)
 
     # Separate create_* calls from other tool calls
-    {create_calls, other_calls} = Enum.split_with(normalized_calls, &BatchProcessor.is_create_tool?/1)
+    {create_calls, other_calls} =
+      Enum.split_with(normalized_calls, &BatchProcessor.is_create_tool?/1)
 
     # Track start time for performance logging
     start_time = System.monotonic_time(:millisecond)
 
     # Process batched creates first (if any)
-    batch_results = if length(create_calls) > 0 do
-      BatchProcessor.execute_batched_creates(create_calls, canvas_id, current_color, &normalize_color/1)
-    else
-      []
-    end
+    batch_results =
+      if length(create_calls) > 0 do
+        BatchProcessor.execute_batched_creates(
+          create_calls,
+          canvas_id,
+          current_color,
+          &normalize_color/1
+        )
+      else
+        []
+      end
 
     # Log batch performance
     if length(create_calls) > 0 do
@@ -423,14 +458,17 @@ defmodule CollabCanvas.AI.Agent do
 
       # Warn if performance target not met (should be <2s for 10 objects)
       if length(create_calls) >= 10 and duration_ms > 2000 do
-        Logger.warning("Batch create exceeded 2s target: #{duration_ms}ms for #{length(create_calls)} objects")
+        Logger.warning(
+          "Batch create exceeded 2s target: #{duration_ms}ms for #{length(create_calls)} objects"
+        )
       end
     end
 
     # Process non-create calls individually
-    other_results = Enum.map(other_calls, fn tool_call ->
-      execute_tool_call(tool_call, canvas_id, current_color)
-    end)
+    other_results =
+      Enum.map(other_calls, fn tool_call ->
+        execute_tool_call(tool_call, canvas_id, current_color)
+      end)
 
     # Combine results in original order
     BatchProcessor.combine_results_in_order(tool_calls, batch_results, other_results)
@@ -438,11 +476,12 @@ defmodule CollabCanvas.AI.Agent do
 
   # Normalizes tool call inputs by coercing string IDs to integers
   # Some AI providers (like Groq) return object_id as strings despite schema specifying integer
-  defp normalize_tool_input(%{name: name, input: input} = tool_call) do
-    normalized_input = input
-    |> normalize_id_field("object_id")
-    |> normalize_id_field("shape_id")
-    |> normalize_id_array_field("object_ids")
+  defp normalize_tool_input(%{name: _name, input: input} = tool_call) do
+    normalized_input =
+      input
+      |> normalize_id_field("object_id")
+      |> normalize_id_field("shape_id")
+      |> normalize_id_array_field("object_ids")
 
     %{tool_call | input: normalized_input}
   end
@@ -455,7 +494,9 @@ defmodule CollabCanvas.AI.Agent do
           {int_id, _} -> Map.put(input, field_name, int_id)
           :error -> input
         end
-      _ -> input
+
+      _ ->
+        input
     end
   end
 
@@ -463,16 +504,22 @@ defmodule CollabCanvas.AI.Agent do
   defp normalize_id_array_field(input, field_name) do
     case Map.get(input, field_name) do
       ids when is_list(ids) ->
-        normalized_ids = Enum.map(ids, fn
-          id when is_binary(id) ->
-            case Integer.parse(id) do
-              {int_id, _} -> int_id
-              :error -> id
-            end
-          id -> id
-        end)
+        normalized_ids =
+          Enum.map(ids, fn
+            id when is_binary(id) ->
+              case Integer.parse(id) do
+                {int_id, _} -> int_id
+                :error -> id
+              end
+
+            id ->
+              id
+          end)
+
         Map.put(input, field_name, normalized_ids)
-      _ -> input
+
+      _ ->
+        input
     end
   end
 
@@ -488,16 +535,24 @@ defmodule CollabCanvas.AI.Agent do
           has_valid_api_key?("GROQ_API_KEY") ->
             Logger.info("Auto-detected Groq API key, using Groq provider")
             "groq"
+
           has_valid_api_key?("OPENAI_API_KEY") ->
             Logger.info("Auto-detected OpenAI API key, using OpenAI provider")
             "openai"
+
           has_valid_api_key?("CLAUDE_API_KEY") ->
             Logger.info("Auto-detected Claude API key, using Claude provider")
             "claude"
+
           true ->
-            Logger.warning("No valid AI API key found. Please set GROQ_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY")
-            "claude"  # Default fallback (will error with missing_api_key)
+            Logger.warning(
+              "No valid AI API key found. Please set GROQ_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY"
+            )
+
+            # Default fallback (will error with missing_api_key)
+            "claude"
         end
+
       provider ->
         # Use explicitly configured provider
         provider
@@ -510,57 +565,113 @@ defmodule CollabCanvas.AI.Agent do
       nil -> false
       "" -> false
       "your_key_here" -> false
-      "your_" <> _rest -> false  # Matches placeholder patterns
+      # Matches placeholder patterns
+      "your_" <> _rest -> false
       _key -> true
     end
   end
 
   # Builds an enhanced command with all canvas objects and their human-readable names
-  defp build_command_with_context(command, selected_ids, canvas_id, current_color) do
+  defp build_command_with_context(command, selected_ids, canvas_id, current_color, viewport \\ nil) do
     # Fetch all canvas objects
     all_objects = Canvases.list_objects(canvas_id)
 
     # Generate human-readable display names (e.g., "Object 1", "Object 2")
     objects_with_names = generate_display_names(all_objects)
 
-    # Build detailed object context for semantic selection
-    objects_with_details = all_objects
-    |> Enum.map(fn obj ->
-      data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
-      %{
-        id: obj.id,
-        type: obj.type,
-        position: obj.position,
-        data: data
-      }
-    end)
+    # Calculate canvas statistics for efficient semantic selection
+    # Instead of sending all objects to AI, send statistical metadata
+    canvas_stats = CanvasStats.calculate_stats(all_objects)
 
     # Build context with all objects and their display names
-    available_objects_str = objects_with_names
-    |> Enum.map(fn {obj, display_name} ->
-      data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
-      color_info = if data["color"], do: " color: #{data["color"]}", else: ""
-      size_info = cond do
-        data["width"] && data["height"] -> " size: #{data["width"]}x#{data["height"]}"
-        data["width"] -> " width: #{data["width"]}"
-        data["text"] -> " text: \"#{String.slice(data["text"] || "", 0, 20)}#{if String.length(data["text"] || "") > 20, do: "...", else: ""}\""
-        true -> ""
-      end
-      "  - #{display_name} (ID: #{obj.id}): #{obj.type} at (#{get_in(obj.position, ["x"])||0}, #{get_in(obj.position, ["y"])||0})#{color_info}#{size_info}"
-    end)
-    |> Enum.join("\n")
+    available_objects_str =
+      objects_with_names
+      |> Enum.map(fn {obj, display_name} ->
+        data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
+        color_info = if data["color"], do: " color: #{data["color"]}", else: ""
+
+        size_info =
+          cond do
+            data["width"] && data["height"] ->
+              " size: #{data["width"]}x#{data["height"]}"
+
+            data["width"] ->
+              " width: #{data["width"]}"
+
+            data["text"] ->
+              " text: \"#{String.slice(data["text"] || "", 0, 20)}#{if String.length(data["text"] || "") > 20, do: "...", else: ""}\""
+
+            true ->
+              ""
+          end
+
+        "  - #{display_name} (ID: #{obj.id}): #{obj.type} at (#{get_in(obj.position, ["x"]) || 0}, #{get_in(obj.position, ["y"]) || 0})#{color_info}#{size_info}"
+      end)
+      |> Enum.join("\n")
 
     # Build selected objects context if any
-    selected_context = if is_list(selected_ids) and length(selected_ids) > 0 do
-      selected_names = objects_with_names
-      |> Enum.filter(fn {obj, _name} -> obj.id in selected_ids end)
-      |> Enum.map(fn {_obj, name} -> name end)
-      |> Enum.join(", ")
+    selected_context =
+      if is_list(selected_ids) and length(selected_ids) > 0 do
+        selected_names =
+          objects_with_names
+          |> Enum.filter(fn {obj, _name} -> obj.id in selected_ids end)
+          |> Enum.map(fn {_obj, name} -> name end)
+          |> Enum.join(", ")
 
-      "\nCurrently selected: #{selected_names}"
-    else
-      ""
-    end
+        "\nCurrently selected: #{selected_names}"
+      else
+        ""
+      end
+
+    # Build viewport context if provided
+    viewport_context =
+      if viewport do
+        # Calculate visible canvas area based on viewport
+        canvas_width = Map.get(viewport, "canvas_width", 1200)
+        canvas_height = Map.get(viewport, "canvas_height", 800)
+        view_x = Map.get(viewport, "x", 0)
+        view_y = Map.get(viewport, "y", 0)
+        zoom = Map.get(viewport, "zoom", 1.0)
+
+        # Calculate the visible rectangle in canvas coordinates
+        visible_left = round(-view_x / zoom)
+        visible_right = round((canvas_width - view_x) / zoom)
+        visible_top = round(-view_y / zoom)
+        visible_bottom = round((canvas_height - view_y) / zoom)
+
+        visible_center_x = round((visible_left + visible_right) / 2)
+        visible_center_y = round((visible_top + visible_bottom) / 2)
+
+        """
+
+        CURRENT VIEWPORT (visible canvas area):
+        - Visible area: left=#{visible_left}px, right=#{visible_right}px, top=#{visible_top}px, bottom=#{visible_bottom}px
+        - Center of view: x=#{visible_center_x}px, y=#{visible_center_y}px
+        - Canvas size: #{canvas_width}px × #{canvas_height}px
+        - Zoom level: #{round(zoom * 100)}%
+
+        SEMANTIC POSITIONING (when user says "at the top", "in the middle", "on the left", etc.):
+        - "top" or "at the top" → y=#{visible_top + 100}
+        - "middle" or "center" (vertical) → y=#{visible_center_y}
+        - "bottom" or "at the bottom" → y=#{visible_bottom - 100}
+        - "left" or "on the left" → x=#{visible_left + 100}
+        - "center" (horizontal) → x=#{visible_center_x}
+        - "right" or "on the right" → x=#{visible_right - 100}
+        - Combinations work too: "top-left" → x=#{visible_left + 100}, y=#{visible_top + 100}
+        - "top-right" → x=#{visible_right - 100}, y=#{visible_top + 100}
+        - "bottom-left" → x=#{visible_left + 100}, y=#{visible_bottom - 100}
+        - "bottom-right" → x=#{visible_right - 100}, y=#{visible_bottom - 100}
+        - "top-center" or "center-top" → x=#{visible_center_x}, y=#{visible_top + 100}
+        - "bottom-center" or "center-bottom" → x=#{visible_center_x}, y=#{visible_bottom - 100}
+        - "middle-left" or "left-center" → x=#{visible_left + 100}, y=#{visible_center_y}
+        - "middle-right" or "right-center" → x=#{visible_right - 100}, y=#{visible_center_y}
+        - "in the current view" or "here" → x=#{visible_center_x}, y=#{visible_center_y}
+
+        IMPORTANT: When the user uses semantic positions (top/bottom/left/right/center), USE THE COORDINATES ABOVE. Do NOT use arbitrary coordinates like 100, 200, etc.
+        """
+      else
+        ""
+      end
 
     # Build full context
     context = """
@@ -568,20 +679,56 @@ defmodule CollabCanvas.AI.Agent do
     - Use this color when creating new shapes/text UNLESS the user specifies a different color
     - If user says "create a rectangle" (without color), use #{current_color}
     - If user says "create a blue rectangle", use blue (#0000FF or similar)
-
+#{viewport_context}
     CANVAS OBJECTS (use these human-readable names in your responses):
     #{available_objects_str}#{selected_context}
 
     SEMANTIC SELECTION RULES:
     - When users ask to select objects by description (e.g., "select all red circles", "select the small objects", "select objects in the top-left corner"):
       * Use the select_objects_by_description tool
-      * Pass the natural language description as provided by the user
-      * Include ALL canvas objects in objects_context - the AI will filter them based on the description
-      * Examples of selectable attributes: color, size (small/medium/large based on relative dimensions), shape/type, position (top/bottom/left/right/center), combined attributes
-    - The objects_context for select_objects_by_description should include the full details of ALL objects for proper filtering
+      * IMPORTANT SHAPE TYPE DISTINCTIONS:
+        - SQUARES: type="rectangle" AND width ≈ height (within 10px difference)
+        - RECTANGLES (non-square): type="rectangle" AND |width - height| > 10px
+        - CIRCLES: type="circle"
+      * APPROACH depends on canvas size (Total objects: #{canvas_stats.total_objects}):
+        #{
+      if canvas_stats.total_objects < 100 do
+        """
+        - SMALL CANVAS (<100 objects): Filter the object list yourself and return matching object IDs in 'object_ids' parameter
+          - Full object details are provided below for filtering
+          - Filter by color, size, type, position, etc.
+          - For "squares", find rectangles where width ≈ height
+          - Return array of matching object IDs
+        """
+      else
+        """
+        - LARGE CANVAS (>=100 objects): Return filter criteria for server-side filtering
+          - Analyze the statistics to determine intelligent filter criteria
+          - Return structured criteria (color, size_min, size_max, shape_type, position)
+          - Server will apply these filters efficiently
+        """
+      end
+    }
 
-    OBJECT DETAILS FOR SEMANTIC SELECTION:
-    #{Jason.encode!(objects_with_details)}
+    CANVAS STATISTICS:
+    Total objects: #{canvas_stats.total_objects}
+    Size distribution: #{Jason.encode!(canvas_stats.size_stats)}
+    Available colors: #{Jason.encode!(canvas_stats.colors)}
+    Shape types: #{Jason.encode!(canvas_stats.shape_types)}
+    #{
+      if canvas_stats.total_objects < 100 do
+        """
+
+        FULL OBJECT LIST FOR FILTERING (small canvas):
+        #{Jason.encode!(Enum.map(all_objects, fn obj ->
+          data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
+          %{id: obj.id, type: obj.type, position: obj.position, data: data}
+        end))}
+        """
+      else
+        ""
+      end
+    }
 
     DISAMBIGUATION RULES:
     - When the user refers to "that square", "the circle", "that rectangle", etc. without specifying which one:
@@ -674,7 +821,8 @@ defmodule CollabCanvas.AI.Agent do
   # Enriches tool calls by injecting selected object IDs into arrange_objects calls
   defp enrich_tool_calls(tool_calls, []), do: tool_calls
 
-  defp enrich_tool_calls(tool_calls, selected_ids) when is_list(selected_ids) and length(selected_ids) > 0 do
+  defp enrich_tool_calls(tool_calls, selected_ids)
+       when is_list(selected_ids) and length(selected_ids) > 0 do
     Enum.map(tool_calls, fn tool_call ->
       case tool_call.name do
         "arrange_objects" ->
@@ -682,11 +830,12 @@ defmodule CollabCanvas.AI.Agent do
           input = tool_call.input
           object_ids = Map.get(input, "object_ids", [])
 
-          updated_input = if length(object_ids) == 0 do
-            Map.put(input, "object_ids", selected_ids)
-          else
-            input
-          end
+          updated_input =
+            if length(object_ids) == 0 do
+              Map.put(input, "object_ids", selected_ids)
+            else
+              input
+            end
 
           %{tool_call | input: updated_input}
 
@@ -718,14 +867,23 @@ defmodule CollabCanvas.AI.Agent do
             }
           end)
 
+        Logger.info("========== PARSED TOOL CALLS (#{length(tool_calls)}) ==========")
+        Enum.each(tool_calls, fn tool_call ->
+          Logger.info("Tool: #{tool_call.name}")
+          Logger.info("Input: #{Jason.encode!(tool_call.input, pretty: true)}")
+          Logger.info("---")
+        end)
+        Logger.info("========================================================")
+
         {:ok, tool_calls}
 
       "end_turn" ->
         # Extract text response (AI might be asking for clarification)
-        text_items = content
-        |> Enum.filter(fn item -> item["type"] == "text" end)
-        |> Enum.map(fn item -> item["text"] end)
-        |> Enum.join("\n")
+        text_items =
+          content
+          |> Enum.filter(fn item -> item["type"] == "text" end)
+          |> Enum.map(fn item -> item["text"] end)
+          |> Enum.join("\n")
 
         if text_items != "" do
           {:ok, {:text_response, text_items}}
@@ -758,13 +916,16 @@ defmodule CollabCanvas.AI.Agent do
     case message do
       %{"tool_calls" => tool_calls} when is_list(tool_calls) ->
         Logger.debug("Found #{length(tool_calls)} tool calls")
-        parsed_calls = Enum.map(tool_calls, fn tool_call ->
-          %{
-            id: tool_call["id"],
-            name: tool_call["function"]["name"],
-            input: Jason.decode!(tool_call["function"]["arguments"])
-          }
-        end)
+
+        parsed_calls =
+          Enum.map(tool_calls, fn tool_call ->
+            %{
+              id: tool_call["id"],
+              name: tool_call["function"]["name"],
+              input: Jason.decode!(tool_call["function"]["arguments"])
+            }
+          end)
+
         {:ok, parsed_calls}
 
       %{"content" => content} when is_binary(content) and content != "" ->
@@ -835,7 +996,9 @@ defmodule CollabCanvas.AI.Agent do
     # Get count parameter (default to 1)
     count = Map.get(input, "count", 1)
 
-    Logger.info("create_shape: count=#{count}, current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
+    Logger.info(
+      "create_shape: count=#{count}, current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}"
+    )
 
     # If creating multiple shapes
     if count > 1 do
@@ -845,31 +1008,34 @@ defmodule CollabCanvas.AI.Agent do
       spacing = Map.get(input, "spacing", default_spacing)
 
       # Create all shapes
-      results = Enum.map(0..(count - 1), fn index ->
-        data = %{
-          width: input["width"],
-          height: input["height"],
-          color: final_color
-        }
+      results =
+        Enum.map(0..(count - 1), fn index ->
+          data = %{
+            width: input["width"],
+            height: input["height"],
+            color: final_color
+          }
 
-        # Calculate position for this shape
-        x_offset = index * (base_width + spacing)
-        attrs = %{
-          position: %{
-            x: input["x"] + x_offset,
-            y: input["y"]
-          },
-          data: Jason.encode!(data)
-        }
+          # Calculate position for this shape
+          x_offset = index * (base_width + spacing)
 
-        Canvases.create_object(canvas_id, input["type"], attrs)
-      end)
+          attrs = %{
+            position: %{
+              x: input["x"] + x_offset,
+              y: input["y"]
+            },
+            data: Jason.encode!(data)
+          }
+
+          Canvases.create_object(canvas_id, input["type"], attrs)
+        end)
 
       # Return summary of all created objects
-      successful = Enum.count(results, fn
-        {:ok, _} -> true
-        _ -> false
-      end)
+      successful =
+        Enum.count(results, fn
+          {:ok, _} -> true
+          _ -> false
+        end)
 
       %{
         tool: "create_shape",
@@ -913,7 +1079,9 @@ defmodule CollabCanvas.AI.Agent do
     # Convert color names to hex if needed
     final_color = normalize_color(ai_color || current_color)
 
-    Logger.info("create_text: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}")
+    Logger.info(
+      "create_text: current_color=#{current_color}, AI provided color=#{inspect(ai_color)}, final_color=#{final_color}"
+    )
 
     data = %{
       text: input["text"],
@@ -962,7 +1130,9 @@ defmodule CollabCanvas.AI.Agent do
           "canvas:#{canvas_id}",
           {:object_updated, updated_object}
         )
-      _ -> :ok
+
+      _ ->
+        :ok
     end
 
     %{
@@ -1012,7 +1182,9 @@ defmodule CollabCanvas.AI.Agent do
               "canvas:#{canvas_id}",
               {:object_updated, updated_object}
             )
-          _ -> :ok
+
+          _ ->
+            :ok
         end
 
         %{
@@ -1026,7 +1198,11 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a delete_object tool call to remove an object from the canvas.
   #
   # Deletes the object with the specified object_id.
-  defp execute_tool_call_legacy(%{name: "delete_object", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call_legacy(
+         %{name: "delete_object", input: input},
+         _canvas_id,
+         _current_color
+       ) do
     result = Canvases.delete_object(input["object_id"])
 
     %{
@@ -1066,7 +1242,11 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Supports multiple component types: login_form, navbar, card, button, sidebar.
   # Delegates to ComponentBuilder module with specified dimensions, theme, and content.
-  defp execute_tool_call_legacy(%{name: "create_component", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(
+         %{name: "create_component", input: input},
+         canvas_id,
+         _current_color
+       ) do
     component_type = input["type"]
     x = input["x"]
     y = input["y"]
@@ -1107,7 +1287,11 @@ defmodule CollabCanvas.AI.Agent do
   #
   # Currently returns success with generated group_id.
   # Full grouping logic would need to be implemented in Canvases context.
-  defp execute_tool_call_legacy(%{name: "group_objects", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call_legacy(
+         %{name: "group_objects", input: input},
+         _canvas_id,
+         _current_color
+       ) do
     # For now, just return success - actual grouping logic would need to be implemented in Canvases
     %{
       tool: "group_objects",
@@ -1143,7 +1327,8 @@ defmodule CollabCanvas.AI.Agent do
             {input["width"], calculated_height}
           else
             # Use provided dimensions
-            {input["width"], Map.get(input, "height", Map.get(existing_data, "height", input["width"]))}
+            {input["width"],
+             Map.get(input, "height", Map.get(existing_data, "height", input["width"]))}
           end
 
         updated_data =
@@ -1162,7 +1347,9 @@ defmodule CollabCanvas.AI.Agent do
               "canvas:#{canvas_id}",
               {:object_updated, updated_object}
             )
-          _ -> :ok
+
+          _ ->
+            :ok
         end
 
         %{
@@ -1188,9 +1375,17 @@ defmodule CollabCanvas.AI.Agent do
       object ->
         existing_data = if object.data, do: Jason.decode!(object.data), else: %{}
 
+        # Get current rotation (default to 0 if not set)
+        current_rotation = Map.get(existing_data, "rotation", 0)
+
+        # Add the delta to current rotation (relative rotation)
+        new_rotation = current_rotation + input["angle"]
+
         # Normalize angle to 0-360 range
-        normalized_angle = rem(round(input["angle"]), 360)
-        normalized_angle = if normalized_angle < 0, do: normalized_angle + 360, else: normalized_angle
+        normalized_angle = rem(round(new_rotation), 360)
+
+        normalized_angle =
+          if normalized_angle < 0, do: normalized_angle + 360, else: normalized_angle
 
         updated_data =
           existing_data
@@ -1208,7 +1403,9 @@ defmodule CollabCanvas.AI.Agent do
               "canvas:#{canvas_id}",
               {:object_updated, updated_object}
             )
-          _ -> :ok
+
+          _ ->
+            :ok
         end
 
         %{
@@ -1243,12 +1440,14 @@ defmodule CollabCanvas.AI.Agent do
                 {num, _} -> num
                 :error -> String.to_integer(input["value"])
               end
+
             "opacity" ->
               # Opacity is 0-1
               case Float.parse(input["value"]) do
                 {num, _} -> max(0.0, min(1.0, num))
                 :error -> 1.0
               end
+
             _ ->
               # String properties (colors, fonts)
               input["value"]
@@ -1266,7 +1465,9 @@ defmodule CollabCanvas.AI.Agent do
               "canvas:#{canvas_id}",
               {:object_updated, updated_object}
             )
-          _ -> :ok
+
+          _ ->
+            :ok
         end
 
         %{
@@ -1302,13 +1503,41 @@ defmodule CollabCanvas.AI.Agent do
 
           # Update text and formatting options
           updated_data = existing_data
-          updated_data = if Map.has_key?(input, "new_text"), do: Map.put(updated_data, "text", input["new_text"]), else: updated_data
-          updated_data = if Map.has_key?(input, "font_size"), do: Map.put(updated_data, "font_size", input["font_size"]), else: updated_data
-          updated_data = if Map.has_key?(input, "font_family"), do: Map.put(updated_data, "font_family", input["font_family"]), else: updated_data
-          updated_data = if Map.has_key?(input, "color"), do: Map.put(updated_data, "color", input["color"]), else: updated_data
-          updated_data = if Map.has_key?(input, "align"), do: Map.put(updated_data, "align", input["align"]), else: updated_data
-          updated_data = if Map.has_key?(input, "bold"), do: Map.put(updated_data, "bold", input["bold"]), else: updated_data
-          updated_data = if Map.has_key?(input, "italic"), do: Map.put(updated_data, "italic", input["italic"]), else: updated_data
+
+          updated_data =
+            if Map.has_key?(input, "new_text"),
+              do: Map.put(updated_data, "text", input["new_text"]),
+              else: updated_data
+
+          updated_data =
+            if Map.has_key?(input, "font_size"),
+              do: Map.put(updated_data, "font_size", input["font_size"]),
+              else: updated_data
+
+          updated_data =
+            if Map.has_key?(input, "font_family"),
+              do: Map.put(updated_data, "font_family", input["font_family"]),
+              else: updated_data
+
+          updated_data =
+            if Map.has_key?(input, "color"),
+              do: Map.put(updated_data, "color", input["color"]),
+              else: updated_data
+
+          updated_data =
+            if Map.has_key?(input, "align"),
+              do: Map.put(updated_data, "align", input["align"]),
+              else: updated_data
+
+          updated_data =
+            if Map.has_key?(input, "bold"),
+              do: Map.put(updated_data, "bold", input["bold"]),
+              else: updated_data
+
+          updated_data =
+            if Map.has_key?(input, "italic"),
+              do: Map.put(updated_data, "italic", input["italic"]),
+              else: updated_data
 
           attrs = %{data: Jason.encode!(updated_data)}
           result = Canvases.update_object(input["object_id"], attrs)
@@ -1321,7 +1550,9 @@ defmodule CollabCanvas.AI.Agent do
                 "canvas:#{canvas_id}",
                 {:object_updated, updated_object}
               )
-            _ -> :ok
+
+            _ ->
+              :ok
           end
 
           %{
@@ -1382,7 +1613,9 @@ defmodule CollabCanvas.AI.Agent do
               "canvas:#{canvas_id}",
               {:object_updated, updated_object}
             )
-          _ -> :ok
+
+          _ ->
+            :ok
         end
 
         %{
@@ -1393,11 +1626,118 @@ defmodule CollabCanvas.AI.Agent do
     end
   end
 
+  # Executes a move_objects_batch tool call to move multiple objects by the same delta.
+  #
+  # Efficient batch operation for moving multiple objects at once.
+  defp execute_tool_call_legacy(%{name: "move_objects_batch", input: input}, canvas_id, _current_color) do
+    object_ids = input["object_ids"] || []
+    delta_x = input["delta_x"] || 0
+    delta_y = input["delta_y"] || 0
+
+    if length(object_ids) == 0 do
+      %{
+        tool: "move_objects_batch",
+        input: input,
+        result: {:error, :no_objects}
+      }
+    else
+      # Fetch all objects and calculate new positions
+      updated_objects =
+        object_ids
+        |> Enum.map(fn id ->
+          case Canvases.get_object(id) do
+            nil ->
+              nil
+
+            object ->
+              current_position = object.position || %{"x" => 0, "y" => 0}
+              current_x = Map.get(current_position, "x") || Map.get(current_position, :x) || 0
+              current_y = Map.get(current_position, "y") || Map.get(current_position, :y) || 0
+
+              new_position = %{
+                x: current_x + delta_x,
+                y: current_y + delta_y
+              }
+
+              # Update the object
+              case Canvases.update_object(id, %{position: new_position}) do
+                {:ok, updated_object} -> updated_object
+                _ -> nil
+              end
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      # Note: Broadcasting is handled by LiveView after AI processing
+      # This matches the pattern used by arrange_objects and other batch operations
+
+      Logger.info("Batch moved #{length(updated_objects)} objects (delta_x: #{delta_x}, delta_y: #{delta_y})")
+
+      %{
+        tool: "move_objects_batch",
+        input: input,
+        result: {:ok, %{updated_objects: updated_objects, count: length(updated_objects)}}
+      }
+    end
+  end
+
+  # Executes a change_layer_order tool call to adjust z-index stacking.
+  #
+  # Supports bring_to_front, send_to_back, move_forward, and move_backward operations.
+  defp execute_tool_call_legacy(%{name: "change_layer_order", input: input}, canvas_id, _current_color) do
+    object_id = input["object_id"]
+    operation = input["operation"]
+
+    case Canvases.get_object(object_id) do
+      nil ->
+        %{
+          tool: "change_layer_order",
+          input: input,
+          result: {:error, :not_found}
+        }
+
+      _object ->
+        result =
+          case operation do
+            "bring_to_front" -> Canvases.bring_to_front(object_id)
+            "send_to_back" -> Canvases.send_to_back(object_id)
+            "move_forward" -> Canvases.move_forward(object_id)
+            "move_backward" -> Canvases.move_backward(object_id)
+            _ -> {:error, :invalid_operation}
+          end
+
+        # Broadcast reordering to all connected clients
+        case result do
+          {:ok, updated_objects} ->
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{canvas_id}",
+              {:objects_reordered, updated_objects}
+            )
+
+            Logger.info("Layer order changed: object #{object_id} #{operation}")
+
+          _ ->
+            :ok
+        end
+
+        %{
+          tool: "change_layer_order",
+          input: input,
+          result: result
+        }
+    end
+  end
+
   # Executes an arrange_objects tool call to layout multiple objects in a specified pattern.
   #
   # Supports horizontal, vertical, grid, circular, and stack layouts.
   # Applies layout algorithms from CollabCanvas.AI.Layout module and batch updates all objects.
-  defp execute_tool_call_legacy(%{name: "arrange_objects", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(
+         %{name: "arrange_objects", input: input},
+         canvas_id,
+         _current_color
+       ) do
     object_ids = input["object_ids"]
     layout_type = input["layout_type"]
 
@@ -1405,25 +1745,29 @@ defmodule CollabCanvas.AI.Agent do
     start_time = System.monotonic_time(:millisecond)
 
     # Fetch all objects to arrange
-    objects = Enum.map(object_ids, fn id ->
-      case Canvases.get_object(id) do
-        nil -> nil
-        obj ->
-          # Decode data if it's a JSON string
-          data = if is_binary(obj.data) do
-            Jason.decode!(obj.data)
-          else
-            obj.data || %{}
-          end
+    objects =
+      Enum.map(object_ids, fn id ->
+        case Canvases.get_object(id) do
+          nil ->
+            nil
 
-          %{
-            id: obj.id,
-            position: obj.position,
-            data: data
-          }
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
+          obj ->
+            # Decode data if it's a JSON string
+            data =
+              if is_binary(obj.data) do
+                Jason.decode!(obj.data)
+              else
+                obj.data || %{}
+              end
+
+            %{
+              id: obj.id,
+              position: obj.position,
+              data: data
+            }
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
 
     if length(objects) == 0 do
       %{
@@ -1433,61 +1777,85 @@ defmodule CollabCanvas.AI.Agent do
       }
     else
       # Apply layout algorithm based on type
-      updates = case layout_type do
-        "horizontal" ->
-          spacing = Map.get(input, "spacing", :even)
-          Layout.distribute_horizontally(objects, spacing)
+      updates =
+        case layout_type do
+          "horizontal" ->
+            spacing = Map.get(input, "spacing", :even)
+            Layout.distribute_horizontally(objects, spacing)
 
-        "vertical" ->
-          spacing = Map.get(input, "spacing", :even)
-          Layout.distribute_vertically(objects, spacing)
+          "vertical" ->
+            spacing = Map.get(input, "spacing", :even)
+            Layout.distribute_vertically(objects, spacing)
 
-        "grid" ->
-          columns = Map.get(input, "columns", 3)
-          spacing = Map.get(input, "spacing", 20)
-          Layout.arrange_grid(objects, columns, spacing)
+          "grid" ->
+            spacing = Map.get(input, "spacing", 20)
 
-        "circular" ->
-          radius = Map.get(input, "radius", 200)
-          Layout.circular_layout(objects, radius)
+            # Support both 'rows' and 'columns' parameters
+            columns = cond do
+              # If rows is specified, calculate columns based on object count
+              Map.has_key?(input, "rows") && input["rows"] > 0 ->
+                rows = input["rows"]
+                object_count = length(objects)
+                ceil(object_count / rows)
 
-        "stack" ->
-          # Stack is vertical distribution with optional alignment
-          alignment = Map.get(input, "alignment")
-          distributed = Layout.distribute_vertically(objects, Map.get(input, "spacing", 20))
+              # If columns is specified, use it
+              Map.has_key?(input, "columns") && input["columns"] > 0 ->
+                input["columns"]
 
-          if alignment do
-            # Apply alignment after stacking
-            aligned_objects = Enum.map(distributed, fn update ->
+              # Default to 3 columns if neither is specified
+              true ->
+                3
+            end
+
+            Layout.arrange_grid(objects, columns, spacing)
+
+          "circular" ->
+            radius = Map.get(input, "radius", 200)
+            Layout.circular_layout(objects, radius)
+
+          "stack" ->
+            # Stack is vertical distribution with optional alignment
+            alignment = Map.get(input, "alignment")
+            distributed = Layout.distribute_vertically(objects, Map.get(input, "spacing", 20))
+
+            if alignment do
+              # Apply alignment after stacking
+              aligned_objects =
+                Enum.map(distributed, fn update ->
+                  obj = Enum.find(objects, fn o -> o.id == update.id end)
+                  %{obj | position: update.position}
+                end)
+
+              Layout.align_objects(aligned_objects, alignment)
+            else
+              distributed
+            end
+
+          _ ->
+            []
+        end
+
+      # Apply alignment if specified and not already applied
+      final_updates =
+        if Map.has_key?(input, "alignment") and layout_type != "stack" do
+          # Reconstruct objects with new positions for alignment
+          aligned_objects =
+            Enum.map(updates, fn update ->
               obj = Enum.find(objects, fn o -> o.id == update.id end)
               %{obj | position: update.position}
             end)
-            Layout.align_objects(aligned_objects, alignment)
-          else
-            distributed
-          end
 
-        _ ->
-          []
-      end
-
-      # Apply alignment if specified and not already applied
-      final_updates = if Map.has_key?(input, "alignment") and layout_type != "stack" do
-        # Reconstruct objects with new positions for alignment
-        aligned_objects = Enum.map(updates, fn update ->
-          obj = Enum.find(objects, fn o -> o.id == update.id end)
-          %{obj | position: update.position}
-        end)
-        Layout.align_objects(aligned_objects, input["alignment"])
-      else
-        updates
-      end
+          Layout.align_objects(aligned_objects, input["alignment"])
+        else
+          updates
+        end
 
       # Batch update all objects atomically
-      results = Enum.map(final_updates, fn update ->
-        attrs = %{position: update.position}
-        Canvases.update_object(update.id, attrs)
-      end)
+      results =
+        Enum.map(final_updates, fn update ->
+          attrs = %{position: update.position}
+          Canvases.update_object(update.id, attrs)
+        end)
 
       # Broadcast updates to all connected clients for real-time sync
       Enum.each(results, fn
@@ -1497,24 +1865,31 @@ defmodule CollabCanvas.AI.Agent do
             "canvas:#{canvas_id}",
             {:object_updated, updated_object}
           )
-        _ -> :ok
+
+        _ ->
+          :ok
       end)
 
       # Check if any updates failed
-      failed = Enum.any?(results, fn
-        {:error, _} -> true
-        _ -> false
-      end)
+      failed =
+        Enum.any?(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
 
       # Calculate performance metrics
       end_time = System.monotonic_time(:millisecond)
       duration_ms = end_time - start_time
 
       # Log performance (should be <500ms for up to 50 objects per PRD requirement)
-      Logger.info("Layout operation completed: #{layout_type} layout for #{length(results)} objects in #{duration_ms}ms")
+      Logger.info(
+        "Layout operation completed: #{layout_type} layout for #{length(results)} objects in #{duration_ms}ms"
+      )
 
       if duration_ms > 500 do
-        Logger.warning("Layout operation exceeded 500ms target: #{duration_ms}ms for #{length(results)} objects")
+        Logger.warning(
+          "Layout operation exceeded 500ms target: #{duration_ms}ms for #{length(results)} objects"
+        )
       end
 
       if failed do
@@ -1527,7 +1902,8 @@ defmodule CollabCanvas.AI.Agent do
         %{
           tool: "arrange_objects",
           input: input,
-          result: {:ok, %{updated: length(results), layout: layout_type, duration_ms: duration_ms}}
+          result:
+            {:ok, %{updated: length(results), layout: layout_type, duration_ms: duration_ms}}
         }
       end
     end
@@ -1536,7 +1912,11 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a show_object_labels tool call to toggle display of visual labels on canvas objects.
   #
   # Returns a special result type that the frontend can handle to show/hide labels.
-  defp execute_tool_call_legacy(%{name: "show_object_labels", input: input}, _canvas_id, _current_color) do
+  defp execute_tool_call_legacy(
+         %{name: "show_object_labels", input: input},
+         _canvas_id,
+         _current_color
+       ) do
     show = Map.get(input, "show", true)
 
     %{
@@ -1549,31 +1929,39 @@ defmodule CollabCanvas.AI.Agent do
   # Executes an arrange_objects_with_pattern tool call for flexible programmatic layouts.
   #
   # Supports custom patterns like line, diagonal, wave, arc for arrangements not covered by standard layouts.
-  defp execute_tool_call_legacy(%{name: "arrange_objects_with_pattern", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(
+         %{name: "arrange_objects_with_pattern", input: input},
+         canvas_id,
+         _current_color
+       ) do
     object_ids = input["object_ids"]
     pattern = input["pattern"]
 
     start_time = System.monotonic_time(:millisecond)
 
     # Fetch all objects to arrange
-    objects = Enum.map(object_ids, fn id ->
-      case Canvases.get_object(id) do
-        nil -> nil
-        obj ->
-          data = if is_binary(obj.data) do
-            Jason.decode!(obj.data)
-          else
-            obj.data || %{}
-          end
+    objects =
+      Enum.map(object_ids, fn id ->
+        case Canvases.get_object(id) do
+          nil ->
+            nil
 
-          %{
-            id: obj.id,
-            position: obj.position,
-            data: data
-          }
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
+          obj ->
+            data =
+              if is_binary(obj.data) do
+                Jason.decode!(obj.data)
+              else
+                obj.data || %{}
+              end
+
+            %{
+              id: obj.id,
+              position: obj.position,
+              data: data
+            }
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
 
     if length(objects) == 0 do
       %{
@@ -1586,10 +1974,11 @@ defmodule CollabCanvas.AI.Agent do
       updates = Layout.pattern_layout(objects, pattern, input)
 
       # Batch update all objects
-      results = Enum.map(updates, fn update ->
-        attrs = %{position: update.position}
-        Canvases.update_object(update.id, attrs)
-      end)
+      results =
+        Enum.map(updates, fn update ->
+          attrs = %{position: update.position}
+          Canvases.update_object(update.id, attrs)
+        end)
 
       # Broadcast updates to all connected clients for real-time sync
       Enum.each(results, fn
@@ -1599,18 +1988,23 @@ defmodule CollabCanvas.AI.Agent do
             "canvas:#{canvas_id}",
             {:object_updated, updated_object}
           )
-        _ -> :ok
+
+        _ ->
+          :ok
       end)
 
-      failed = Enum.any?(results, fn
-        {:error, _} -> true
-        _ -> false
-      end)
+      failed =
+        Enum.any?(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
 
       end_time = System.monotonic_time(:millisecond)
       duration_ms = end_time - start_time
 
-      Logger.info("Pattern layout operation completed: #{pattern} for #{length(results)} objects in #{duration_ms}ms")
+      Logger.info(
+        "Pattern layout operation completed: #{pattern} for #{length(results)} objects in #{duration_ms}ms"
+      )
 
       if failed do
         %{
@@ -1631,39 +2025,48 @@ defmodule CollabCanvas.AI.Agent do
   # Executes a define_object_relationships tool call for constraint-based positioning.
   #
   # Uses declarative constraints (above, below, left_of, etc.) to calculate object positions.
-  defp execute_tool_call_legacy(%{name: "define_object_relationships", input: input}, canvas_id, _current_color) do
+  defp execute_tool_call_legacy(
+         %{name: "define_object_relationships", input: input},
+         canvas_id,
+         _current_color
+       ) do
     relationships = input["relationships"]
     apply_constraints = Map.get(input, "apply_constraints", true)
 
     start_time = System.monotonic_time(:millisecond)
 
     # Collect all unique object IDs from relationships
-    object_ids = relationships
-    |> Enum.flat_map(fn rel ->
-      [rel["subject_id"], rel["reference_id"], Map.get(rel, "reference_id_2")]
-    end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
+    object_ids =
+      relationships
+      |> Enum.flat_map(fn rel ->
+        [rel["subject_id"], rel["reference_id"], Map.get(rel, "reference_id_2")]
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
 
     # Fetch all objects involved
-    objects = Enum.map(object_ids, fn id ->
-      case Canvases.get_object(id) do
-        nil -> nil
-        obj ->
-          data = if is_binary(obj.data) do
-            Jason.decode!(obj.data)
-          else
-            obj.data || %{}
-          end
+    objects =
+      Enum.map(object_ids, fn id ->
+        case Canvases.get_object(id) do
+          nil ->
+            nil
 
-          %{
-            id: obj.id,
-            position: obj.position,
-            data: data
-          }
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
+          obj ->
+            data =
+              if is_binary(obj.data) do
+                Jason.decode!(obj.data)
+              else
+                obj.data || %{}
+              end
+
+            %{
+              id: obj.id,
+              position: obj.position,
+              data: data
+            }
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
 
     if length(objects) == 0 do
       %{
@@ -1676,10 +2079,11 @@ defmodule CollabCanvas.AI.Agent do
       updates = Layout.apply_relationships(objects, relationships, apply_constraints)
 
       # Batch update all objects
-      results = Enum.map(updates, fn update ->
-        attrs = %{position: update.position}
-        Canvases.update_object(update.id, attrs)
-      end)
+      results =
+        Enum.map(updates, fn update ->
+          attrs = %{position: update.position}
+          Canvases.update_object(update.id, attrs)
+        end)
 
       # Broadcast updates to all connected clients for real-time sync
       Enum.each(results, fn
@@ -1689,18 +2093,23 @@ defmodule CollabCanvas.AI.Agent do
             "canvas:#{canvas_id}",
             {:object_updated, updated_object}
           )
-        _ -> :ok
+
+        _ ->
+          :ok
       end)
 
-      failed = Enum.any?(results, fn
-        {:error, _} -> true
-        _ -> false
-      end)
+      failed =
+        Enum.any?(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
 
       end_time = System.monotonic_time(:millisecond)
       duration_ms = end_time - start_time
 
-      Logger.info("Relationship layout completed: #{length(relationships)} constraints for #{length(results)} objects in #{duration_ms}ms")
+      Logger.info(
+        "Relationship layout completed: #{length(relationships)} constraints for #{length(results)} objects in #{duration_ms}ms"
+      )
 
       if failed do
         %{
@@ -1712,34 +2121,274 @@ defmodule CollabCanvas.AI.Agent do
         %{
           tool: "define_object_relationships",
           input: input,
-          result: {:ok, %{updated: length(results), relationships: length(relationships), duration_ms: duration_ms}}
+          result:
+            {:ok,
+             %{
+               updated: length(results),
+               relationships: length(relationships),
+               duration_ms: duration_ms
+             }}
         }
       end
     end
   end
 
-  # Executes a select_objects_by_description tool call to select objects by natural language description.
+  # Executes select_objects_by_description (small canvas) or select_objects_by_filter_criteria (large canvas)
   #
-  # Filters objects based on the description provided and returns matching object IDs.
-  # The AI will have already parsed the description and matched it against the objects_context.
-  defp execute_tool_call(%{name: "select_objects_by_description", input: input}, canvas_id, _current_color) do
+  # Small canvas: AI filters and returns object_ids directly
+  # Large canvas: AI returns filter criteria, we filter server-side
+  defp execute_tool_call_legacy(
+         %{name: name, input: input},
+         canvas_id,
+         _current_color
+       ) when name in ["select_objects_by_description", "select_objects_by_filter_criteria"] do
     description = input["description"]
-    objects_context = input["objects_context"] || []
 
-    # The AI has already done the filtering based on the description and objects_context
-    # Extract the IDs from the filtered objects
-    selected_ids = Enum.map(objects_context, fn obj ->
-      obj["id"] || obj[:id]
-    end)
+    # Check if AI provided object_ids (small canvas approach)
+    selected_ids =
+      if input["object_ids"] && is_list(input["object_ids"]) do
+        # Small canvas: AI already filtered, just use the IDs
+        Logger.info("Semantic selection (small canvas): '#{description}' - AI returned #{length(input["object_ids"])} object IDs")
+        input["object_ids"]
+      else
+        # Large canvas: Apply filter criteria server-side
+        criteria = %{
+          "color" => input["color"],
+          "size_min" => input["size_min"],
+          "size_max" => input["size_max"],
+          "shape_type" => input["shape_type"],
+          "position" => input["position"]
+        }
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+        |> Map.new()
 
-    Logger.info("Semantic selection: '#{description}' matched #{length(selected_ids)} objects")
+        Logger.info("Semantic selection (large canvas): '#{description}' with criteria: #{inspect(criteria)}")
 
-    # Return the selected IDs - the LiveView will handle the actual selection
+        # Fetch all canvas objects
+        canvas = Canvases.get_canvas_with_preloads(canvas_id, [:objects])
+        all_objects = canvas.objects || []
+
+        # Build viewport if position filtering is needed
+        viewport =
+          if Map.has_key?(criteria, "position") do
+            # Viewport will be provided by LiveView when needed
+            # For now, we'll pass nil and handle in LiveView
+            nil
+          else
+            nil
+          end
+
+        # Apply filters server-side
+        filtered_ids = CanvasStats.apply_filter(all_objects, criteria, viewport)
+        Logger.info("Semantic selection matched #{length(filtered_ids)} objects")
+        filtered_ids
+      end
+
+    # Return the selected IDs
     %{
-      tool: "select_objects_by_description",
+      tool: name,
       input: input,
       result: {:ok, %{selected_ids: selected_ids, description: description}}
     }
+  end
+
+  # Executes an arrange_in_star tool call to arrange objects in a star pattern.
+  #
+  # Places objects at alternating outer and inner points to create star shapes.
+  defp execute_tool_call_legacy(
+         %{name: "arrange_in_star", input: input},
+         canvas_id,
+         _current_color
+       ) do
+    object_ids = input["object_ids"]
+    points = Map.get(input, "points", 5)
+    outer_radius = Map.get(input, "outer_radius", 300)
+    inner_radius = Map.get(input, "inner_radius")
+
+    start_time = System.monotonic_time(:millisecond)
+
+    # Fetch all objects to arrange
+    objects =
+      Enum.map(object_ids, fn id ->
+        case Canvases.get_object(id) do
+          nil ->
+            nil
+
+          obj ->
+            data =
+              if is_binary(obj.data) do
+                Jason.decode!(obj.data)
+              else
+                obj.data || %{}
+              end
+
+            %{
+              id: obj.id,
+              position: obj.position,
+              data: data
+            }
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    if length(objects) == 0 do
+      %{
+        tool: "arrange_in_star",
+        input: input,
+        result: {:error, :no_objects_found}
+      }
+    else
+      # Apply star layout
+      updates = Layout.star_layout(objects, points, outer_radius, inner_radius)
+
+      # Batch update all objects
+      results =
+        Enum.map(updates, fn update ->
+          attrs = %{position: update.position}
+          Canvases.update_object(update.id, attrs)
+        end)
+
+      # Broadcast updates
+      Enum.each(results, fn
+        {:ok, updated_object} ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            "canvas:#{canvas_id}",
+            {:object_updated, updated_object}
+          )
+
+        _ ->
+          :ok
+      end)
+
+      end_time = System.monotonic_time(:millisecond)
+      duration_ms = end_time - start_time
+
+      Logger.info(
+        "Star layout completed: #{points}-pointed star for #{length(results)} objects in #{duration_ms}ms"
+      )
+
+      failed =
+        Enum.any?(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
+
+      if failed do
+        %{
+          tool: "arrange_in_star",
+          input: input,
+          result: {:error, :partial_update_failure}
+        }
+      else
+        %{
+          tool: "arrange_in_star",
+          input: input,
+          result:
+            {:ok,
+             %{updated: length(results), points: points, outer_radius: outer_radius,
+               duration_ms: duration_ms}}
+        }
+      end
+    end
+  end
+
+  # Executes an arrange_along_path tool call to arrange objects along geometric paths.
+  #
+  # Supports line, arc, bezier, and spiral paths with full parameter control.
+  defp execute_tool_call_legacy(
+         %{name: "arrange_along_path", input: input},
+         canvas_id,
+         _current_color
+       ) do
+    object_ids = input["object_ids"]
+    path_type = input["path_type"]
+
+    start_time = System.monotonic_time(:millisecond)
+
+    # Fetch all objects to arrange
+    objects =
+      Enum.map(object_ids, fn id ->
+        case Canvases.get_object(id) do
+          nil ->
+            nil
+
+          obj ->
+            data =
+              if is_binary(obj.data) do
+                Jason.decode!(obj.data)
+              else
+                obj.data || %{}
+              end
+
+            %{
+              id: obj.id,
+              position: obj.position,
+              data: data
+            }
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    if length(objects) == 0 do
+      %{
+        tool: "arrange_along_path",
+        input: input,
+        result: {:error, :no_objects_found}
+      }
+    else
+      # Apply path-based layout
+      updates = Layout.arrange_along_path(objects, path_type, input)
+
+      # Batch update all objects
+      results =
+        Enum.map(updates, fn update ->
+          attrs = %{position: update.position}
+          Canvases.update_object(update.id, attrs)
+        end)
+
+      # Broadcast updates
+      Enum.each(results, fn
+        {:ok, updated_object} ->
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            "canvas:#{canvas_id}",
+            {:object_updated, updated_object}
+          )
+
+        _ ->
+          :ok
+      end)
+
+      end_time = System.monotonic_time(:millisecond)
+      duration_ms = end_time - start_time
+
+      Logger.info(
+        "Path layout completed: #{path_type} path for #{length(results)} objects in #{duration_ms}ms"
+      )
+
+      failed =
+        Enum.any?(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
+
+      if failed do
+        %{
+          tool: "arrange_along_path",
+          input: input,
+          result: {:error, :partial_update_failure}
+        }
+      else
+        %{
+          tool: "arrange_along_path",
+          input: input,
+          result:
+            {:ok,
+             %{updated: length(results), path_type: path_type, duration_ms: duration_ms}}
+        }
+      end
+    end
   end
 
   # Fallback handler for unknown tool calls.
@@ -1802,57 +2451,133 @@ defmodule CollabCanvas.AI.Agent do
   defp color_name_to_hex(name) do
     case name do
       # Primary colors
-      "red" -> "#FF0000"
-      "green" -> "#00FF00"
-      "blue" -> "#0000FF"
+      "red" ->
+        "#FF0000"
+
+      "green" ->
+        "#00FF00"
+
+      "blue" ->
+        "#0000FF"
 
       # Secondary colors
-      "yellow" -> "#FFFF00"
-      "cyan" -> "#00FFFF"
-      "magenta" -> "#FF00FF"
+      "yellow" ->
+        "#FFFF00"
+
+      "cyan" ->
+        "#00FFFF"
+
+      "magenta" ->
+        "#FF00FF"
 
       # Common colors
-      "orange" -> "#FFA500"
-      "purple" -> "#800080"
-      "pink" -> "#FFC0CB"
-      "brown" -> "#A52A2A"
-      "gray" -> "#808080"
-      "grey" -> "#808080"
+      "orange" ->
+        "#FFA500"
+
+      "purple" ->
+        "#800080"
+
+      "pink" ->
+        "#FFC0CB"
+
+      "brown" ->
+        "#A52A2A"
+
+      "gray" ->
+        "#808080"
+
+      "grey" ->
+        "#808080"
 
       # Light/Dark variants
-      "light gray" -> "#D3D3D3"
-      "light grey" -> "#D3D3D3"
-      "dark gray" -> "#A9A9A9"
-      "dark grey" -> "#A9A9A9"
-      "light blue" -> "#ADD8E6"
-      "dark blue" -> "#00008B"
-      "light green" -> "#90EE90"
-      "dark green" -> "#006400"
-      "light red" -> "#FF6B6B"
-      "dark red" -> "#8B0000"
+      "light gray" ->
+        "#D3D3D3"
+
+      "light grey" ->
+        "#D3D3D3"
+
+      "dark gray" ->
+        "#A9A9A9"
+
+      "dark grey" ->
+        "#A9A9A9"
+
+      "light blue" ->
+        "#ADD8E6"
+
+      "dark blue" ->
+        "#00008B"
+
+      "light green" ->
+        "#90EE90"
+
+      "dark green" ->
+        "#006400"
+
+      "light red" ->
+        "#FF6B6B"
+
+      "dark red" ->
+        "#8B0000"
 
       # Extended colors
-      "lime" -> "#00FF00"
-      "navy" -> "#000080"
-      "teal" -> "#008080"
-      "maroon" -> "#800000"
-      "olive" -> "#808000"
-      "aqua" -> "#00FFFF"
-      "fuchsia" -> "#FF00FF"
-      "silver" -> "#C0C0C0"
-      "gold" -> "#FFD700"
-      "indigo" -> "#4B0082"
-      "violet" -> "#EE82EE"
-      "coral" -> "#FF7F50"
-      "salmon" -> "#FA8072"
-      "turquoise" -> "#40E0D0"
-      "khaki" -> "#F0E68C"
-      "plum" -> "#DDA0DD"
-      "crimson" -> "#DC143C"
+      "lime" ->
+        "#00FF00"
+
+      "navy" ->
+        "#000080"
+
+      "teal" ->
+        "#008080"
+
+      "maroon" ->
+        "#800000"
+
+      "olive" ->
+        "#808000"
+
+      "aqua" ->
+        "#00FFFF"
+
+      "fuchsia" ->
+        "#FF00FF"
+
+      "silver" ->
+        "#C0C0C0"
+
+      "gold" ->
+        "#FFD700"
+
+      "indigo" ->
+        "#4B0082"
+
+      "violet" ->
+        "#EE82EE"
+
+      "coral" ->
+        "#FF7F50"
+
+      "salmon" ->
+        "#FA8072"
+
+      "turquoise" ->
+        "#40E0D0"
+
+      "khaki" ->
+        "#F0E68C"
+
+      "plum" ->
+        "#DDA0DD"
+
+      "crimson" ->
+        "#DC143C"
 
       # Grayscale
-      "black" -> "#000000"
-      "white" -> "#FFFFFF"
+      "black" ->
+        "#000000"
+
+      "white" ->
+        "#FFFFFF"
 
       # Unknown color - default to black
       _ ->

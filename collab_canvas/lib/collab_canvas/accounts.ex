@@ -220,11 +220,12 @@ defmodule CollabCanvas.Accounts do
     avatar = Map.get(auth_data, :avatar) || Map.get(auth_data, :picture)
 
     # Try to find existing user by provider_uid first (more reliable)
-    user = if provider_uid do
-      Repo.get_by(User, provider: provider, provider_uid: provider_uid)
-    else
-      nil
-    end
+    user =
+      if provider_uid do
+        Repo.get_by(User, provider: provider, provider_uid: provider_uid)
+      else
+        nil
+      end
 
     # Fall back to email lookup if provider_uid not found
     user = user || Repo.get_by(User, email: email)

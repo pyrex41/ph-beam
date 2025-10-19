@@ -157,12 +157,20 @@ defmodule CollabCanvas.ColorPalettes do
 
     favorite_colors =
       case Jason.decode(preferences.favorite_colors) do
-        {:ok, colors} when is_list(colors) -> colors
+        {:ok, colors} when is_list(colors) ->
+          colors
+
         {:error, reason} ->
           require Logger
-          Logger.warning("Failed to decode favorite colors for user #{user_id}: #{inspect(reason)}")
+
+          Logger.warning(
+            "Failed to decode favorite colors for user #{user_id}: #{inspect(reason)}"
+          )
+
           []
-        _ -> []
+
+        _ ->
+          []
       end
 
     # Don't add duplicates
@@ -203,12 +211,20 @@ defmodule CollabCanvas.ColorPalettes do
 
     favorite_colors =
       case Jason.decode(preferences.favorite_colors) do
-        {:ok, colors} when is_list(colors) -> colors
+        {:ok, colors} when is_list(colors) ->
+          colors
+
         {:error, reason} ->
           require Logger
-          Logger.warning("Failed to decode favorite colors for user #{user_id}: #{inspect(reason)}")
+
+          Logger.warning(
+            "Failed to decode favorite colors for user #{user_id}: #{inspect(reason)}"
+          )
+
           []
-        _ -> []
+
+        _ ->
+          []
       end
 
     updated_favorites =

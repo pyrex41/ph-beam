@@ -19,8 +19,10 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
 
   schema "user_color_preferences" do
     belongs_to :user, User
-    field :recent_colors, :string, default: "[]"  # JSON array of hex colors
-    field :favorite_colors, :string, default: "[]"  # JSON array of hex colors
+    # JSON array of hex colors
+    field :recent_colors, :string, default: "[]"
+    # JSON array of hex colors
+    field :favorite_colors, :string, default: "[]"
     field :default_color, :string, default: "#000000"
 
     timestamps(type: :utc_datetime)
@@ -93,10 +95,16 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   """
   def decode_recent_colors(preference) do
     case Jason.decode(preference.recent_colors) do
-      {:ok, colors} -> colors
+      {:ok, colors} ->
+        colors
+
       {:error, reason} ->
         require Logger
-        Logger.warning("Failed to decode recent colors for user #{preference.user_id}: #{inspect(reason)}")
+
+        Logger.warning(
+          "Failed to decode recent colors for user #{preference.user_id}: #{inspect(reason)}"
+        )
+
         []
     end
   end
@@ -106,10 +114,16 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   """
   def decode_favorite_colors(preference) do
     case Jason.decode(preference.favorite_colors) do
-      {:ok, colors} -> colors
+      {:ok, colors} ->
+        colors
+
       {:error, reason} ->
         require Logger
-        Logger.warning("Failed to decode favorite colors for user #{preference.user_id}: #{inspect(reason)}")
+
+        Logger.warning(
+          "Failed to decode favorite colors for user #{preference.user_id}: #{inspect(reason)}"
+        )
+
         []
     end
   end
@@ -118,15 +132,24 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   Adds a color to recent colors (LIFO queue with max 8 items).
   Removes duplicates and moves existing color to front.
   """
-  def add_to_recent(recent_colors_json, new_color) when is_binary(recent_colors_json) and is_binary(new_color) do
+  def add_to_recent(recent_colors_json, new_color)
+      when is_binary(recent_colors_json) and is_binary(new_color) do
     recent_colors =
       case Jason.decode(recent_colors_json) do
-        {:ok, colors} when is_list(colors) -> colors
+        {:ok, colors} when is_list(colors) ->
+          colors
+
         {:error, reason} ->
           require Logger
-          Logger.warning("Failed to decode recent colors when adding new color: #{inspect(reason)}")
+
+          Logger.warning(
+            "Failed to decode recent colors when adding new color: #{inspect(reason)}"
+          )
+
           []
-        _ -> []
+
+        _ ->
+          []
       end
 
     # Remove existing instance of this color and prepend it

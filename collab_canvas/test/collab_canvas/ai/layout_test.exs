@@ -49,7 +49,8 @@ defmodule CollabCanvas.AI.LayoutTest do
       result = Layout.distribute_horizontally(objects, 20)
 
       assert Enum.at(result, 0).position.x == 0
-      assert Enum.at(result, 1).position.x == 70  # 50 (width) + 20 (spacing)
+      # 50 (width) + 20 (spacing)
+      assert Enum.at(result, 1).position.x == 70
     end
 
     test "handles single object" do
@@ -120,7 +121,8 @@ defmodule CollabCanvas.AI.LayoutTest do
       result = Layout.distribute_vertically(objects, 20)
 
       assert Enum.at(result, 0).position.y == 0
-      assert Enum.at(result, 1).position.y == 70  # 50 (height) + 20 (spacing)
+      # 50 (height) + 20 (spacing)
+      assert Enum.at(result, 1).position.y == 70
     end
 
     test "preserves x coordinates" do
@@ -150,12 +152,14 @@ defmodule CollabCanvas.AI.LayoutTest do
       # First row
       assert Enum.at(result, 0).position.x == 0
       assert Enum.at(result, 0).position.y == 0
-      assert Enum.at(result, 1).position.x == 60  # 50 + 10 spacing
+      # 50 + 10 spacing
+      assert Enum.at(result, 1).position.x == 60
       assert Enum.at(result, 1).position.y == 0
 
       # Second row
       assert Enum.at(result, 2).position.x == 0
-      assert Enum.at(result, 2).position.y == 60  # 50 + 10 spacing
+      # 50 + 10 spacing
+      assert Enum.at(result, 2).position.y == 60
       assert Enum.at(result, 3).position.x == 60
       assert Enum.at(result, 3).position.y == 60
     end
@@ -172,12 +176,15 @@ defmodule CollabCanvas.AI.LayoutTest do
 
       # First row (3 items)
       assert Enum.at(result, 0).position.x == 0
-      assert Enum.at(result, 1).position.x == 70  # 50 + 20 spacing
-      assert Enum.at(result, 2).position.x == 140  # (50 + 20) * 2
+      # 50 + 20 spacing
+      assert Enum.at(result, 1).position.x == 70
+      # (50 + 20) * 2
+      assert Enum.at(result, 2).position.x == 140
 
       # Second row (1 item)
       assert Enum.at(result, 3).position.x == 0
-      assert Enum.at(result, 3).position.y == 70  # 50 + 20 spacing
+      # 50 + 20 spacing
+      assert Enum.at(result, 3).position.y == 70
     end
 
     test "handles varying object sizes" do
@@ -190,7 +197,8 @@ defmodule CollabCanvas.AI.LayoutTest do
       result = Layout.arrange_grid(objects, 2, 10)
 
       # Should use max width (60) for uniform grid
-      assert Enum.at(result, 1).position.x == 70  # 60 + 10
+      # 60 + 10
+      assert Enum.at(result, 1).position.x == 70
     end
 
     test "handles empty list" do
@@ -226,8 +234,10 @@ defmodule CollabCanvas.AI.LayoutTest do
       result = Layout.align_objects(objects, "right")
 
       # Both should align right edges to x: 200 (rightmost edge)
-      assert Enum.at(result, 0).position.x == 150  # 200 - 50 (width)
-      assert Enum.at(result, 1).position.x == 150  # 200 - 50 (width)
+      # 200 - 50 (width)
+      assert Enum.at(result, 0).position.x == 150
+      # 200 - 50 (width)
+      assert Enum.at(result, 1).position.x == 150
     end
 
     test "aligns objects to horizontal center" do
@@ -239,10 +249,12 @@ defmodule CollabCanvas.AI.LayoutTest do
       result = Layout.align_objects(objects, "center")
 
       # Both should align to same center x coordinate
-      center1 = Enum.at(result, 0).position.x + 25  # x + width/2
+      # x + width/2
+      center1 = Enum.at(result, 0).position.x + 25
       center2 = Enum.at(result, 1).position.x + 25
 
-      assert abs(center1 - center2) <= 1  # Within ±1px
+      # Within ±1px
+      assert abs(center1 - center2) <= 1
     end
 
     test "aligns objects to the top" do
@@ -267,8 +279,10 @@ defmodule CollabCanvas.AI.LayoutTest do
       result = Layout.align_objects(objects, "bottom")
 
       # Both should align bottom edges to y: 200 (bottommost edge)
-      assert Enum.at(result, 0).position.y == 150  # 200 - 50 (height)
-      assert Enum.at(result, 1).position.y == 150  # 200 - 50 (height)
+      # 200 - 50 (height)
+      assert Enum.at(result, 0).position.y == 150
+      # 200 - 50 (height)
+      assert Enum.at(result, 1).position.y == 150
     end
 
     test "aligns objects to vertical middle" do
@@ -280,10 +294,12 @@ defmodule CollabCanvas.AI.LayoutTest do
       result = Layout.align_objects(objects, "middle")
 
       # Both should align to same middle y coordinate
-      middle1 = Enum.at(result, 0).position.y + 25  # y + height/2
+      # y + height/2
+      middle1 = Enum.at(result, 0).position.y + 25
       middle2 = Enum.at(result, 1).position.y + 25
 
-      assert abs(middle1 - middle2) <= 1  # Within ±1px
+      # Within ±1px
+      assert abs(middle1 - middle2) <= 1
     end
 
     test "handles single object" do
@@ -331,14 +347,17 @@ defmodule CollabCanvas.AI.LayoutTest do
 
       # Objects should be evenly distributed (90 degrees apart for 4 objects)
       # Verify they're all roughly the same distance from center
-      center_x = 250  # Average of input x coordinates
-      center_y = 250  # Average of input y coordinates
+      # Average of input x coordinates
+      center_x = 250
+      # Average of input y coordinates
+      center_y = 250
 
-      distances = Enum.map(result, fn obj ->
-        dx = obj.position.x - center_x
-        dy = obj.position.y - center_y
-        :math.sqrt(dx * dx + dy * dy)
-      end)
+      distances =
+        Enum.map(result, fn obj ->
+          dx = obj.position.x - center_x
+          dy = obj.position.y - center_y
+          :math.sqrt(dx * dx + dy * dy)
+        end)
 
       # All distances should be approximately equal to radius (within tolerance for object centering)
       assert Enum.all?(distances, fn dist -> abs(dist - 150) < 50 end)
@@ -360,42 +379,54 @@ defmodule CollabCanvas.AI.LayoutTest do
   describe "performance requirements" do
     test "completes layout operations within 500ms for 50 objects" do
       # Generate 50 objects with varied positions and sizes
-      objects = Enum.map(1..50, fn i ->
-        %{
-          id: "obj-#{i}",
-          position: %{x: rem(i * 30, 800), y: rem(i * 40, 600)},
-          data: %{width: 40 + rem(i, 20), height: 40 + rem(i, 20)}
-        }
-      end)
+      objects =
+        Enum.map(1..50, fn i ->
+          %{
+            id: "obj-#{i}",
+            position: %{x: rem(i * 30, 800), y: rem(i * 40, 600)},
+            data: %{width: 40 + rem(i, 20), height: 40 + rem(i, 20)}
+          }
+        end)
 
       # Test horizontal distribution
-      {time_h, _result} = :timer.tc(fn ->
-        Layout.distribute_horizontally(objects, :even)
-      end)
-      assert time_h < 500_000, "Horizontal distribution took #{time_h / 1000}ms (should be < 500ms)"
+      {time_h, _result} =
+        :timer.tc(fn ->
+          Layout.distribute_horizontally(objects, :even)
+        end)
+
+      assert time_h < 500_000,
+             "Horizontal distribution took #{time_h / 1000}ms (should be < 500ms)"
 
       # Test vertical distribution
-      {time_v, _result} = :timer.tc(fn ->
-        Layout.distribute_vertically(objects, :even)
-      end)
+      {time_v, _result} =
+        :timer.tc(fn ->
+          Layout.distribute_vertically(objects, :even)
+        end)
+
       assert time_v < 500_000, "Vertical distribution took #{time_v / 1000}ms (should be < 500ms)"
 
       # Test grid arrangement
-      {time_g, _result} = :timer.tc(fn ->
-        Layout.arrange_grid(objects, 5, 20)
-      end)
+      {time_g, _result} =
+        :timer.tc(fn ->
+          Layout.arrange_grid(objects, 5, 20)
+        end)
+
       assert time_g < 500_000, "Grid arrangement took #{time_g / 1000}ms (should be < 500ms)"
 
       # Test alignment
-      {time_a, _result} = :timer.tc(fn ->
-        Layout.align_objects(objects, "center")
-      end)
+      {time_a, _result} =
+        :timer.tc(fn ->
+          Layout.align_objects(objects, "center")
+        end)
+
       assert time_a < 500_000, "Alignment took #{time_a / 1000}ms (should be < 500ms)"
 
       # Test circular layout
-      {time_c, _result} = :timer.tc(fn ->
-        Layout.circular_layout(objects, 300)
-      end)
+      {time_c, _result} =
+        :timer.tc(fn ->
+          Layout.circular_layout(objects, 300)
+        end)
+
       assert time_c < 500_000, "Circular layout took #{time_c / 1000}ms (should be < 500ms)"
     end
   end
