@@ -85,6 +85,7 @@ defmodule CollabCanvasWeb.CanvasLive do
   alias CollabCanvas.Canvases
   alias CollabCanvas.ColorPalettes
   alias CollabCanvas.AI.Agent
+  alias CollabCanvas.UndoHistory
   alias CollabCanvasWeb.Presence
   alias CollabCanvasWeb.Plugs.Auth
 
@@ -154,6 +155,9 @@ defmodule CollabCanvasWeb.CanvasLive do
       # Load user's saved viewport position for this canvas
       viewport = Canvases.get_viewport(user.id, canvas_id)
 
+      # Load user's undo/redo history stacks for this canvas
+      history_stacks = UndoHistory.get_stacks(user_id, canvas_id)
+
       # Initialize socket state
       socket =
         socket
@@ -172,6 +176,11 @@ defmodule CollabCanvasWeb.CanvasLive do
         |> assign(:show_labels, false)
         |> assign(:current_color, ColorPalettes.get_default_color(user.id))
         |> assign(:show_color_picker, false)
+        |> assign(:undo_stack, history_stacks.undo_stack)
+        |> assign(:redo_stack, history_stacks.redo_stack)
+        |> assign(:operation_batch_started, false)
+        |> assign(:operation_initial_states, %{})
+        |> assign(:play_error_sound, ColorPalettes.get_play_error_sound(user.id))
 
       # If viewport position exists, push it to the client to restore position
       socket =
@@ -211,6 +220,17 @@ defmodule CollabCanvasWeb.CanvasLive do
     ]
 
     Enum.random(colors)
+  end
+
+  @doc false
+  # Helper function to conditionally play error sound based on user preference
+  # Pushes play_error_sound event to JavaScript if user has enabled the setting
+  defp maybe_play_error_sound(socket) do
+    if socket.assigns.play_error_sound do
+      push_event(socket, "play_error_sound", %{})
+    else
+      socket
+    end
   end
 
   @doc """
@@ -254,6 +274,20 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     case Canvases.create_object(canvas_id, type, attrs) do
       {:ok, object} ->
+        # Capture operation for undo/redo
+        operation = UndoHistory.create_operation("create", [
+          %{
+            id: object.id,
+            before: nil,  # Object didn't exist before
+            after: %{
+              "type" => type,
+              "position" => object.position,
+              "data" => object.data
+            }
+          }
+        ])
+        UndoHistory.push_operation(socket.assigns.user_id, canvas_id, operation)
+
         # Broadcast to all connected clients (including other browser tabs)
         Phoenix.PubSub.broadcast(
           CollabCanvas.PubSub,
@@ -570,6 +604,16 @@ defmodule CollabCanvasWeb.CanvasLive do
       when is_list(updates) do
     user_id = socket.assigns.user_id
 
+    # Capture "before" states for undo/redo
+    objects_before =
+      Enum.map(updates, fn update_params ->
+        object_id = update_params["object_id"] || update_params["id"]
+        object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
+        {object_id, Canvases.get_object(object_id)}
+      end)
+      |> Enum.filter(fn {_id, obj} -> obj != nil end)
+      |> Map.new()
+
     # Execute all updates in a transaction
     result =
       CollabCanvas.Repo.transaction(fn ->
@@ -606,6 +650,39 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     case result do
       {:ok, updated_objects} ->
+        # Only capture operation for undo/redo if NOT in a batch operation
+        # If we're in a batch (e.g., drag), we'll capture at the end
+        unless socket.assigns.operation_batch_started do
+          operation_objects =
+            Enum.map(updated_objects, fn updated_obj ->
+              before_obj = Map.get(objects_before, updated_obj.id)
+
+              if before_obj do
+                %{
+                  id: updated_obj.id,
+                  before: %{
+                    "type" => before_obj.type,
+                    "position" => before_obj.position,
+                    "data" => before_obj.data
+                  },
+                  after: %{
+                    "type" => updated_obj.type,
+                    "position" => updated_obj.position,
+                    "data" => updated_obj.data
+                  }
+                }
+              else
+                nil
+              end
+            end)
+            |> Enum.reject(&is_nil/1)
+
+          if length(operation_objects) > 0 do
+            operation = UndoHistory.create_operation("batch_update", operation_objects)
+            UndoHistory.push_operation(socket.assigns.user_id, socket.assigns.canvas_id, operation)
+          end
+        end
+
         # Broadcast to all connected clients (include originating user_id to prevent self-update)
         Phoenix.PubSub.broadcast(
           CollabCanvas.PubSub,
@@ -683,9 +760,28 @@ defmodule CollabCanvasWeb.CanvasLive do
         {:noreply, put_flash(socket, :error, "Object not found")}
 
       _ ->
+        # Capture object state before deletion for undo/redo
+        object_before_delete = Canvases.get_object(object_id)
+
         # Object is unlocked or locked by current user, proceed with deletion
         case Canvases.delete_object(object_id) do
           {:ok, _deleted_object} ->
+            # Capture operation for undo/redo
+            if object_before_delete do
+              operation = UndoHistory.create_operation("delete", [
+                %{
+                  id: object_id,
+                  before: %{
+                    "type" => object_before_delete.type,
+                    "position" => object_before_delete.position,
+                    "data" => object_before_delete.data
+                  },
+                  after: nil  # Object no longer exists after deletion
+                }
+              ])
+              UndoHistory.push_operation(socket.assigns.user_id, socket.assigns.canvas_id, operation)
+            end
+
             # Broadcast to all connected clients
             Phoenix.PubSub.broadcast(
               CollabCanvas.PubSub,
@@ -1550,12 +1646,176 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles toggling the error sound preference.
+
+  Updates the user's preference for playing error sounds on AI tool call failures.
+  """
+  def handle_event("toggle_error_sound", %{"enabled" => enabled}, socket) do
+    user_id = socket.assigns.current_user.id
+
+    case ColorPalettes.set_play_error_sound(user_id, enabled) do
+      {:ok, _preferences} ->
+        {:noreply, assign(socket, :play_error_sound, enabled)}
+
+      {:error, reason} ->
+        Logger.error("Failed to update error sound preference: #{inspect(reason)}")
+        {:noreply, socket}
+    end
+  end
+
+  @doc """
   Handles reset view request to fit all objects on screen.
 
   Sends a push_event to the client canvas manager to calculate and apply the optimal viewport.
   """
   def handle_event("reset_view", _params, socket) do
     {:noreply, push_event(socket, "reset_view", %{})}
+  end
+
+  @doc """
+  Handles the start of a batch operation (e.g., drag start).
+
+  Captures the initial state of objects before any changes are made.
+  This allows us to create a single undo operation for the entire batch.
+  """
+  def handle_event("start_operation", %{"object_ids" => object_ids}, socket) do
+    # Capture initial states of all objects involved in this operation
+    initial_states =
+      object_ids
+      |> Enum.map(fn id ->
+        object_id = if is_binary(id), do: String.to_integer(id), else: id
+        object = Canvases.get_object(object_id)
+
+        if object do
+          {object_id, %{
+            "type" => object.type,
+            "position" => object.position,
+            "data" => object.data
+          }}
+        else
+          nil
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Map.new()
+
+    {:noreply,
+     socket
+     |> assign(:operation_batch_started, true)
+     |> assign(:operation_initial_states, initial_states)}
+  end
+
+  @doc """
+  Handles the end of a batch operation (e.g., drag end).
+
+  Creates a single undo operation using the initial states captured at batch start
+  and the current (final) states of the objects.
+  """
+  def handle_event("end_operation", %{"object_ids" => object_ids}, socket) do
+    if socket.assigns.operation_batch_started do
+      initial_states = socket.assigns.operation_initial_states
+
+      # Capture final states
+      operation_objects =
+        object_ids
+        |> Enum.map(fn id ->
+          object_id = if is_binary(id), do: String.to_integer(id), else: id
+          object = Canvases.get_object(object_id)
+          before_state = Map.get(initial_states, object_id)
+
+          if object && before_state do
+            %{
+              id: object_id,
+              before: before_state,
+              after: %{
+                "type" => object.type,
+                "position" => object.position,
+                "data" => object.data
+              }
+            }
+          else
+            nil
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      # Only create operation if states actually changed
+      if length(operation_objects) > 0 do
+        operation = UndoHistory.create_operation("batch_update", operation_objects)
+        UndoHistory.push_operation(socket.assigns.user_id, socket.assigns.canvas_id, operation)
+      end
+
+      {:noreply,
+       socket
+       |> assign(:operation_batch_started, false)
+       |> assign(:operation_initial_states, %{})}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Handles undo operation for the current user.
+
+  Pops the most recent operation from the undo stack, applies the inverse changes
+  (restores "before" states), and pushes the operation onto the redo stack.
+
+  ## Returns
+
+  `{:noreply, socket}` with updated stacks and restored object states.
+  """
+  def handle_event("undo", _params, socket) do
+    user_id = socket.assigns.user_id
+    canvas_id = socket.assigns.canvas_id
+
+    case UndoHistory.undo(user_id, canvas_id) do
+      {:ok, operation} ->
+        # Apply the inverse operation (restore "before" states)
+        socket = apply_undo_operation(socket, operation)
+
+        # Update socket assigns with new stacks
+        history_stacks = UndoHistory.get_stacks(user_id, canvas_id)
+
+        {:noreply,
+         socket
+         |> assign(:undo_stack, history_stacks.undo_stack)
+         |> assign(:redo_stack, history_stacks.redo_stack)}
+
+      {:error, :empty_undo_stack} ->
+        {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Handles redo operation for the current user.
+
+  Pops the most recent operation from the redo stack, reapplies the changes
+  (restores "after" states), and pushes the operation back onto the undo stack.
+
+  ## Returns
+
+  `{:noreply, socket}` with updated stacks and reapplied object states.
+  """
+  def handle_event("redo", _params, socket) do
+    user_id = socket.assigns.user_id
+    canvas_id = socket.assigns.canvas_id
+
+    case UndoHistory.redo(user_id, canvas_id) do
+      {:ok, operation} ->
+        # Reapply the operation (restore "after" states)
+        socket = apply_redo_operation(socket, operation)
+
+        # Update socket assigns with new stacks
+        history_stacks = UndoHistory.get_stacks(user_id, canvas_id)
+
+        {:noreply,
+         socket
+         |> assign(:undo_stack, history_stacks.undo_stack)
+         |> assign(:redo_stack, history_stacks.redo_stack)}
+
+      {:error, :empty_redo_stack} ->
+        {:noreply, socket}
+    end
   end
 
   @doc """
@@ -2034,6 +2294,7 @@ defmodule CollabCanvasWeb.CanvasLive do
        socket
        |> assign(:ai_loading, false)
        |> assign(:ai_task_ref, nil)
+       |> maybe_play_error_sound()
        |> put_flash(:error, "AI processing failed unexpectedly")}
     else
       {:noreply, socket}
@@ -2065,6 +2326,7 @@ defmodule CollabCanvasWeb.CanvasLive do
        socket
        |> assign(:ai_loading, false)
        |> assign(:ai_task_ref, nil)
+       |> maybe_play_error_sound()
        |> put_flash(:error, "AI request timed out after 30 seconds. Please try again.")}
     else
       # Timeout for an old task that already completed, ignore
@@ -2120,6 +2382,202 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     # Presence tracking is automatically cleaned up when process dies
     :ok
+  end
+
+  @doc false
+  # Applies an undo operation by restoring "before" states of all affected objects.
+  # Handles create (delete object), delete (recreate object), and update (restore previous state).
+  defp apply_undo_operation(socket, operation) do
+    canvas_id = socket.assigns.canvas_id
+    topic = socket.assigns.topic
+    operation_type = operation["type"]
+    objects = operation["objects"] || []
+
+    case operation_type do
+      "create" ->
+        # Undo create = delete the objects
+        Enum.each(objects, fn obj_snapshot ->
+          object_id = obj_snapshot["id"]
+
+          case Canvases.delete_object(object_id) do
+            {:ok, _} ->
+              Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_deleted, object_id})
+              Logger.info("Undo create: deleted object #{object_id}")
+
+            _ ->
+              :ok
+          end
+        end)
+
+        # Update local state
+        updated_objects =
+          socket.assigns.objects
+          |> Enum.reject(fn obj -> Enum.any?(objects, fn s -> s["id"] == obj.id end) end)
+
+        assign(socket, :objects, updated_objects)
+
+      "delete" ->
+        # Undo delete = recreate the objects from "before" state
+        created_objects =
+          Enum.map(objects, fn obj_snapshot ->
+            before_state = obj_snapshot["before"]
+
+            if before_state do
+              attrs = %{
+                position: before_state["position"],
+                data: before_state["data"]
+              }
+
+              type = before_state["type"] || "rectangle"
+
+              case Canvases.create_object(canvas_id, type, attrs) do
+                {:ok, new_object} ->
+                  Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_created, new_object})
+                  Logger.info("Undo delete: recreated object #{new_object.id}")
+                  new_object
+
+                _ ->
+                  nil
+              end
+            else
+              nil
+            end
+          end)
+          |> Enum.reject(&is_nil/1)
+
+        # Update local state
+        updated_objects = socket.assigns.objects ++ created_objects
+        assign(socket, :objects, updated_objects)
+
+      "batch_update" ->
+        # Undo batch update = restore "before" states
+        Enum.each(objects, fn obj_snapshot ->
+          object_id = obj_snapshot["id"]
+          before_state = obj_snapshot["before"]
+
+          if before_state do
+            attrs = %{
+              position: before_state["position"],
+              data: before_state["data"]
+            }
+
+            case Canvases.update_object(object_id, attrs) do
+              {:ok, updated_object} ->
+                Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_updated, updated_object})
+                Logger.info("Undo batch_update: restored object #{object_id}")
+
+              _ ->
+                :ok
+            end
+          end
+        end)
+
+        # Refresh objects from database
+        canvas = Canvases.get_canvas_with_preloads(canvas_id, [:objects])
+        assign(socket, :objects, canvas.objects)
+
+      _ ->
+        # Unknown operation type, do nothing
+        socket
+    end
+  end
+
+  @doc false
+  # Applies a redo operation by restoring "after" states of all affected objects.
+  # Handles create (recreate object), delete (delete again), and update (reapply changes).
+  defp apply_redo_operation(socket, operation) do
+    canvas_id = socket.assigns.canvas_id
+    topic = socket.assigns.topic
+    operation_type = operation["type"]
+    objects = operation["objects"] || []
+
+    case operation_type do
+      "create" ->
+        # Redo create = recreate the objects from "after" state
+        created_objects =
+          Enum.map(objects, fn obj_snapshot ->
+            after_state = obj_snapshot["after"]
+
+            if after_state do
+              attrs = %{
+                position: after_state["position"],
+                data: after_state["data"]
+              }
+
+              type = after_state["type"] || "rectangle"
+
+              case Canvases.create_object(canvas_id, type, attrs) do
+                {:ok, new_object} ->
+                  Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_created, new_object})
+                  Logger.info("Redo create: recreated object #{new_object.id}")
+                  new_object
+
+                _ ->
+                  nil
+              end
+            else
+              nil
+            end
+          end)
+          |> Enum.reject(&is_nil/1)
+
+        # Update local state
+        updated_objects = socket.assigns.objects ++ created_objects
+        assign(socket, :objects, updated_objects)
+
+      "delete" ->
+        # Redo delete = delete the objects again
+        Enum.each(objects, fn obj_snapshot ->
+          object_id = obj_snapshot["id"]
+
+          case Canvases.delete_object(object_id) do
+            {:ok, _} ->
+              Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_deleted, object_id})
+              Logger.info("Redo delete: deleted object #{object_id}")
+
+            _ ->
+              :ok
+          end
+        end)
+
+        # Update local state
+        updated_objects =
+          socket.assigns.objects
+          |> Enum.reject(fn obj -> Enum.any?(objects, fn s -> s["id"] == obj.id end) end)
+
+        assign(socket, :objects, updated_objects)
+
+      "batch_update" ->
+        # Redo batch update = restore "after" states
+        Enum.each(objects, fn obj_snapshot ->
+          object_id = obj_snapshot["id"]
+          after_state = obj_snapshot["after"]
+
+          if after_state do
+            attrs = %{
+              position: after_state["position"],
+              data: after_state["data"]
+            }
+
+            case Canvases.update_object(object_id, attrs) do
+              {:ok, updated_object} ->
+                Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_updated, updated_object})
+                Logger.info("Redo batch_update: restored object #{object_id}")
+
+              _ ->
+                :ok
+            end
+          end
+        end)
+
+        # Refresh objects from database
+        canvas = Canvases.get_canvas_with_preloads(canvas_id, [:objects])
+        assign(socket, :objects, canvas.objects)
+
+      _ ->
+        # Unknown operation type, do nothing
+        socket
+    end
   end
 
   @doc false
@@ -2606,6 +3064,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         socket
         |> add_ai_response.(clarifying_question)
+        |> maybe_play_error_sound()
         |> put_flash(:error, "Canvas not found")
 
       {:error, :missing_api_key} ->
@@ -2614,6 +3073,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         socket
         |> add_ai_response.(clarifying_question)
+        |> maybe_play_error_sound()
         |> put_flash(
           :error,
           "AI API key not configured. Please set CLAUDE_API_KEY environment variable."
@@ -2634,6 +3094,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         socket
         |> add_ai_response.(clarifying_question)
+        |> maybe_play_error_sound()
         |> put_flash(:error, error_msg)
 
       {:error, {:request_failed, reason}} ->
@@ -2644,6 +3105,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         socket
         |> add_ai_response.(clarifying_question)
+        |> maybe_play_error_sound()
         |> put_flash(:error, "AI request failed: #{inspect(reason)}")
 
       {:error, :invalid_response_format} ->
@@ -2652,6 +3114,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         socket
         |> add_ai_response.(clarifying_question)
+        |> maybe_play_error_sound()
         |> put_flash(:error, "AI returned invalid response format")
 
       {:error, reason} ->
@@ -2660,6 +3123,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         socket
         |> add_ai_response.(clarifying_question)
+        |> maybe_play_error_sound()
         |> put_flash(:error, "AI command failed: #{inspect(reason)}")
     end
   end
@@ -2775,10 +3239,55 @@ defmodule CollabCanvasWeb.CanvasLive do
           </svg>
           <span class="absolute right-1 bottom-1 text-[10px] font-bold opacity-50">D</span>
         </button>
-        
+
     <!-- Divider -->
         <div class="w-10 h-px bg-gray-300 my-2"></div>
-        
+
+    <!-- Undo Button -->
+        <button
+          phx-click="undo"
+          class={[
+            "w-12 h-12 rounded-lg flex items-center justify-center transition-colors",
+            length(@undo_stack) > 0 && "hover:bg-gray-100 text-gray-700",
+            length(@undo_stack) == 0 && "opacity-30 cursor-not-allowed text-gray-400"
+          ]}
+          disabled={length(@undo_stack) == 0}
+          title={"Undo (Ctrl+Z) - #{length(@undo_stack)} operations"}
+        >
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+            />
+          </svg>
+        </button>
+
+    <!-- Redo Button -->
+        <button
+          phx-click="redo"
+          class={[
+            "w-12 h-12 rounded-lg flex items-center justify-center transition-colors",
+            length(@redo_stack) > 0 && "hover:bg-gray-100 text-gray-700",
+            length(@redo_stack) == 0 && "opacity-30 cursor-not-allowed text-gray-400"
+          ]}
+          disabled={length(@redo_stack) == 0}
+          title={"Redo (Ctrl+Shift+Z) - #{length(@redo_stack)} operations"}
+        >
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"
+            />
+          </svg>
+        </button>
+
+    <!-- Divider -->
+        <div class="w-10 h-px bg-gray-300 my-2"></div>
+
     <!-- Color Picker Button -->
         <button
           phx-click="toggle_color_picker"
@@ -3087,6 +3596,21 @@ defmodule CollabCanvasWeb.CanvasLive do
         <div class="p-4 border-b border-gray-200">
           <h2 class="text-lg font-semibold text-gray-800">AI Assistant</h2>
           <p class="text-sm text-gray-500 mt-1">Describe what you want to create</p>
+
+          <!-- Error Sound Settings -->
+          <div class="mt-3 flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="error-sound-toggle"
+              checked={@play_error_sound}
+              phx-click="toggle_error_sound"
+              phx-value-enabled={!@play_error_sound}
+              class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer"
+            />
+            <label for="error-sound-toggle" class="text-sm text-gray-700 cursor-pointer select-none">
+              Play sound on errors
+            </label>
+          </div>
         </div>
 
         <div class="flex-1 flex flex-col">

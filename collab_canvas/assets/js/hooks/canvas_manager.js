@@ -334,6 +334,31 @@ export default {
       this.canvasManager.selectObjectsByIds(data.object_ids);
     });
 
+    // Handle error sound playback with volume boost
+    this.handleEvent('play_error_sound', () => {
+      console.log('[Hook] play_error_sound event received');
+
+      // Create audio context for volume control
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const audio = new Audio('/sounds/sorrydave.mp3');
+
+      // Create audio source from the audio element
+      const source = audioContext.createMediaElementSource(audio);
+
+      // Create gain node to boost volume (1.5x louder)
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = 1.5; // Boost volume by 50%
+
+      // Connect: source -> gain -> destination (speakers)
+      source.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      // Play the audio
+      audio.play().catch(err => {
+        console.warn('[Hook] Failed to play error sound:', err);
+      });
+    });
+
     // Setup debounced viewport saving
     this.setupViewportSaving();
   },

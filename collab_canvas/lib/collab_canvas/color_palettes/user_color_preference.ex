@@ -24,6 +24,8 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
     # JSON array of hex colors
     field :favorite_colors, :string, default: "[]"
     field :default_color, :string, default: "#000000"
+    # Play error sound on AI tool call failures
+    field :play_error_sound, :boolean, default: true
 
     timestamps(type: :utc_datetime)
   end
@@ -39,7 +41,7 @@ defmodule CollabCanvas.ColorPalettes.UserColorPreference do
   """
   def changeset(preference, attrs) do
     preference
-    |> cast(attrs, [:user_id, :recent_colors, :favorite_colors, :default_color])
+    |> cast(attrs, [:user_id, :recent_colors, :favorite_colors, :default_color, :play_error_sound])
     |> validate_required([:user_id])
     |> validate_color_format(:default_color)
     |> validate_json_color_array(:recent_colors, @max_recent_colors)

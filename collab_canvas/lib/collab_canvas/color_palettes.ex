@@ -317,6 +317,48 @@ defmodule CollabCanvas.ColorPalettes do
     preferences.default_color
   end
 
+  @doc """
+  Gets whether the user wants to play error sounds.
+
+  ## Parameters
+    * `user_id` - The ID of the user
+
+  ## Returns
+    * Boolean
+
+  ## Examples
+
+      iex> get_play_error_sound(1)
+      true
+
+  """
+  def get_play_error_sound(user_id) do
+    preferences = get_or_create_preferences(user_id)
+    preferences.play_error_sound
+  end
+
+  @doc """
+  Sets whether the user wants to play error sounds.
+
+  ## Parameters
+    * `user_id` - The ID of the user
+    * `enabled` - Boolean value
+
+  ## Returns
+    * `{:ok, %UserColorPreference{}}` on success
+    * `{:error, reason}` on failure
+
+  ## Examples
+
+      iex> set_play_error_sound(1, false)
+      {:ok, %UserColorPreference{}}
+
+  """
+  def set_play_error_sound(user_id, enabled) when is_boolean(enabled) do
+    preferences = get_or_create_preferences(user_id)
+    update_preferences(preferences, %{play_error_sound: enabled})
+  end
+
   # Palette Management Functions
 
   @doc """
