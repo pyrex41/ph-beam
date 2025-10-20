@@ -18,17 +18,16 @@ defmodule CollabCanvas.PixelDataStore do
 
   @doc """
   Store pixel data for a canvas and user.
-  Returns a unique key to retrieve the data.
   """
   def store(canvas_id, user_id, pixel_data) do
     key = generate_key(canvas_id, user_id)
     GenServer.call(__MODULE__, {:store, key, pixel_data})
-    key
+    :ok
   end
 
   @doc """
   Retrieve and remove pixel data for a canvas and user.
-  Returns nil if not found or expired.
+  Returns {:ok, pixel_data} or {:error, reason}.
   """
   def pop(canvas_id, user_id) do
     key = generate_key(canvas_id, user_id)
@@ -90,7 +89,7 @@ defmodule CollabCanvas.PixelDataStore do
   # Private Functions
 
   defp generate_key(canvas_id, user_id) do
-    "#{canvas_id}_#{user_id}_#{System.unique_integer([:positive])}"
+    "#{canvas_id}_#{user_id}"
   end
 
   defp schedule_cleanup do
