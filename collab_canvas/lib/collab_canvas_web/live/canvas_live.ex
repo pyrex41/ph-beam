@@ -2742,12 +2742,12 @@ defmodule CollabCanvasWeb.CanvasLive do
       Enum.map(current_batch, fn rect ->
         attrs = %{
           type: "rectangle",
-          position: %{x: rect["x"], y: rect["y"]},
+          position: %{x: rect.x, y: rect.y},
           data:
             Jason.encode!(%{
-              width: rect["width"],
-              height: rect["height"],
-              color: rect["color"]
+              width: rect.width,
+              height: rect.height,
+              color: rect.color
             })
         }
 
