@@ -3471,7 +3471,7 @@
         "testStrategy": "1. A visual UI indicator clearly shows 'Offline' and 'Reconnecting' states. 2. A queue of at least 20 operations can be stored locally. 3. Upon reconnection, all queued operations are synced successfully within 5 seconds with no data corruption, and become visible to other users.",
         "priority": "high",
         "dependencies": [],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -3479,7 +3479,7 @@
             "description": "Develop a state machine in canvas_manager.js to track connection states (online, offline, reconnecting) and display visual UI indicators for offline and reconnecting statuses.",
             "dependencies": [],
             "details": "Use a finite state machine to manage connection status. Integrate with the canvas manager to detect disconnections and reconnections. Add UI elements like a status bar or notification that shows 'Offline' when disconnected and 'Reconnecting' when attempting to reconnect. Ensure the state machine handles transitions smoothly and updates the UI in real-time.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Verify that the UI indicator accurately reflects connection states and updates within 100ms of state changes."
           },
           {
@@ -3488,7 +3488,7 @@
             "description": "Set up IndexedDB in the frontend to store canvas operations (create, update, delete) locally when offline, ensuring the queue can handle at least 20 operations.",
             "dependencies": [],
             "details": "Initialize IndexedDB database in canvas_manager.js with a store for operation queues. Implement functions to enqueue operations when offline, including operation type, data, and timestamp. Ensure data persistence across browser sessions and handle potential storage limits or corruption gracefully.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Test storing and retrieving a queue of at least 20 operations, confirming no data loss or corruption after browser refresh."
           },
           {
@@ -3497,7 +3497,7 @@
             "description": "Create an event handler in CanvasLive to process batches of queued operations sent from reconnected clients, ensuring atomic and reliable syncing.",
             "dependencies": [],
             "details": "Add a backend endpoint or event handler that receives batched operations from the client upon reconnection. Process each operation in sequence, applying changes to the canvas state, and broadcast updates to other clients. Handle conflicts or errors during batch processing, such as invalid operations, and ensure the queue syncs within 5 seconds.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Simulate offline operations, reconnect, and verify that all queued operations are processed successfully, synced to the backend, and visible to other users without data corruption."
           }
         ]
@@ -3545,7 +3545,7 @@
           1,
           2
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -3553,7 +3553,7 @@
             "description": "Develop the history stack in canvas_manager.js to track canvas operations, handle user-initiated undo/redo events, and send them to the server for processing.",
             "dependencies": [],
             "details": "In canvas_manager.js, create a stack data structure to store operations. Implement event listeners for Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z. On undo, reverse the action locally and emit an event to the backend. Ensure the stack supports at least 50 operations and integrates with the offline queue if needed.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Verify that 50+ consecutive actions can be undone and redone without errors, and that undo events are sent to the server."
           },
           {
@@ -3564,7 +3564,7 @@
               1
             ],
             "details": "In CanvasLive, add handlers for undo events. For each operation type (create, update, delete), define reversal logic (e.g., delete a created object, revert updates). Use PubSub to broadcast the reversed state to all connected clients, ensuring real-time updates.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Test reversing various operations (create, update, delete) and confirm that changes are broadcasted and visible to all clients within 100ms."
           },
           {
@@ -3576,7 +3576,7 @@
               2
             ],
             "details": "Modify the history stack to group related operations into atomic units. For AI-generated commands creating multiple objects, store them as one entry. Implement logic to undo the entire group at once, reversing all changes in sequence. Integrate with backend reversal to handle complex AI actions.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Simulate an AI command creating 5 objects and verify it can be undone in a single step, with all objects removed atomically."
           },
           {
@@ -3588,7 +3588,7 @@
               3
             ],
             "details": "Leverage the existing PubSub system in CanvasLive to broadcast undo/redo events to all clients. On the frontend, update the canvas state based on received broadcasts. Handle conflicts by ensuring last-write-wins model and notify users if needed. Test with multiple clients to confirm visibility.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "With 10+ concurrent users, perform undo/redo actions and measure that changes are visible across all screens with latency below 150ms."
           }
         ]
@@ -3673,7 +3673,7 @@
     ],
     "metadata": {
       "created": "2025-10-18T02:11:03.447Z",
-      "updated": "2025-10-18T02:11:03.447Z",
+      "updated": "2025-10-19T23:58:02.315Z",
       "description": "Tasks for core context"
     }
   },
@@ -3775,7 +3775,7 @@
         "testStrategy": "Verify saving and retrieving at least 10 named palettes with correct colors.",
         "priority": "medium",
         "dependencies": [],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -3788,7 +3788,7 @@
         "dependencies": [
           8
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": []
       },
       {
@@ -3807,7 +3807,7 @@
     ],
     "metadata": {
       "created": "2025-10-18T02:12:21.303Z",
-      "updated": "2025-10-18T02:12:21.303Z",
+      "updated": "2025-10-19T23:58:20.146Z",
       "description": "Tasks for workflow context"
     }
   },

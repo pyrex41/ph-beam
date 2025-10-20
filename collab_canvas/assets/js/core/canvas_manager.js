@@ -1818,42 +1818,27 @@ export class CanvasManager {
   }
 
   /**
-   * Handle mouse wheel for zoom and pan (Figma-like controls)
+   * Handle mouse wheel for zoom
    * @param {WheelEvent} event
    */
   handleWheel(event) {
     event.preventDefault();
 
-    // Shift+wheel = pan, otherwise zoom (like Figma)
-    if (event.shiftKey) {
-      // Pan with Shift held
-      this.viewOffset.x -= event.deltaX || event.deltaY;
-      this.viewOffset.y -= event.deltaY;
-      this.objectContainer.x = this.viewOffset.x;
-      this.objectContainer.y = this.viewOffset.y;
-      this.labelContainer.x = this.viewOffset.x;
-      this.labelContainer.y = this.viewOffset.y;
-      this.cursorContainer.x = this.viewOffset.x;
-      this.cursorContainer.y = this.viewOffset.y;
+    // Zoom with scroll wheel
+    // Note: Use Space+drag for panning, Shift is now used for multi-select
+    const delta = event.deltaY > 0 ? 0.9 : 1.1;
+    const newZoom = Math.min(Math.max(this.zoomLevel * delta, 0.1), 5);
 
-      // Emit viewport changed event for saving
-      this.emit('viewport_changed');
-    } else {
-      // Zoom with scroll wheel (default behavior, like Figma)
-      const delta = event.deltaY > 0 ? 0.9 : 1.1;
-      const newZoom = Math.min(Math.max(this.zoomLevel * delta, 0.1), 5);
+    this.zoomLevel = newZoom;
+    this.objectContainer.scale.set(newZoom, newZoom);
+    this.labelContainer.scale.set(newZoom, newZoom);
+    this.cursorContainer.scale.set(newZoom, newZoom);
 
-      this.zoomLevel = newZoom;
-      this.objectContainer.scale.set(newZoom, newZoom);
-      this.labelContainer.scale.set(newZoom, newZoom);
-      this.cursorContainer.scale.set(newZoom, newZoom);
+    // Emit viewport changed event for saving
+    this.emit('viewport_changed');
 
-      // Emit viewport changed event for saving
-      this.emit('viewport_changed');
-
-      // Debounced culling during zoom (disabled for now)
-      // this.debouncedCullUpdate();
-    }
+    // Debounced culling during zoom (disabled for now)
+    // this.debouncedCullUpdate();
   }
 
   /**
