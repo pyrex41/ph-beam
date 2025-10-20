@@ -35,6 +35,8 @@ import VoiceInput from "./hooks/voice_input"
 import AICommandInput from "./hooks/ai_command_input"
 // Import Layer Context Menu hook for layer panel right-click menu
 import LayerContextMenu from "./hooks/layer_context_menu"
+// Import Pixel Canvas hook for image pixelation rendering
+import PixelCanvas from "./hooks/pixel_canvas"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 
@@ -59,7 +61,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
     ColorPicker: ColorPickerHook,
     VoiceInput: VoiceInput,
     AICommandInput: AICommandInput,
-    LayerContextMenu: LayerContextMenu
+    LayerContextMenu: LayerContextMenu,
+    PixelCanvas: PixelCanvas
   },
 })
 

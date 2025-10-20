@@ -4306,5 +4306,584 @@
       "updated": "2025-10-19T02:53:04.912Z",
       "description": "Tasks for agent context"
     }
+  },
+  "pixel": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Install and Configure Dependencies",
+        "description": "Set up the required Elixir dependencies (Mogrify and Image) and ensure ImageMagick is installed on the system.",
+        "details": "Update mix.exs to include {:mogrify, \"~> 0.9.4\"} and {:image, \"~> 0.32\"}. Run mix deps.get. Install ImageMagick via brew install imagemagick on macOS or apt-get install imagemagick on Ubuntu. Verify installation with convert -version. Configure file uploads in config/config.exs with allow_upload/3 for image files.",
+        "testStrategy": "Verify dependencies compile with mix compile. Check ImageMagick version in CI/CD pipeline. Run a simple image conversion test using Mogrify to ensure it works.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update mix.exs with required dependencies",
+            "description": "Add the Mogrify and Image dependencies to the mix.exs file with the specified versions.",
+            "dependencies": [],
+            "details": "Open the mix.exs file in the project root and add {:mogrify, \"~> 0.9.4\"} and {:image, \"~> 0.32\"} to the deps list. Ensure the syntax is correct to avoid compilation errors.",
+            "status": "done",
+            "testStrategy": "Verify that mix deps.get runs without errors and the dependencies are listed in mix.lock."
+          },
+          {
+            "id": 2,
+            "title": "Run mix deps.get to fetch dependencies",
+            "description": "Execute the mix deps.get command to download and install the Elixir dependencies.",
+            "dependencies": [
+              1
+            ],
+            "details": "After updating mix.exs, run 'mix deps.get' in the terminal from the project root. This will fetch the Mogrify and Image libraries along with their dependencies. Check for any resolution conflicts.",
+            "status": "done",
+            "testStrategy": "Run mix compile to ensure all dependencies compile successfully without warnings."
+          },
+          {
+            "id": 3,
+            "title": "Install ImageMagick on the system",
+            "description": "Install ImageMagick using the appropriate package manager based on the operating system.",
+            "dependencies": [],
+            "details": "For macOS, use 'brew install imagemagick'. For Ubuntu or other Linux distributions, use 'sudo apt-get install imagemagick'. Verify the installation by running 'convert -version' to check the version and ensure it's working.",
+            "status": "done",
+            "testStrategy": "Execute 'convert -version' and confirm ImageMagick is installed with a valid version output."
+          },
+          {
+            "id": 4,
+            "title": "Configure file uploads in config.exs",
+            "description": "Set up the allow_upload configuration for image files in the Phoenix config file.",
+            "dependencies": [
+              1
+            ],
+            "details": "In config/config.exs, add the allow_upload/3 configuration for image uploads with options like max_entries: 1, accept: ~w(.jpg .jpeg .png), and max_file_size: 10_000_000. Ensure it's properly integrated with the LiveView module.",
+            "status": "done",
+            "testStrategy": "Test the upload functionality in the LiveView by attempting to upload a valid image file and checking for no errors."
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Create LiveView Module Structure",
+        "description": "Implement the basic structure of the ImagePixelator LiveView module to handle mounts, events, and state management.",
+        "details": "Create lib/my_app_web/live/image_pixelator.ex. Define mount/3 to initialize socket assigns for grid_size (default 64), pixel_data (empty list), and errors (empty map). Implement handle_event/3 for \"upload\" and \"process\" events. Use allow_upload/3 in mount for image uploads with max_entries: 1, accept: ~w(.jpg .jpeg .png), max_file_size: 10_000_000.",
+        "testStrategy": "Unit test mount/3 to assert assigns are set correctly. Test handle_event for upload validation.",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create the ImagePixelator LiveView module file",
+            "description": "Create the new file lib/my_app_web/live/image_pixelator.ex and define the basic LiveView module structure with use Phoenix.LiveView.",
+            "dependencies": [],
+            "details": "Start by creating the file in the correct directory. Use the standard Phoenix LiveView module template, including the use Phoenix.LiveView directive. Ensure the module name is MyAppWeb.ImagePixelatorLive. This sets up the foundation for the LiveView functionality.",
+            "status": "done",
+            "testStrategy": "Verify the file exists and the module compiles without errors."
+          },
+          {
+            "id": 2,
+            "title": "Implement mount/3 function with initial assigns",
+            "description": "Define the mount/3 function to initialize socket assigns for grid_size, pixel_data, and errors.",
+            "dependencies": [
+              1
+            ],
+            "details": "In the mount/3 function, set socket assigns to grid_size: 64, pixel_data: [], errors: %{}. Handle both connected and disconnected mounts appropriately, ensuring assigns are set correctly for state management.",
+            "status": "done",
+            "testStrategy": "Unit test mount/3 to assert that assigns are initialized with the correct default values."
+          },
+          {
+            "id": 3,
+            "title": "Configure allow_upload in mount for image uploads",
+            "description": "Use allow_upload/3 in the mount function to allow image uploads with specified constraints.",
+            "dependencies": [
+              2
+            ],
+            "details": "Within mount/3, call allow_upload/3 on the socket with options: max_entries: 1, accept: ~w(.jpg .jpeg .png), max_file_size: 10_000_000. This enables file upload functionality for the LiveView.",
+            "status": "done",
+            "testStrategy": "Test that uploads are allowed only for the specified file types and sizes, rejecting invalid uploads."
+          },
+          {
+            "id": 4,
+            "title": "Implement handle_event for 'upload' event",
+            "description": "Add handle_event/3 to handle the 'upload' event for processing uploaded images.",
+            "dependencies": [
+              3
+            ],
+            "details": "Implement handle_event/3 for the 'upload' event. Validate the uploaded file, consume the upload, and prepare for processing. Update socket assigns if necessary, such as setting pixel_data or errors based on upload status.",
+            "status": "done",
+            "testStrategy": "Unit test handle_event for 'upload' to ensure file validation and consumption work correctly."
+          },
+          {
+            "id": 5,
+            "title": "Implement handle_event for 'process' event",
+            "description": "Add handle_event/3 to handle the 'process' event for triggering image processing.",
+            "dependencies": [
+              4
+            ],
+            "details": "Implement handle_event/3 for the 'process' event. This should call the image processing logic (to be implemented later), update pixel_data with processed data, and handle any errors by updating the errors assign.",
+            "status": "done",
+            "testStrategy": "Unit test handle_event for 'process' to verify that it triggers processing and updates assigns appropriately."
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Implement File Upload Validation",
+        "description": "Add client and server-side validation for uploaded image files including type, size, and format checks.",
+        "details": "In the LiveView module, use uploaded_entries/1 to validate file type and size. Check if file is JPG/PNG and <=10MB. On client-side, add JavaScript to validate before upload. Display errors in assigns if validation fails. Use consume_uploaded_entry/3 to process valid uploads.",
+        "testStrategy": "Integration test uploading invalid files (wrong type, oversized) and assert error messages. Test valid uploads proceed without errors.",
+        "priority": "high",
+        "dependencies": [
+          2
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Client-Side File Upload Validation",
+            "description": "Add JavaScript validation to check file type and size before upload on the client-side.",
+            "dependencies": [],
+            "details": "In the LiveView template, add JavaScript code to validate uploaded files for JPG/PNG types and size <=10MB before submission. Use event listeners on the file input to prevent invalid uploads and provide immediate feedback to the user.",
+            "status": "done",
+            "testStrategy": "Browser test: Attempt to upload invalid files (wrong type, oversized) and assert that they are blocked with appropriate error messages displayed."
+          },
+          {
+            "id": 2,
+            "title": "Implement Server-Side File Upload Validation and Processing",
+            "description": "Add server-side validation using uploaded_entries and process valid uploads with consume_uploaded_entry.",
+            "dependencies": [],
+            "details": "In the LiveView module, use uploaded_entries/1 to validate file type (JPG/PNG) and size (<=10MB). Display validation errors in assigns if checks fail. For valid uploads, use consume_uploaded_entry/3 to process the files and handle any processing errors gracefully.",
+            "status": "done",
+            "testStrategy": "Integration test: Upload invalid files and assert error messages in assigns. Upload valid files and verify they are processed without errors."
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Add Grid Size Selection Input",
+        "description": "Implement the form input for selecting grid size with validation.",
+        "details": "In the template, add a select dropdown with options: 16, 32, 64, 128, 256. Default to 64. In LiveView, validate grid_size is integer between 4 and 256. Update assigns on change. Send grid_size with upload event.",
+        "testStrategy": "Test form submission with invalid grid sizes (e.g., 0, 1024) and assert validation errors. Test valid selections update state.",
+        "priority": "medium",
+        "dependencies": [
+          2
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Add Select Dropdown to Template",
+            "description": "Add a select dropdown element to the HTML template with predefined grid size options.",
+            "dependencies": [],
+            "details": "In the template file, insert a <select> element with options for 16, 32, 64, 128, and 256. Set the default selected value to 64. Ensure the select has an appropriate name attribute for form handling.",
+            "status": "done",
+            "testStrategy": "Verify the dropdown renders with correct options and default selection in the browser."
+          },
+          {
+            "id": 2,
+            "title": "Bind Select Change Event to LiveView",
+            "description": "Connect the select dropdown to LiveView to handle change events.",
+            "dependencies": [
+              1
+            ],
+            "details": "In the LiveView module, add a phx-change event handler to the select element. This will trigger when the user selects a different grid size, allowing the server to process the change.",
+            "status": "done",
+            "testStrategy": "Test that selecting different options triggers the change event and updates the server-side state."
+          },
+          {
+            "id": 3,
+            "title": "Implement Grid Size Validation",
+            "description": "Add validation logic to ensure the selected grid_size is a valid integer within the allowed range.",
+            "dependencies": [
+              2
+            ],
+            "details": "In the LiveView handle_event for the change, validate that the grid_size parameter is an integer between 4 and 256 inclusive. If invalid, set an error message in assigns; if valid, proceed to update the state.",
+            "status": "done",
+            "testStrategy": "Submit invalid values (e.g., 0, 300) and assert that validation errors are displayed. Test valid values pass without errors."
+          },
+          {
+            "id": 4,
+            "title": "Update Assigns on Valid Change",
+            "description": "Update the LiveView assigns with the new grid_size when validation passes.",
+            "dependencies": [
+              3
+            ],
+            "details": "Upon successful validation in the change event handler, update the socket assigns with the new grid_size value. This ensures the component reflects the current selection and can use it in subsequent operations.",
+            "status": "done",
+            "testStrategy": "Change the select value and verify that assigns are updated correctly by checking the component's state."
+          },
+          {
+            "id": 5,
+            "title": "Send Grid Size with Upload Event",
+            "description": "Modify the upload event to include the current grid_size in the payload.",
+            "dependencies": [
+              4
+            ],
+            "details": "In the upload event handler, retrieve the grid_size from assigns and include it in the event data sent to the server. This allows the server to process the upload with the specified grid size.",
+            "status": "done",
+            "testStrategy": "Trigger an upload event and assert that the grid_size is correctly included in the event payload."
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Develop Image Processing Function",
+        "description": "Create the server-side function to process uploaded images into pixelated data.",
+        "details": "Implement process_image/2 function in LiveView module. Use Mogrify to resize image to grid_size x grid_size. Extract RGB values for each pixel using Image library. Convert RGB to hex (e.g., Integer.to_string(r,16) <> Integer.to_string(g,16) <> Integer.to_string(b,16)). Return list of maps: [%{x: x, y: y, hex_color: hex}, ...] and dimensions {width, height}. Handle errors gracefully.",
+        "testStrategy": "Unit test process_image/2 with sample images for different grid sizes (16x16, 64x64). Assert correct pixel data format and hex conversion. Test error cases like corrupted images.",
+        "priority": "high",
+        "dependencies": [
+          1,
+          3
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Resize Image Using Mogrify",
+            "description": "Implement the image resizing functionality within the process_image/2 function to scale the uploaded image to the specified grid_size x grid_size using the Mogrify library.",
+            "dependencies": [],
+            "details": "In the LiveView module, use Mogrify to resize the image to grid_size x grid_size. Ensure the resizing maintains aspect ratio or fits exactly as needed for pixelation. This subtask focuses solely on the resizing step before further processing.",
+            "status": "done",
+            "testStrategy": "Unit test the resizing with sample images of various sizes to verify correct output dimensions."
+          },
+          {
+            "id": 2,
+            "title": "Extract Pixel Data and Convert RGB to Hex",
+            "description": "Extract RGB values for each pixel from the resized image using the Image library and convert them to hexadecimal color codes.",
+            "dependencies": [
+              1
+            ],
+            "details": "After resizing, use the Image library to iterate over each pixel in the grid_size x grid_size image. For each pixel, extract the RGB values and convert them to a hex string (e.g., using Integer.to_string with base 16). Build a list of maps with x, y coordinates and hex_color.",
+            "status": "done",
+            "testStrategy": "Unit test with mock pixel data to assert correct hex conversion and map structure for different RGB values."
+          },
+          {
+            "id": 3,
+            "title": "Implement Error Handling for Image Processing",
+            "description": "Add graceful error handling to the process_image/2 function to manage issues like corrupted images, unsupported formats, or processing failures.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Wrap the resizing, extraction, and conversion steps in try-catch blocks or use library-specific error handling. Return appropriate error messages or default values if processing fails. Ensure the function returns valid data or errors without crashing the LiveView.",
+            "status": "done",
+            "testStrategy": "Unit test with corrupted or invalid image files to verify error messages are returned and no exceptions are raised."
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Implement Canvas Rendering on Client",
+        "description": "Add JavaScript to render pixel data on HTML canvas.",
+        "details": "In the template, include <canvas id=\"pixel-canvas\" width=\"512\" height=\"512\"></canvas>. Add JavaScript hook to listen for push_event \"render_pixels\". In hook, clear canvas with ctx.clearRect(0,0,512,512). Calculate square_size = 512 / grid_size. For each pixel, ctx.fillStyle = hex_color; ctx.fillRect(x*square_size, y*square_size, square_size, square_size).",
+        "testStrategy": "Browser test rendering for 64x64 grid: verify canvas displays colored squares matching pixel data. Test clearing on new render. Measure render time <100ms.",
+        "priority": "high",
+        "dependencies": [
+          5
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Set up the canvas element in the HTML template",
+            "description": "Add the HTML canvas element with specified dimensions to the template for pixel rendering.",
+            "dependencies": [],
+            "details": "In the LiveView template, include a <canvas> tag with id 'pixel-canvas', width 512, and height 512. Ensure it is properly positioned and styled for display.",
+            "status": "done",
+            "testStrategy": "Verify the canvas element is present in the DOM with correct attributes using browser developer tools."
+          },
+          {
+            "id": 2,
+            "title": "Implement JavaScript hook for listening to render_pixels event",
+            "description": "Add JavaScript code to listen for the 'render_pixels' push event and handle pixel data rendering on the canvas.",
+            "dependencies": [
+              1
+            ],
+            "details": "In the JavaScript hooks, create a hook that listens for the 'render_pixels' event. Access the canvas context using getContext('2d'). Prepare to receive pixel data including grid_size, and process each pixel to render on the canvas.",
+            "status": "done",
+            "testStrategy": "Test that the hook is triggered on push_event and logs or renders initial data correctly in the browser console."
+          },
+          {
+            "id": 3,
+            "title": "Handle canvas clearing and pixel rendering with resizing",
+            "description": "Implement logic to clear the canvas and render pixels by calculating square sizes and filling rectangles based on pixel data.",
+            "dependencies": [
+              2
+            ],
+            "details": "In the hook, clear the canvas using ctx.clearRect(0,0,512,512). Calculate square_size as 512 divided by grid_size. For each pixel in the data, set ctx.fillStyle to the hex_color and use ctx.fillRect to draw the square at (x*square_size, y*square_size) with dimensions square_size x square_size. Ensure accurate rendering for different grid sizes.",
+            "status": "done",
+            "testStrategy": "Browser test rendering for a 64x64 grid: verify colored squares match pixel data, canvas clears on new renders, and render time is under 100ms using performance tools."
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Integrate Upload and Processing Flow",
+        "description": "Connect file upload, grid selection, processing, and rendering into a seamless flow.",
+        "details": "In handle_event(\"process\"), validate inputs, process image with process_image/2, push_event(\"render_pixels\", %{pixels: pixel_data, width: width, height: height, grid_size: grid_size}). Update template to trigger process on form submit. Ensure temporary files are deleted after processing.",
+        "testStrategy": "End-to-end test: upload image, select grid, submit, verify pixelated image renders on canvas. Test with different grid sizes and images.",
+        "priority": "high",
+        "dependencies": [
+          3,
+          4,
+          5,
+          6
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement End-to-End Processing Flow",
+            "description": "Connect file upload validation, grid size selection, image processing, and canvas rendering into a seamless event-driven flow in the LiveView module.",
+            "dependencies": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "details": "In the handle_event(\"process\") function, validate inputs from upload and grid selection, call process_image/2 to get pixel data, and push_event(\"render_pixels\") with the pixel data, width, height, and grid_size. Update the template to trigger the process event on form submit, ensuring the flow handles errors and updates the UI accordingly.",
+            "status": "done",
+            "testStrategy": "End-to-end test: simulate uploading an image, selecting a grid size, submitting the form, and verifying that the pixelated image renders correctly on the canvas with accurate pixel data."
+          },
+          {
+            "id": 2,
+            "title": "Ensure Temporary File Cleanup",
+            "description": "Implement cleanup of temporary uploaded files after processing to prevent storage issues and ensure security.",
+            "dependencies": [
+              1
+            ],
+            "details": "After processing the image in handle_event(\"process\"), use consume_uploaded_entry/3 to consume and delete the temporary file. Add error handling to ensure cleanup occurs even if processing fails, and log any issues for debugging purposes.",
+            "status": "done",
+            "testStrategy": "Integration test: upload a file, process it, and verify that the temporary file is deleted from the server after processing completes, including failure scenarios."
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Add Error Handling and User Feedback",
+        "description": "Implement error messages for upload failures, invalid inputs, and processing errors.",
+        "details": "In LiveView, set assigns[:error] for various cases: no file, invalid file, processing fail, invalid grid. Display errors in template with <p class=\"error\">. For large grids, add warning if grid >128. Use flash for temporary messages.",
+        "testStrategy": "Test error scenarios: upload no file, wrong format, oversized, invalid grid. Assert correct error messages displayed. Test warnings for large grids.",
+        "priority": "medium",
+        "dependencies": [
+          2,
+          7
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Error Handling and User Feedback Mechanisms",
+            "description": "Define and handle various error cases including no file uploaded, invalid file formats, processing failures, and invalid grid sizes. Implement setting assigns[:error] in LiveView for these scenarios and display errors in the template using <p class=\"error\">. Add warnings for large grids (e.g., if grid >128) and use flash messages for temporary notifications.",
+            "dependencies": [],
+            "details": "In the LiveView module, modify event handlers for file upload and image processing to check for errors such as missing files, unsupported formats, processing exceptions, and out-of-range grid sizes. Set assigns[:error] with descriptive messages for each case. For large grids, add a warning check (e.g., if grid_size > 128) and set assigns[:warning] or use Phoenix flash for temporary alerts. Ensure the template renders these errors and warnings appropriately. Integrate seamlessly with existing validation and processing functions from dependent tasks.",
+            "status": "done",
+            "testStrategy": "Conduct integration tests by simulating error scenarios: uploading no file, invalid file types, oversized files, processing failures, and invalid grid sizes. Assert that assigns[:error] is set correctly and error messages are displayed in the template. Test warnings for grids >128 by verifying flash messages or assigns. Use browser tests to confirm UI feedback."
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Optimize Performance for Large Grids",
+        "description": "Implement optimizations for processing and rendering larger grid sizes.",
+        "details": "For grids >128, add progress indicator via push_event. Cache resized images temporarily if same grid reused. Optimize Mogrify resizing. Monitor memory usage. Cap processing time with timeout.",
+        "testStrategy": "Performance test: measure processing time for 128x128 grid <5s, 256x256 <10s. Test concurrent uploads (up to 100) without degradation. Verify progress indicator shows.",
+        "priority": "medium",
+        "dependencies": [
+          5,
+          6
+        ],
+        "status": "deferred",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Add Progress Indicator for Large Grids",
+            "description": "Implement a progress indicator for grids larger than 128 using push_event to provide real-time updates during processing.",
+            "dependencies": [
+              5,
+              6
+            ],
+            "details": "In the LiveView module, for grid sizes greater than 128, integrate push_event calls to send progress updates (e.g., percentage complete) to the client. Ensure the client-side JavaScript listens for these events and updates a progress bar or indicator in the UI. This should not block the processing thread and provide feedback for long-running operations.",
+            "status": "pending",
+            "testStrategy": "Verify that for grids >128, progress events are pushed and displayed correctly in the UI, with accurate percentages."
+          },
+          {
+            "id": 2,
+            "title": "Implement Temporary Image Caching",
+            "description": "Add caching mechanism to temporarily store resized images when the same grid size is reused to avoid redundant processing.",
+            "dependencies": [
+              5,
+              6
+            ],
+            "details": "Modify the image processing function to check for cached resized images based on grid size and original image hash. Use an in-memory cache or ETS table to store resized images temporarily. If a match is found, retrieve from cache instead of reprocessing. Implement cache invalidation after a timeout or when memory limits are approached.",
+            "status": "pending",
+            "testStrategy": "Test that repeated uploads of the same image with the same grid size use cached data, reducing processing time, and verify cache expiration."
+          },
+          {
+            "id": 3,
+            "title": "Optimize Mogrify Operations and Add Timeouts with Memory Monitoring",
+            "description": "Enhance Mogrify resizing efficiency, implement processing timeouts, and monitor memory usage for large grids.",
+            "dependencies": [
+              5,
+              6
+            ],
+            "details": "Tune Mogrify operations for better performance on large images, such as using optimized resize algorithms or batch processing. Add a timeout mechanism to cap processing time (e.g., 30 seconds) and abort if exceeded. Integrate memory usage monitoring using Erlang's memory functions, logging or alerting if usage spikes. Ensure graceful handling of timeouts and memory issues without crashing the system.",
+            "status": "pending",
+            "testStrategy": "Benchmark processing times for large grids with and without optimizations; test timeout behavior and memory monitoring alerts under high load."
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Configure and Test Browser Compatibility",
+        "description": "Ensure the feature works across supported browsers with HTML5 canvas.",
+        "details": "Test on Chrome, Firefox, Safari, Edge. Use standard canvas APIs. Add fallbacks if needed, but PRD specifies HTML5 support. Document any browser-specific issues.",
+        "testStrategy": "Browser tests on multiple devices/browsers: upload and render on 64x64 grid. Verify no rendering errors. Test canvas clearing and resizing.",
+        "priority": "low",
+        "dependencies": [
+          6
+        ],
+        "status": "deferred",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Test Browser Compatibility on Chrome",
+            "description": "Perform testing to ensure the feature works correctly on Google Chrome using HTML5 canvas APIs.",
+            "dependencies": [],
+            "details": "Use standard canvas APIs to test uploading and rendering on a 64x64 grid. Verify no rendering errors occur, and test canvas clearing and resizing functionality. Run tests on the latest stable version of Chrome.",
+            "status": "pending",
+            "testStrategy": "Browser test on Chrome: upload and render on 64x64 grid, verify no errors, test clearing and resizing."
+          },
+          {
+            "id": 2,
+            "title": "Test Browser Compatibility on Firefox",
+            "description": "Perform testing to ensure the feature works correctly on Mozilla Firefox using HTML5 canvas APIs.",
+            "dependencies": [],
+            "details": "Use standard canvas APIs to test uploading and rendering on a 64x64 grid. Verify no rendering errors occur, and test canvas clearing and resizing functionality. Run tests on the latest stable version of Firefox.",
+            "status": "pending",
+            "testStrategy": "Browser test on Firefox: upload and render on 64x64 grid, verify no errors, test clearing and resizing."
+          },
+          {
+            "id": 3,
+            "title": "Test Browser Compatibility on Safari",
+            "description": "Perform testing to ensure the feature works correctly on Apple Safari using HTML5 canvas APIs.",
+            "dependencies": [],
+            "details": "Use standard canvas APIs to test uploading and rendering on a 64x64 grid. Verify no rendering errors occur, and test canvas clearing and resizing functionality. Run tests on the latest stable version of Safari.",
+            "status": "pending",
+            "testStrategy": "Browser test on Safari: upload and render on 64x64 grid, verify no errors, test clearing and resizing."
+          },
+          {
+            "id": 4,
+            "title": "Test Browser Compatibility on Edge",
+            "description": "Perform testing to ensure the feature works correctly on Microsoft Edge using HTML5 canvas APIs.",
+            "dependencies": [],
+            "details": "Use standard canvas APIs to test uploading and rendering on a 64x64 grid. Verify no rendering errors occur, and test canvas clearing and resizing functionality. Run tests on the latest stable version of Edge.",
+            "status": "pending",
+            "testStrategy": "Browser test on Edge: upload and render on 64x64 grid, verify no errors, test clearing and resizing."
+          },
+          {
+            "id": 5,
+            "title": "Document Browser-Specific Issues",
+            "description": "Identify and document any issues encountered during browser compatibility testing.",
+            "dependencies": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "details": "After testing on all supported browsers, compile a list of any browser-specific issues, such as rendering differences or API incompatibilities. Include details on fallbacks if needed, though PRD specifies HTML5 support. Update project documentation accordingly.",
+            "status": "pending",
+            "testStrategy": "Review test results from each browser test and document any discrepancies or errors found."
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "Write Unit and Integration Tests",
+        "description": "Develop comprehensive tests for the feature as per testing requirements.",
+        "details": "Add ExUnit tests for process_image/2, RGB-to-hex, grid validation. Integration tests for full flow in LiveView. Browser tests with Wallaby or similar. Performance tests with Benchee.",
+        "testStrategy": "Run tests to ensure >90% coverage. Validate acceptance criteria: processing times, error messages, rendering accuracy.",
+        "priority": "medium",
+        "dependencies": [
+          7
+        ],
+        "status": "deferred",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Write Unit Tests for Core Functions",
+            "description": "Develop unit tests for process_image/2, RGB-to-hex conversion, and grid validation using ExUnit.",
+            "dependencies": [],
+            "details": "Implement ExUnit tests for the process_image/2 function with sample images of different grid sizes (e.g., 16x16, 64x64), asserting correct pixel data format, hex conversion, and error handling for corrupted images. Include tests for RGB-to-hex logic and grid validation rules.",
+            "status": "pending",
+            "testStrategy": "Run unit tests to ensure >90% coverage for core functions and validate correct behavior under various inputs."
+          },
+          {
+            "id": 2,
+            "title": "Write Integration and Performance Tests",
+            "description": "Develop integration tests for the full LiveView flow, browser tests with Wallaby, and performance tests using Benchee.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create integration tests for the end-to-end flow: upload image, select grid, process, and render pixels in LiveView. Use Wallaby for browser tests across supported browsers (Chrome, Firefox, etc.) to verify rendering accuracy and canvas interactions. Implement performance tests with Benchee to measure processing times and ensure they meet acceptance criteria.",
+            "status": "pending",
+            "testStrategy": "Execute integration tests for full flow validation, browser compatibility checks on multiple devices, and performance benchmarks to confirm processing times and error handling."
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Document and Prepare for Deployment",
+        "description": "Create documentation and ensure deployment readiness.",
+        "details": "Write setup instructions for ImageMagick. Document config options in README. User guide for feature usage. Update router.ex for /pixelator route. Prepare for CI/CD checks.",
+        "testStrategy": "Review documentation for completeness. Test deployment on staging environment with full flow.",
+        "priority": "low",
+        "dependencies": [
+          1,
+          11
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Write Setup and User Documentation",
+            "description": "Create setup instructions for ImageMagick, document config options in README, and write user guide for feature usage.",
+            "dependencies": [],
+            "details": "Write detailed setup instructions for installing and configuring ImageMagick. Document all config options in the README file. Create a user guide explaining how to use the pixelator feature, including uploading images and selecting grid sizes.",
+            "status": "done",
+            "testStrategy": "Review documentation for completeness and accuracy."
+          },
+          {
+            "id": 2,
+            "title": "Update Router and Configs",
+            "description": "Update router.ex for /pixelator route and prepare configs for deployment.",
+            "dependencies": [],
+            "details": "Modify router.ex to add the /pixelator route for the ImagePixelator LiveView. Ensure all configuration options are properly set for deployment readiness, including any necessary environment variables or settings.",
+            "status": "done",
+            "testStrategy": "Test that the /pixelator route is accessible and renders the LiveView correctly."
+          },
+          {
+            "id": 3,
+            "title": "Prepare for Staging Deployment Tests",
+            "description": "Prepare for CI/CD checks and perform staging deployment tests.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Set up CI/CD pipeline to include checks for documentation completeness and code quality. Deploy to staging environment and test the full flow, including image upload, processing, and rendering.",
+            "status": "done",
+            "testStrategy": "Test deployment on staging environment with full flow, verifying image processing, canvas rendering, and error handling."
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "created": "2025-10-19T22:01:13.131Z",
+      "updated": "2025-10-19T22:42:29.025Z",
+      "description": "Tasks for pixel context"
+    }
   }
 }

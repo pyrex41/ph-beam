@@ -109,6 +109,7 @@ defmodule CollabCanvasWeb.Router do
     get("/", PageController, :home)
     live("/dashboard", DashboardLive)
     live("/canvas/:id", CanvasLive)
+    live("/pixelator", ImagePixelatorLive)
   end
 
   # Auth routes
