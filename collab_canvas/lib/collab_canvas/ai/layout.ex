@@ -245,7 +245,7 @@ defmodule CollabCanvas.AI.Layout do
 
   ## Parameters
     * `objects` - List of object maps with id, position, and data
-    * `radius` - Radius of the circle in pixels
+    * `radius` - Radius of the circle in pixels (will be auto-adjusted to prevent overlaps)
 
   ## Returns
     List of update maps with new positions
@@ -291,12 +291,16 @@ defmodule CollabCanvas.AI.Layout do
 
     Logger.debug("Center Y: #{inspect(center_y)}, is_number: #{is_number(center_y)}")
 
+    # Calculate minimum safe radius to prevent overlaps
+    safe_radius = calculate_safe_circular_radius(objects, radius)
+    Logger.info("[Layout] Circular layout: requested radius=#{radius}, safe radius=#{safe_radius} for #{length(objects)} objects")
+
     # Distribute objects evenly around the circle
     count = length(objects)
     angle_step = 2 * :math.pi() / count
 
     Logger.debug(
-      "Radius: #{inspect(radius)}, Count: #{count}, Angle step: #{inspect(angle_step)}"
+      "Radius: #{inspect(safe_radius)}, Count: #{count}, Angle step: #{inspect(angle_step)}"
     )
 
     objects
@@ -321,7 +325,7 @@ defmodule CollabCanvas.AI.Layout do
         "Object #{index}: cos(#{angle})=#{inspect(cos_value)}, sin(#{angle})=#{inspect(sin_value)}"
       )
 
-      radius_cos = radius * cos_value
+      radius_cos = safe_radius * cos_value
 
       Logger.debug(
         "Object #{index}: radius * cos = #{inspect(radius_cos)} (is_number: #{is_number(radius_cos)})"
@@ -340,7 +344,7 @@ defmodule CollabCanvas.AI.Layout do
       )
 
       new_x = center_x + round(offset_x)
-      new_y = center_y + round(radius * sin_value - obj_height / 2)
+      new_y = center_y + round(safe_radius * sin_value - obj_height / 2)
 
       Logger.debug("Object #{index}: new_x=#{inspect(new_x)}, new_y=#{inspect(new_y)}")
 
@@ -1290,14 +1294,74 @@ defmodule CollabCanvas.AI.Layout do
     end
   end
 
+  # Helper function to calculate safe circular radius to prevent overlaps
+  defp calculate_safe_circular_radius(objects, requested_radius) do
+    # Get the maximum dimension (width or height) of all objects
+    max_dimension =
+      objects
+      |> Enum.map(fn obj ->
+        max(get_object_width(obj), get_object_height(obj))
+      end)
+      |> Enum.max(fn -> 50 end)
+
+    # Calculate the arc length needed per object (object size + padding)
+    padding = 20
+    arc_length_per_object = max_dimension + padding
+
+    # Calculate total circumference needed
+    total_arc_length = arc_length_per_object * length(objects)
+
+    # Calculate minimum radius: circumference = 2πr, so r = circumference / 2π
+    min_radius = total_arc_length / (2 * :math.pi())
+
+    # Use the larger of requested radius or minimum safe radius
+    round(max(requested_radius, min_radius))
+  end
+
+  # Helper function to calculate safe star radii to prevent overlaps
+  defp calculate_safe_star_radii(objects, requested_outer_radius, requested_inner_radius) do
+    # Get the maximum dimension (width or height) of all objects
+    max_dimension =
+      objects
+      |> Enum.map(fn obj ->
+        max(get_object_width(obj), get_object_height(obj))
+      end)
+      |> Enum.max(fn -> 50 end)
+
+    # For a star, objects alternate between outer and inner points
+    # We need to ensure spacing on both circles
+    padding = 20
+    arc_length_per_object = max_dimension + padding
+
+    # Half the objects go on outer circle, half on inner
+    outer_count = ceil(length(objects) / 2)
+    inner_count = floor(length(objects) / 2)
+
+    # Calculate minimum radii for both circles
+    outer_circumference = arc_length_per_object * outer_count
+    min_outer_radius = outer_circumference / (2 * :math.pi())
+
+    inner_circumference = arc_length_per_object * inner_count
+    min_inner_radius = if inner_count > 0, do: inner_circumference / (2 * :math.pi()), else: 0
+
+    # Use the larger of requested or minimum safe radii
+    safe_outer = round(max(requested_outer_radius, min_outer_radius))
+    safe_inner = round(max(requested_inner_radius, min_inner_radius))
+
+    # Ensure inner radius is smaller than outer radius
+    final_inner = min(safe_inner, round(safe_outer * 0.6))
+
+    {safe_outer, final_inner}
+  end
+
   @doc """
   Arranges objects in a star pattern.
 
   ## Parameters
     * `objects` - List of object maps with id, position, and data
     * `points` - Number of star points (default: 5)
-    * `outer_radius` - Radius to outer points in pixels (default: 300)
-    * `inner_radius` - Radius to inner points in pixels (default: outer_radius * 0.4)
+    * `outer_radius` - Radius to outer points in pixels (will be auto-adjusted to prevent overlaps)
+    * `inner_radius` - Radius to inner points in pixels (will be auto-adjusted, default: outer_radius * 0.4)
 
   ## Returns
     List of update maps with new positions
@@ -1316,6 +1380,8 @@ defmodule CollabCanvas.AI.Layout do
 
   def star_layout(objects, points, outer_radius, inner_radius)
       when is_list(objects) and is_integer(points) and points >= 3 do
+    require Logger
+
     # Calculate center point based on average position
     center_x =
       objects
@@ -1332,13 +1398,14 @@ defmodule CollabCanvas.AI.Layout do
       |> round()
 
     # Default inner radius to 40% of outer radius if not specified
-    actual_inner_radius = inner_radius || round(outer_radius * 0.4)
+    requested_inner_radius = inner_radius || round(outer_radius * 0.4)
+
+    # Calculate minimum safe radii to prevent overlaps
+    {safe_outer_radius, safe_inner_radius} = calculate_safe_star_radii(objects, outer_radius, requested_inner_radius)
+    Logger.info("[Layout] Star layout: requested outer=#{outer_radius}, inner=#{requested_inner_radius}, safe outer=#{safe_outer_radius}, inner=#{safe_inner_radius} for #{length(objects)} objects")
 
     # Calculate angle between points
     angle_step = :math.pi() / points  # Half the circle division for star points
-
-    # Total number of positions in star (outer + inner points)
-    total_positions = points * 2
 
     # Distribute objects across all star points
     objects
@@ -1346,7 +1413,7 @@ defmodule CollabCanvas.AI.Layout do
     |> Enum.map(fn {obj, index} ->
       # Determine if this is an outer or inner point
       is_outer = rem(index, 2) == 0
-      radius = if is_outer, do: outer_radius, else: actual_inner_radius
+      radius = if is_outer, do: safe_outer_radius, else: safe_inner_radius
 
       # Calculate angle (start from top and go clockwise)
       angle = index * angle_step - :math.pi() / 2
