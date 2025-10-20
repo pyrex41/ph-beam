@@ -1824,16 +1824,37 @@ export class CanvasManager {
    */
   handleWheel(event) {
     event.preventDefault();
+    event.stopPropagation();
 
-    // Zoom with scroll wheel
-    // Note: Use Space+drag for panning, Shift is now used for multi-select
+    // Get mouse position relative to canvas
+    const rect = this.app.canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    // Calculate world position under mouse BEFORE zoom
+    const worldX = (mouseX - this.viewOffset.x) / this.zoomLevel;
+    const worldY = (mouseY - this.viewOffset.y) / this.zoomLevel;
+
+    // Calculate new zoom level
     const delta = event.deltaY > 0 ? 0.9 : 1.1;
     const newZoom = Math.min(Math.max(this.zoomLevel * delta, 0.1), 5);
 
+    // Apply zoom
     this.zoomLevel = newZoom;
     this.objectContainer.scale.set(newZoom, newZoom);
     this.labelContainer.scale.set(newZoom, newZoom);
     this.cursorContainer.scale.set(newZoom, newZoom);
+
+    // Adjust viewport offset so the world position stays under the mouse
+    this.viewOffset.x = mouseX - (worldX * newZoom);
+    this.viewOffset.y = mouseY - (worldY * newZoom);
+
+    this.objectContainer.x = this.viewOffset.x;
+    this.objectContainer.y = this.viewOffset.y;
+    this.labelContainer.x = this.viewOffset.x;
+    this.labelContainer.y = this.viewOffset.y;
+    this.cursorContainer.x = this.viewOffset.x;
+    this.cursorContainer.y = this.viewOffset.y;
 
     // Emit viewport changed event for saving
     this.emit('viewport_changed');
