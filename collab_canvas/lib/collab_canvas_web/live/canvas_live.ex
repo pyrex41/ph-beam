@@ -2081,6 +2081,20 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles batch object creation broadcasts from PubSub (for pixel art streaming).
+
+  Receives a batch of created objects and pushes them all to the client at once
+  for maximum rendering speed. Used for pixel art animation where thousands of
+  objects need to be created rapidly.
+  """
+  @impl true
+  def handle_info({:objects_created_batch, objects_data}, socket) do
+    {:noreply,
+     socket
+     |> push_event("objects_created_batch", %{objects: objects_data})}
+  end
+
+  @doc """
   Handles object_updated broadcasts from PubSub (from other clients).
 
   Updates the object in local state with the new properties and pushes to
@@ -2753,8 +2767,8 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         case Canvases.create_object(canvas_id, "rectangle", attrs) do
           {:ok, object} ->
-            # Broadcast to all connected clients
-            Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_created, object})
+            # Don't broadcast individual objects during pixel creation
+            # We'll broadcast the batch instead for maximum speed
             object
 
           {:error, reason} ->
@@ -2764,7 +2778,7 @@ defmodule CollabCanvasWeb.CanvasLive do
       end)
       |> Enum.reject(&is_nil/1)
 
-    # Send batch creation event to client (much faster than individual events)
+    # Broadcast batch to ALL clients (much faster than individual broadcasts)
     socket =
       if length(created_objects) > 0 do
         objects_data = Enum.map(created_objects, fn object ->
@@ -2776,7 +2790,10 @@ defmodule CollabCanvasWeb.CanvasLive do
           }
         end)
 
-        push_event(socket, "objects_created_batch", %{objects: objects_data})
+        # Broadcast to all connected clients including this one
+        Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:objects_created_batch, objects_data})
+
+        socket
       else
         socket
       end
