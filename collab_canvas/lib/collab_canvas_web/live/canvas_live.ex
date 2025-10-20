@@ -181,6 +181,7 @@ defmodule CollabCanvasWeb.CanvasLive do
         |> assign(:operation_batch_started, false)
         |> assign(:operation_initial_states, %{})
         |> assign(:play_error_sound, ColorPalettes.get_play_error_sound(user.id))
+        |> assign(:layers_panel_visible, false)
 
       # If viewport position exists, push it to the client to restore position
       socket =
@@ -1692,6 +1693,14 @@ defmodule CollabCanvasWeb.CanvasLive do
   @impl true
   def handle_event("toggle_color_picker", _params, socket) do
     {:noreply, assign(socket, :show_color_picker, !socket.assigns.show_color_picker)}
+  end
+
+  @doc """
+  Toggles the visibility of the layers panel.
+  """
+  @impl true
+  def handle_event("toggle_layers_panel", _params, socket) do
+    {:noreply, assign(socket, :layers_panel_visible, !socket.assigns.layers_panel_visible)}
   end
 
   @doc """
@@ -3445,6 +3454,30 @@ defmodule CollabCanvasWeb.CanvasLive do
           </svg>
         </button>
 
+        <!-- Layers Panel Toggle Button -->
+        <button
+          phx-click="toggle_layers_panel"
+          class={[
+            "w-12 h-12 rounded-lg flex items-center justify-center transition-colors hover:bg-gray-100 active:bg-gray-200",
+            @layers_panel_visible && "bg-blue-100 text-blue-600"
+          ]}
+          title={if @layers_panel_visible, do: "Hide Layers Panel (L)", else: "Show Layers Panel (L)"}
+        >
+          <svg
+            class="w-6 h-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 6h16M4 10h16M4 14h16M4 18h16"
+            />
+          </svg>
+        </button>
+
         <div class="flex-1"></div>
 
     <!-- Keyboard shortcuts help -->
@@ -3476,11 +3509,32 @@ defmodule CollabCanvasWeb.CanvasLive do
       </div>
       
     <!-- Layers Panel -->
-      <div class="w-64 bg-white border-r border-gray-200 flex flex-col">
+      <div class={[
+        "bg-white border-r border-gray-200 flex flex-col transition-all duration-300",
+        @layers_panel_visible && "w-64",
+        !@layers_panel_visible && "w-0 overflow-hidden"
+      ]}>
         <div class="p-3 border-b border-gray-200">
           <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-gray-800">Layers</h2>
-            <span class="text-xs text-gray-500">{length(@objects)} total</span>
+            <button
+              phx-click="toggle_layers_panel"
+              class="text-gray-500 hover:text-gray-700"
+              title="Close Layers Panel"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs text-gray-500">
+              <%= if MapSet.size(@selected_object_ids) > 1 do %>
+                {MapSet.size(@selected_object_ids)} selected
+              <% else %>
+                {length(@objects)} total
+              <% end %>
+            </span>
           </div>
           <!-- Search/Filter Input -->
           <input
@@ -3512,25 +3566,34 @@ defmodule CollabCanvasWeb.CanvasLive do
             selected_ids = @selected_object_ids
 
             # Determine which objects to show
-            # If there's a selected object, show context around it (10 before, 10 after)
+            # If multiple objects are selected, show ONLY those objects
+            # Otherwise, if there's a single selected object, show context around it (10 before, 10 after)
             # Otherwise show top 50
             objects_to_display =
-              if MapSet.size(selected_ids) > 0 do
-                # Find first selected object's position
-                selected_pos =
+              cond do
+                MapSet.size(selected_ids) > 1 ->
+                  # Multi-select: show ONLY selected objects
                   objects_with_position
-                  |> Enum.find_index(fn {obj, _pos} -> MapSet.member?(selected_ids, obj.id) end)
+                  |> Enum.filter(fn {obj, _pos} -> MapSet.member?(selected_ids, obj.id) end)
 
-                if selected_pos do
-                  # Show 10 objects before and after selected object
-                  start_idx = max(0, selected_pos - 10)
-                  end_idx = min(length(objects_with_position) - 1, selected_pos + 10)
-                  Enum.slice(objects_with_position, start_idx..end_idx)
-                else
+                MapSet.size(selected_ids) == 1 ->
+                  # Single selection: show context around it
+                  selected_pos =
+                    objects_with_position
+                    |> Enum.find_index(fn {obj, _pos} -> MapSet.member?(selected_ids, obj.id) end)
+
+                  if selected_pos do
+                    # Show 10 objects before and after selected object
+                    start_idx = max(0, selected_pos - 10)
+                    end_idx = min(length(objects_with_position) - 1, selected_pos + 10)
+                    Enum.slice(objects_with_position, start_idx..end_idx)
+                  else
+                    Enum.take(objects_with_position, 50)
+                  end
+
+                true ->
+                  # No selection: show top 50
                   Enum.take(objects_with_position, 50)
-                end
-              else
-                Enum.take(objects_with_position, 50)
               end
 
             total_count = length(objects_with_position)
