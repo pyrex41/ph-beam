@@ -281,7 +281,8 @@ export class CanvasManager {
     // Attach move and up to window so they work even when mouse leaves canvas
     window.addEventListener('mousemove', this.boundHandlers.handleMouseMove);
     window.addEventListener('mouseup', this.boundHandlers.handleMouseUp);
-    canvas.addEventListener('wheel', this.boundHandlers.handleWheel);
+    // Wheel event needs passive: false to allow preventDefault() to work
+    canvas.addEventListener('wheel', this.boundHandlers.handleWheel, { passive: false });
 
     // Prevent default browser context menu on canvas
     canvas.addEventListener('contextmenu', (e) => {
@@ -4161,7 +4162,7 @@ export class CanvasManager {
     const canvas = this.app?.canvas;
     if (canvas) {
       canvas.removeEventListener('mousedown', this.boundHandlers.handleMouseDown);
-      canvas.removeEventListener('wheel', this.boundHandlers.handleWheel);
+      canvas.removeEventListener('wheel', this.boundHandlers.handleWheel, { passive: false });
       canvas.removeEventListener('touchstart', this.boundHandlers.handleTouchStart);
       canvas.removeEventListener('touchmove', this.boundHandlers.handleTouchMove);
       canvas.removeEventListener('touchend', this.boundHandlers.handleTouchEnd);
