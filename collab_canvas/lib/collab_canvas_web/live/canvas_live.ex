@@ -578,6 +578,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
   When the user changes the color picker while objects are selected, this updates
   the fill color of the specified object in the database and broadcasts the change.
+  Tracks the operation for undo/redo.
   """
   @impl true
   def handle_event("update_object_color", %{"object_id" => object_id, "color" => color}, socket) do
@@ -598,6 +599,13 @@ defmodule CollabCanvasWeb.CanvasLive do
             object.data || %{}
           end
 
+        # Capture before state for undo
+        before_state = %{
+          "type" => object.type,
+          "position" => object.position,
+          "data" => object.data
+        }
+
         # Update fill field (color and fill have been consolidated)
         updated_data = Map.put(existing_data, "fill", color)
 
@@ -606,6 +614,23 @@ defmodule CollabCanvasWeb.CanvasLive do
           {:ok, updated_object} ->
             Logger.info("Updated object #{object_id} color to #{color}")
 
+            # Capture after state for redo
+            after_state = %{
+              "type" => updated_object.type,
+              "position" => updated_object.position,
+              "data" => updated_object.data
+            }
+
+            # Record operation for undo/redo
+            operation = UndoHistory.create_operation("update_color", [
+              %{
+                id: object_id,
+                before: before_state,
+                after: after_state
+              }
+            ])
+            UndoHistory.push_operation(socket.assigns.user_id, socket.assigns.canvas_id, operation)
+
             # Broadcast to all clients
             Phoenix.PubSub.broadcast(
               CollabCanvas.PubSub,
@@ -613,7 +638,21 @@ defmodule CollabCanvasWeb.CanvasLive do
               {:object_updated, updated_object}
             )
 
-            {:noreply, socket}
+            # Update local socket assigns with new undo/redo stacks
+            history_stacks = UndoHistory.get_stacks(socket.assigns.user_id, socket.assigns.canvas_id)
+
+            # Update local objects list
+            updated_objects =
+              Enum.map(socket.assigns.objects, fn obj ->
+                if obj.id == updated_object.id, do: updated_object, else: obj
+              end)
+
+            {:noreply,
+             socket
+             |> assign(:objects, updated_objects)
+             |> assign(:undo_stack, history_stacks.undo_stack)
+             |> assign(:redo_stack, history_stacks.redo_stack)
+             |> push_event("object_updated", %{object: updated_object})}
 
           {:error, _changeset} ->
             Logger.error("Failed to update object #{object_id} color")
@@ -807,7 +846,13 @@ defmodule CollabCanvasWeb.CanvasLive do
         {:noreply, put_flash(socket, :error, "Object is currently being edited by another user")}
 
       {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Object not found")}
+        # Object already deleted - treat as success and clean up local state
+        objects = Enum.reject(socket.assigns.objects, fn obj -> obj.id == object_id end)
+
+        {:noreply,
+         socket
+         |> assign(:objects, objects)
+         |> push_event("object_deleted", %{object_id: object_id})}
 
       _ ->
         # Capture object state before deletion for undo/redo
@@ -848,7 +893,13 @@ defmodule CollabCanvasWeb.CanvasLive do
              |> push_event("object_deleted", %{object_id: object_id})}
 
           {:error, :not_found} ->
-            {:noreply, put_flash(socket, :error, "Object not found")}
+            # Object already deleted - treat as success and clean up local state
+            objects = Enum.reject(socket.assigns.objects, fn obj -> obj.id == object_id end)
+
+            {:noreply,
+             socket
+             |> assign(:objects, objects)
+             |> push_event("object_deleted", %{object_id: object_id})}
         end
     end
   end
@@ -2534,6 +2585,33 @@ defmodule CollabCanvasWeb.CanvasLive do
         canvas = Canvases.get_canvas_with_preloads(canvas_id, [:objects])
         assign(socket, :objects, canvas.objects)
 
+      "update_color" ->
+        # Undo color change = restore "before" color state
+        Enum.each(objects, fn obj_snapshot ->
+          object_id = obj_snapshot["id"]
+          before_state = obj_snapshot["before"]
+
+          if before_state do
+            attrs = %{
+              position: before_state["position"],
+              data: before_state["data"]
+            }
+
+            case Canvases.update_object(object_id, attrs) do
+              {:ok, updated_object} ->
+                Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_updated, updated_object})
+                Logger.info("Undo update_color: restored object #{object_id}")
+
+              _ ->
+                :ok
+            end
+          end
+        end)
+
+        # Refresh objects from database
+        canvas = Canvases.get_canvas_with_preloads(canvas_id, [:objects])
+        assign(socket, :objects, canvas.objects)
+
       _ ->
         # Unknown operation type, do nothing
         socket
@@ -2621,6 +2699,33 @@ defmodule CollabCanvasWeb.CanvasLive do
               {:ok, updated_object} ->
                 Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_updated, updated_object})
                 Logger.info("Redo batch_update: restored object #{object_id}")
+
+              _ ->
+                :ok
+            end
+          end
+        end)
+
+        # Refresh objects from database
+        canvas = Canvases.get_canvas_with_preloads(canvas_id, [:objects])
+        assign(socket, :objects, canvas.objects)
+
+      "update_color" ->
+        # Redo color change = restore "after" color state
+        Enum.each(objects, fn obj_snapshot ->
+          object_id = obj_snapshot["id"]
+          after_state = obj_snapshot["after"]
+
+          if after_state do
+            attrs = %{
+              position: after_state["position"],
+              data: after_state["data"]
+            }
+
+            case Canvases.update_object(object_id, attrs) do
+              {:ok, updated_object} ->
+                Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_updated, updated_object})
+                Logger.info("Redo update_color: restored object #{object_id}")
 
               _ ->
                 :ok
