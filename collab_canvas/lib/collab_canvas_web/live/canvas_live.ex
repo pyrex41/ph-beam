@@ -3868,7 +3868,7 @@ defmodule CollabCanvasWeb.CanvasLive do
         </div>
       </div>
       <!-- AI Panel -->
-      <div class="w-80 bg-white border-l border-gray-200 flex flex-col">
+      <div class="w-80 bg-white border-l border-gray-200 flex flex-col overflow-y-auto">
         <div class="p-4 border-b border-gray-200">
           <h2 class="text-lg font-semibold text-gray-800">AI Assistant</h2>
           <p class="text-sm text-gray-500 mt-1">Describe what you want to create</p>
@@ -3891,7 +3891,7 @@ defmodule CollabCanvasWeb.CanvasLive do
 
         <div class="flex-1 flex flex-col">
           <!-- AI Interaction History -->
-          <div class="p-4 border-b border-gray-200 max-h-96 overflow-y-auto">
+          <div class="p-4 border-b border-gray-200">
             <h3 class="text-sm font-medium text-gray-700 mb-3">AI Interaction History</h3>
             <div class="space-y-2 flex flex-col-reverse">
               <%= if length(@ai_interaction_history) == 0 do %>
@@ -4125,7 +4125,7 @@ defmodule CollabCanvasWeb.CanvasLive do
                 </div>
               </button>
             </div>
-            <div class="space-y-1 max-h-40 overflow-y-auto">
+            <div class="space-y-1">
               <%= for object <- @objects do %>
                 <div class="flex items-center justify-between text-sm py-1">
                   <span class="text-gray-600">{object.type}</span>
