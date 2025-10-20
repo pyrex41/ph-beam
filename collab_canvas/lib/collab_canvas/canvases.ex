@@ -492,6 +492,39 @@ defmodule CollabCanvas.Canvases do
   end
 
   @doc """
+  Retrieves multiple objects by their IDs in a single query.
+
+  More efficient than calling `get_object/1` multiple times when fetching
+  many objects at once. Returns objects in the same order as the input IDs.
+
+  ## Parameters
+    * `object_ids` - List of object IDs to retrieve
+
+  ## Returns
+    * List of `%Object{}` structs (may be shorter than input if some objects don't exist)
+
+  ## Examples
+
+      iex> get_objects_batch([1, 2, 3])
+      [%Object{id: 1}, %Object{id: 2}, %Object{id: 3}]
+
+      iex> get_objects_batch([1, 999])  # 999 doesn't exist
+      [%Object{id: 1}]
+
+      iex> get_objects_batch([])
+      []
+
+  """
+  def get_objects_batch(object_ids) when is_list(object_ids) do
+    if Enum.empty?(object_ids) do
+      []
+    else
+      from(o in Object, where: o.id in ^object_ids)
+      |> Repo.all()
+    end
+  end
+
+  @doc """
   Locks an object for editing by a specific user.
 
   Locks automatically expire after #{@lock_timeout_minutes} minutes of inactivity.
@@ -613,6 +646,45 @@ defmodule CollabCanvas.Canvases do
         else
           {:unlocked, object}
         end
+    end
+  end
+
+  @doc """
+  Checks which objects in a list are locked by users other than the specified user.
+
+  More efficient than calling `check_lock/1` multiple times when checking
+  many objects at once. Uses a single query to find locked objects.
+
+  ## Parameters
+    * `object_ids` - List of object IDs to check
+    * `user_id` - The user ID to check against (objects locked by this user are NOT returned)
+
+  ## Returns
+    * List of object IDs that are locked by other users
+
+  ## Examples
+
+      iex> check_locks_batch([1, 2, 3], "user_123")
+      [2]  # Only object 2 is locked by another user
+
+      iex> check_locks_batch([1, 2, 3], "user_456")
+      []   # No objects are locked by other users
+
+      iex> check_locks_batch([], "user_123")
+      []
+
+  """
+  def check_locks_batch(object_ids, user_id) when is_list(object_ids) do
+    if Enum.empty?(object_ids) do
+      []
+    else
+      from(o in Object,
+        where: o.id in ^object_ids,
+        where: not is_nil(o.locked_by),
+        where: o.locked_by != ^user_id,
+        select: o.id
+      )
+      |> Repo.all()
     end
   end
 

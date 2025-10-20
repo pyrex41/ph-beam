@@ -48,6 +48,9 @@ export default {
     // Performance monitoring (optional, can be removed in production)
     this.enablePerformanceMonitoring = this.el.dataset.perfMonitoring === 'true';
 
+    // Track requestAnimationFrame ID for cleanup
+    this.rafId = null;
+
     // Listen for render_pixels events from LiveView
     this.handleEvent('render_pixels', (payload) => {
       this.renderPixels(payload);
@@ -153,6 +156,12 @@ export default {
    * @param {Number|null} startTime - Performance monitoring start time
    */
   renderPixelsAsync(pixels, squareWidth, squareHeight, startTime) {
+    // Cancel any existing animation frame to prevent conflicts
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+
     // Chunk size: render this many pixels per frame
     // 1024 pixels per frame keeps frame time under 16ms for 60fps
     const CHUNK_SIZE = 1024;
@@ -177,21 +186,26 @@ export default {
 
       // Continue with next chunk or finish
       if (currentIndex < pixels.length) {
-        requestAnimationFrame(renderChunk);
-      } else if (startTime !== null) {
-        // All done, log performance
-        const renderTime = performance.now() - startTime;
-        console.log(`[PixelCanvas] Rendered ${pixels.length} pixels in ${renderTime.toFixed(2)}ms (async, ${Math.ceil(pixels.length / CHUNK_SIZE)} chunks)`);
+        this.rafId = requestAnimationFrame(renderChunk);
+      } else {
+        // All done, clear RAF ID
+        this.rafId = null;
 
-        // Warn if exceeding performance target
-        if (pixels.length <= 16384 && renderTime > 500) {
-          console.warn(`[PixelCanvas] Performance warning: 128x128 grid took ${renderTime.toFixed(2)}ms (target: <500ms)`);
+        if (startTime !== null) {
+          // Log performance
+          const renderTime = performance.now() - startTime;
+          console.log(`[PixelCanvas] Rendered ${pixels.length} pixels in ${renderTime.toFixed(2)}ms (async, ${Math.ceil(pixels.length / CHUNK_SIZE)} chunks)`);
+
+          // Warn if exceeding performance target
+          if (pixels.length <= 16384 && renderTime > 500) {
+            console.warn(`[PixelCanvas] Performance warning: 128x128 grid took ${renderTime.toFixed(2)}ms (target: <500ms)`);
+          }
         }
       }
     };
 
     // Start async rendering
-    requestAnimationFrame(renderChunk);
+    this.rafId = requestAnimationFrame(renderChunk);
   },
 
   /**
@@ -199,9 +213,12 @@ export default {
    * Clean up resources when hook is removed from DOM
    */
   destroyed() {
-    // Clear any pending animation frames (if we tracked them)
-    // For now, no explicit cleanup needed as RAF callbacks will naturally stop
-    // when the hook is destroyed
-    console.log('[PixelCanvas] Hook destroyed');
+    // Cancel any pending animation frames to prevent memory leaks
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+
+    console.log('[PixelCanvas] Hook destroyed, resources cleaned up');
   }
 };

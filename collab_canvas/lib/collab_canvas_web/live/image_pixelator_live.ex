@@ -42,6 +42,7 @@ defmodule CollabCanvasWeb.ImagePixelatorLive do
   @max_file_size 10_000_000
   @allowed_extensions ~w(.jpg .jpeg .png)
   @default_grid_size 64
+  @max_image_dimension 4000
 
   @doc """
   Mounts the image pixelator LiveView and initializes state.
@@ -57,36 +58,45 @@ defmodule CollabCanvasWeb.ImagePixelatorLive do
   `{:ok, socket}` with initialized assigns and file upload configuration
   """
   @impl true
-  def mount(_params, _session, socket) do
-    grid_size_options = [
-      {"16x16", 16},
-      {"32x32", 32},
-      {"64x64", 64},
-      {"128x128", 128}
-    ]
+  def mount(_params, session, socket) do
+    # Load authenticated user from session
+    socket = CollabCanvasWeb.Plugs.Auth.assign_current_user(socket, session)
+    user = socket.assigns[:current_user]
 
-    # Get user's canvases for selection
-    user = Accounts.get_user(1) || create_default_user()
-    canvases = Canvases.list_user_canvases(user.id)
+    # Require authentication - redirect if no user
+    if !user do
+      {:ok,
+       socket
+       |> put_flash(:error, "Please log in to use the image pixelator")
+       |> redirect(to: ~p"/")}
+    else
+      grid_size_options = [
+        {"16x16", 16},
+        {"32x32", 32},
+        {"64x64", 64},
+        {"128x128", 128}
+      ]
 
-    canvas_options = [{"Create New Canvas", "new"}] ++ Enum.map(canvases, fn c -> {c.name, c.id} end)
+      # Get user's canvases for selection
+      canvases = Canvases.list_user_canvases(user.id)
+      canvas_options = [{"Create New Canvas", "new"}] ++ Enum.map(canvases, fn c -> {c.name, c.id} end)
 
-    {:ok,
-     socket
-     |> assign(:grid_size, @default_grid_size)
-     |> assign(:grid_size_options, grid_size_options)
-     |> assign(:pixel_data, nil)
-     |> assign(:error, nil)
-     |> assign(:processing, false)
-     |> assign(:current_user, user)
-     |> assign(:canvas_options, canvas_options)
-     |> assign(:selected_canvas_id, "new")
-     |> allow_upload(:image,
-       accept: @allowed_extensions,
-       max_entries: 1,
-       max_file_size: @max_file_size,
-       auto_upload: true
-     )}
+      {:ok,
+       socket
+       |> assign(:grid_size, @default_grid_size)
+       |> assign(:grid_size_options, grid_size_options)
+       |> assign(:pixel_data, nil)
+       |> assign(:error, nil)
+       |> assign(:processing, false)
+       |> assign(:canvas_options, canvas_options)
+       |> assign(:selected_canvas_id, "new")
+       |> allow_upload(:image,
+         accept: @allowed_extensions,
+         max_entries: 1,
+         max_file_size: @max_file_size,
+         auto_upload: true
+       )}
+    end
   end
 
   @impl true
@@ -216,12 +226,24 @@ defmodule CollabCanvasWeb.ImagePixelatorLive do
         end)
 
         # Store pixel data server-side instead of passing through URL
-        PixelDataStore.store(canvas.id, user.id, rectangles)
+        case PixelDataStore.store(canvas.id, user.id, rectangles) do
+          :ok ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Animating pixel art on canvas...")
+             |> push_navigate(to: ~p"/canvas/#{canvas.id}?animate_pixels=true")}
 
-        {:noreply,
-         socket
-         |> put_flash(:info, "Animating pixel art on canvas...")
-         |> push_navigate(to: ~p"/canvas/#{canvas.id}?animate_pixels=true")}
+          {:error, :table_full} ->
+            {:noreply,
+             socket
+             |> assign(:error, "Server storage is temporarily full. Please try again in a moment.")}
+
+          {:error, reason} ->
+            Logger.error("Failed to store pixel data: #{inspect(reason)}")
+            {:noreply,
+             socket
+             |> assign(:error, "Failed to store pixel data. Please try again.")}
+        end
 
       {:error, reason} ->
         Logger.error("Failed to get/create canvas: #{inspect(reason)}")
@@ -234,34 +256,49 @@ defmodule CollabCanvasWeb.ImagePixelatorLive do
 
   # Private Functions
 
-  defp create_default_user do
-    # Create a default user if none exists
-    {:ok, user} =
-      Accounts.create_user(%{
-        email: "pixelator@collabcanvas.com",
-        name: "Pixel Art Creator"
-      })
+  @doc false
+  defp validate_image_dimensions(image_path) do
+    case Image.open(image_path) do
+      {:ok, image} ->
+        {width, height} = Image.size(image)
 
-    user
+        if width <= @max_image_dimension and height <= @max_image_dimension do
+          :ok
+        else
+          Logger.warning("Image dimensions (#{width}x#{height}) exceed maximum (#{@max_image_dimension}x#{@max_image_dimension})")
+          {:error, :dimensions_too_large}
+        end
+
+      {:error, reason} ->
+        Logger.error("Failed to open image for validation: #{inspect(reason)}")
+        {:error, reason}
+    end
   end
 
   @doc false
   defp process_image(image_path, grid_size) do
-    try do
-      # Step 1: Resize image to grid_size x grid_size using Mogrify
-      resized_path = resize_image(image_path, grid_size)
+    # Validate image dimensions before processing
+    case validate_image_dimensions(image_path) do
+      :ok ->
+        resized_path = resize_image(image_path, grid_size)
 
-      # Step 2: Extract pixel data using Image library
-      pixel_data = extract_pixel_data(resized_path, grid_size)
+        try do
+          # Extract pixel data using Image library
+          pixel_data = extract_pixel_data(resized_path, grid_size)
+          {:ok, pixel_data}
+        rescue
+          error ->
+            Logger.error("Image processing error: #{inspect(error)}")
+            {:error, error}
+        after
+          # Always clean up temporary resized file, even if extraction fails
+          if File.exists?(resized_path) do
+            File.rm(resized_path)
+          end
+        end
 
-      # Step 3: Clean up temporary resized file
-      File.rm(resized_path)
-
-      {:ok, pixel_data}
-    rescue
-      error ->
-        Logger.error("Image processing error: #{inspect(error)}")
-        {:error, error}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -342,6 +379,8 @@ defmodule CollabCanvasWeb.ImagePixelatorLive do
   defp format_error(:too_large), do: "File is too large (max 10MB)"
   defp format_error(:not_accepted), do: "File type not accepted (JPG, JPEG, PNG only)"
   defp format_error(:too_many_files), do: "Only one file can be uploaded at a time"
+  defp format_error(:dimensions_too_large),
+    do: "Image dimensions too large (max #{@max_image_dimension}x#{@max_image_dimension} pixels)"
   defp format_error(error) when is_binary(error), do: error
   defp format_error(error), do: "An error occurred: #{inspect(error)}"
 

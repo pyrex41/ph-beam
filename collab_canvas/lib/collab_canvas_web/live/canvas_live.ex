@@ -2679,16 +2679,11 @@ defmodule CollabCanvasWeb.CanvasLive do
       if is_binary(id), do: String.to_integer(id), else: id
     end)
 
-    # Capture objects before deletion for undo/redo
-    objects_before_delete = Enum.map(object_ids, &Canvases.get_object/1) |> Enum.filter(& &1)
+    # Capture objects before deletion for undo/redo (single query)
+    objects_before_delete = Canvases.get_objects_batch(object_ids)
 
-    # Check if any objects are locked by other users
-    locked_by_others = Enum.filter(object_ids, fn id ->
-      case Canvases.check_lock(id) do
-        {:locked, locked_by} when locked_by != user_id -> true
-        _ -> false
-      end
-    end)
+    # Check if any objects are locked by other users (single query)
+    locked_by_others = Canvases.check_locks_batch(object_ids, user_id)
 
     if Enum.any?(locked_by_others) do
       {:noreply, put_flash(socket, :error, "Some objects are locked by other users")}
