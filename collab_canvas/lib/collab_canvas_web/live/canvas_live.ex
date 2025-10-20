@@ -3164,6 +3164,7 @@ defmodule CollabCanvasWeb.CanvasLive do
             |> add_ai_response.(message)
             |> assign(:objects, final_objects)
             |> assign(:ai_command, "")
+            |> push_event("reset_view", %{})
             |> put_flash(:info, message)
         end
 

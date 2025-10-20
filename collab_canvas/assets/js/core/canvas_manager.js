@@ -2924,10 +2924,19 @@ export class CanvasManager {
       // (This handles lasso selections properly since all selected objects are reparented there)
       const isInSelection = object.parent === this.selectionContainer;
 
-      console.log('[CanvasManager] onObjectPointerDown: object', object.objectId, 'parent:', object.parent?.constructor?.name, 'isInSelection:', isInSelection, 'selectionContainer children:', this.selectionContainer.children.length, 'selectedObjects size:', this.selectedObjects.size);
+      // Check if shift key is pressed for multi-selection
+      const shiftPressed = event.data.originalEvent.shiftKey;
 
-      if (!isInSelection) {
-        // Object is not in selection container, select it
+      console.log('[CanvasManager] onObjectPointerDown: object', object.objectId, 'parent:', object.parent?.constructor?.name, 'isInSelection:', isInSelection, 'shiftPressed:', shiftPressed, 'selectionContainer children:', this.selectionContainer.children.length, 'selectedObjects size:', this.selectedObjects.size);
+
+      if (shiftPressed) {
+        // Shift+click = toggle selection (add or remove from selection)
+        console.log('[CanvasManager] onObjectPointerDown: shift+click, calling toggleSelection for object', object.objectId);
+        this.toggleSelection(object);
+        // Don't start dragging on shift+click - user is building selection
+        return;
+      } else if (!isInSelection) {
+        // Object is not in selection container, select it (replace current selection)
         console.log('[CanvasManager] onObjectPointerDown: calling setSelection for object', object.objectId);
         this.setSelection(object);
       } else {
