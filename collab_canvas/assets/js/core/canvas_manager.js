@@ -2,6 +2,7 @@ import * as PIXI from '../../vendor/pixi.min.mjs';
 import { PerformanceMonitor } from './performance_monitor.js';
 import { OfflineQueue } from './offline_queue.js';
 import { HistoryManager } from './history_manager.js';
+import { SpatialHashGrid } from './spatial_hash_grid.js';
 
 /**
  * CanvasManager - Standalone PixiJS Canvas Management
@@ -94,6 +95,16 @@ export class CanvasManager {
 
     // Performance monitoring
     this.performanceMonitor = null;
+
+    // Spatial hash grid for efficient overlap detection (100x100 pixel cells)
+    this.spatialGrid = new SpatialHashGrid(100);
+    // Track objects that have overlaps and need z-index management
+    this.overlappingObjects = new Set();
+
+    // Bulk operation loading state
+    this.loadingSpinner = null;
+    this.isShowingLoadingSpinner = false;
+    this.pendingBulkDelete = false;
 
     // Shared resources for cursor label optimization
     this.sharedCursorLabelStyle = null;
@@ -402,6 +413,9 @@ export class CanvasManager {
 
     this.objects.set(objectData.id, pixiObject);
     this.objectContainer.addChild(pixiObject);
+
+    // Add to spatial grid and check for overlaps
+    this.updateSpatialGridForObject(pixiObject);
 
     // Create label for this object if labels are currently visible
     if (this.labelsVisible) {
@@ -1213,6 +1227,9 @@ export class CanvasManager {
   deleteObject(objectId) {
     const pixiObject = this.objects.get(objectId);
     if (pixiObject) {
+      // Remove from spatial grid
+      this.spatialGrid.remove(pixiObject);
+
       this.objectContainer.removeChild(pixiObject);
       pixiObject.destroy();
       this.objects.delete(objectId);
@@ -1228,6 +1245,101 @@ export class CanvasManager {
 
     // Also remove the lock indicator if it exists
     this.hideLockIndicator(objectId);
+  }
+
+  /**
+   * Delete multiple objects in a batch (optimized for large selections)
+   * @param {Array<number>} objectIds - Array of object IDs to delete
+   */
+  deleteObjectsBatch(objectIds) {
+    if (!Array.isArray(objectIds) || objectIds.length === 0) {
+      return;
+    }
+
+    // Batch remove all objects
+    objectIds.forEach(objectId => {
+      const pixiObject = this.objects.get(objectId);
+      if (pixiObject) {
+        // Remove from spatial grid
+        this.spatialGrid.remove(pixiObject);
+
+        this.objectContainer.removeChild(pixiObject);
+        pixiObject.destroy();
+        this.objects.delete(objectId);
+      }
+
+      // Remove label
+      const label = this.objectLabels.get(objectId);
+      if (label) {
+        this.labelContainer.removeChild(label.container);
+        label.container.destroy();
+        this.objectLabels.delete(objectId);
+      }
+
+      // Remove lock indicator
+      this.hideLockIndicator(objectId);
+    });
+
+    // Render once after all deletions
+    this.app.render();
+
+    console.log(`Batch deleted ${objectIds.length} objects`);
+
+    // Hide loading spinner if it was shown for this bulk delete
+    if (this.pendingBulkDelete) {
+      this.hideLoadingSpinner();
+    }
+  }
+
+  /**
+   * Update spatial grid for an object and manage z-index for overlapping objects
+   * @param {PIXI.Container} pixiObject - The PixiJS object to update in spatial grid
+   */
+  updateSpatialGridForObject(pixiObject) {
+    if (!pixiObject || !pixiObject.objectId) {
+      return;
+    }
+
+    // Calculate object bounds in world space
+    const bounds = pixiObject.getBounds();
+    const objectBounds = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height
+    };
+
+    // Store bounds on object for quick access
+    pixiObject.pixiBounds = objectBounds;
+
+    // Update object position in spatial grid
+    this.spatialGrid.update(pixiObject, objectBounds);
+
+    // Find overlapping objects using spatial grid
+    const overlapping = this.spatialGrid.getOverlappingObjects(pixiObject, objectBounds);
+
+    // Only assign z-index if object overlaps with others
+    if (overlapping.size > 0) {
+      // Object has overlaps - ensure it has a z-index
+      if (pixiObject.zIndex === undefined || pixiObject.zIndex === null) {
+        // Assign a z-index based on current child index
+        pixiObject.zIndex = this.objectContainer.getChildIndex(pixiObject);
+      }
+
+      // Ensure overlapping objects also have z-indices
+      overlapping.forEach(other => {
+        if (other.zIndex === undefined || other.zIndex === null) {
+          other.zIndex = this.objectContainer.getChildIndex(other);
+        }
+      });
+
+      // Enable sorting on container if not already enabled
+      if (!this.objectContainer.sortableChildren) {
+        this.objectContainer.sortableChildren = true;
+      }
+    }
+    // Note: We don't remove z-index from non-overlapping objects to avoid thrashing
+    // Objects keep their z-index once assigned, only updated when they overlap
   }
 
   /**
@@ -1691,6 +1803,9 @@ export class CanvasManager {
         this.emit('end_operation', { object_ids: [objectId] });
       }
 
+      // Update spatial grid after rotation (bounds may have changed)
+      this.updateSpatialGridForObject(obj);
+
       // Reset rotation handle cursor
       const handle = this.rotationHandles.get(obj.objectId);
       if (handle) {
@@ -1720,6 +1835,9 @@ export class CanvasManager {
           }
         });
       }
+
+      // Update spatial grid after resize (bounds have changed)
+      this.updateSpatialGridForObject(obj);
 
       // Reset resize handle cursor
       const handle = this.resizeHandles.get(obj.objectId);
@@ -1774,6 +1892,11 @@ export class CanvasManager {
 
         // Update selection boxes to match new positions
         this.updateSelectionBoxes();
+
+        // Update spatial grid for all dragged objects (for overlap detection)
+        updates.forEach(({ obj }) => {
+          this.updateSpatialGridForObject(obj);
+        });
 
         // IMPORTANT: Always send final batch update on mouseup
         // The throttled update during drag may be stale if < 50ms has elapsed
@@ -1971,11 +2094,34 @@ export class CanvasManager {
       case 'backspace':
         if (this.selectedObjects.size > 0) {
           event.preventDefault();
-          // Delete all selected objects
-          this.selectedObjects.forEach(obj => {
-            this.emit('delete_object', { object_id: obj.objectId });
-          });
-          this.clearSelection();
+          // Batch delete all selected objects
+          const objectIds = Array.from(this.selectedObjects).map(obj => obj.objectId);
+          console.log('[CanvasManager] Delete key pressed, deleting', objectIds.length, 'objects:', objectIds);
+
+          if (objectIds.length > 1) {
+            // For bulk deletes (>200 objects), show loading spinner and fade out immediately
+            if (objectIds.length > 200) {
+              console.log('[CanvasManager] Large bulk delete detected, showing loading spinner');
+              this.showLoadingSpinner();
+              this.pendingBulkDelete = true;
+
+              // Immediately fade out all selected objects for instant visual feedback
+              this.selectedObjects.forEach(obj => {
+                obj.alpha = 0.3; // Fade to 30% opacity
+              });
+            }
+
+            // Send batch delete for multiple objects
+            console.log('[CanvasManager] Sending batch delete event with', objectIds.length, 'IDs');
+            this.emit('delete_object', { object_ids: objectIds });
+            // Clear selection silently after sending the event
+            this.clearSelectionSilent();
+          } else if (objectIds.length === 1) {
+            // Single object delete - use normal flow with unlock
+            console.log('[CanvasManager] Sending single delete event for ID:', objectIds[0]);
+            this.emit('delete_object', { object_id: objectIds[0] });
+            this.clearSelection();
+          }
         }
         break;
       case 'escape':
@@ -2193,6 +2339,9 @@ export class CanvasManager {
       // Select all objects that intersect with the lasso rectangle
       console.log('[CanvasManager] Lasso checking', this.objects.size, 'objects in lasso rect:', minX, minY, 'to', maxX, maxY);
 
+      // Track newly selected objects for batch lock operation
+      const newlySelectedIds = [];
+
       this.objects.forEach((obj, objectId) => {
         // Safety check: ensure object has required properties
         if (!obj || !obj.objectId) {
@@ -2224,11 +2373,18 @@ export class CanvasManager {
             this.addToSelection(obj);
             // Add to selection tracking
             this.selectedObjects.add(obj);
-            this.emit('lock_object', { object_id: obj.objectId });
+            // Track for batch lock
+            newlySelectedIds.push(obj.objectId);
             this.createSelectionBox(obj);
           }
         }
       });
+
+      // Emit batch lock event if any objects were newly selected
+      if (newlySelectedIds.length > 0) {
+        console.log('[CanvasManager] Batch locking', newlySelectedIds.length, 'objects from lasso selection');
+        this.emit('lock_objects_batch', { object_ids: newlySelectedIds });
+      }
     }
 
     console.log('[CanvasManager] AFTER lasso loop, selectionContainer children:', this.selectionContainer.children.length, 'children IDs:', this.selectionContainer.children.map(c => c.objectId));
@@ -2289,9 +2445,16 @@ export class CanvasManager {
    */
   clearSelection() {
     // Unlock all selected objects
-    this.selectedObjects.forEach(obj => {
-      this.emit('unlock_object', { object_id: obj.objectId });
-    });
+    const objectIds = Array.from(this.selectedObjects).map(obj => obj.objectId);
+
+    if (objectIds.length > 1) {
+      // Use batch unlock for multiple objects
+      console.log('[CanvasManager] Batch unlocking', objectIds.length, 'objects from clearSelection');
+      this.emit('unlock_objects_batch', { object_ids: objectIds });
+    } else if (objectIds.length === 1) {
+      // Use individual unlock for single object
+      this.emit('unlock_object', { object_id: objectIds[0] });
+    }
 
     // Reparent all objects back to their original parents
     this.selectedObjects.forEach(obj => {
@@ -2330,6 +2493,51 @@ export class CanvasManager {
     // Reset selection container position to origin
     this.selectionContainer.x = 0;
     this.selectionContainer.y = 0;
+  }
+
+  /**
+   * Clear selection without emitting unlock events (for batch operations like delete)
+   */
+  clearSelectionSilent() {
+    // Just clear visual elements without server communication
+    // Objects will be deleted anyway, so no need to unlock them first
+
+    // Remove all selection boxes
+    this.selectionBoxes.forEach((box, objectId) => {
+      if (box.parent) {
+        box.parent.removeChild(box);
+      }
+      box.destroy({ children: true });
+    });
+
+    // Remove all rotation handles
+    this.rotationHandles.forEach((handle, objectId) => {
+      if (handle.parent) {
+        handle.parent.removeChild(handle);
+      }
+      handle.destroy({ children: true });
+    });
+
+    // Remove all resize handles
+    this.resizeHandles.forEach((handle, objectId) => {
+      if (handle.parent) {
+        handle.parent.removeChild(handle);
+      }
+      handle.destroy({ children: true });
+    });
+
+    // Clear all state
+    this.selectedObjects.clear();
+    this.selectionBoxes.clear();
+    this.rotationHandles.clear();
+    this.resizeHandles.clear();
+    this.selectionData.clear();
+
+    // Reset selection container position to origin
+    this.selectionContainer.x = 0;
+    this.selectionContainer.y = 0;
+
+    console.log('[CanvasManager] Cleared selection silently for batch operation');
   }
 
   /**
@@ -2530,6 +2738,8 @@ export class CanvasManager {
     // Clear current selection first
     this.clearSelection();
 
+    const selectedIds = [];
+
     // Select each object
     objectIds.forEach(objectId => {
       const object = this.objects.get(objectId);
@@ -2547,9 +2757,15 @@ export class CanvasManager {
       // Add to selection (same pattern as lasso selection)
       this.addToSelection(object);
       this.selectedObjects.add(object);
-      this.emit('lock_object', { object_id: object.objectId });
+      selectedIds.push(object.objectId);
       this.createSelectionBox(object);
     });
+
+    // Emit batch lock event for selected objects
+    if (selectedIds.length > 0) {
+      console.log('[CanvasManager] Batch locking', selectedIds.length, 'objects from selectObjectsByIds');
+      this.emit('lock_objects_batch', { object_ids: selectedIds });
+    }
 
     console.log('[CanvasManager] Multi-selection complete, selected', this.selectedObjects.size, 'objects');
   }
@@ -3428,14 +3644,22 @@ export class CanvasManager {
   selectAll() {
     this.clearSelection();
 
+    const allObjectIds = [];
+
     this.objects.forEach((pixiObj, objectId) => {
       // Reparent to selection container
       this.addToSelection(pixiObj);
       // Add to selection tracking
       this.selectedObjects.add(pixiObj);
-      this.emit('lock_object', { object_id: pixiObj.objectId });
+      allObjectIds.push(pixiObj.objectId);
       this.createSelectionBox(pixiObj);
     });
+
+    // Emit batch lock event for all objects
+    if (allObjectIds.length > 0) {
+      console.log('[CanvasManager] Batch locking', allObjectIds.length, 'objects from select all');
+      this.emit('lock_objects_batch', { object_ids: allObjectIds });
+    }
 
     console.log('[CanvasManager] Selected all', this.selectedObjects.size, 'objects');
   }
@@ -4104,6 +4328,58 @@ export class CanvasManager {
   }
 
   /**
+   * Show loading spinner for bulk operations (>200 objects)
+   */
+  showLoadingSpinner() {
+    if (this.isShowingLoadingSpinner || !this.app) return;
+
+    // Create spinner if it doesn't exist
+    if (!this.loadingSpinner) {
+      this.loadingSpinner = new PIXI.Container();
+
+      // Semi-transparent backdrop
+      const backdrop = new PIXI.Graphics();
+      backdrop.beginFill(0x000000, 0.3);
+      backdrop.drawRect(0, 0, this.canvasWidth, this.canvasHeight);
+      backdrop.endFill();
+      this.loadingSpinner.addChild(backdrop);
+
+      // Spinner circle
+      const spinner = new PIXI.Graphics();
+      spinner.lineStyle(4, 0xFFFFFF, 1);
+      spinner.arc(0, 0, 30, 0, Math.PI * 1.5);
+      spinner.x = this.canvasWidth / 2;
+      spinner.y = this.canvasHeight / 2;
+      this.loadingSpinner.addChild(spinner);
+
+      // Animate spinner rotation
+      this.loadingSpinner.spinner = spinner;
+      this.app.ticker.add(() => {
+        if (this.loadingSpinner && this.loadingSpinner.spinner) {
+          this.loadingSpinner.spinner.rotation += 0.1;
+        }
+      });
+    }
+
+    // Add to stage
+    this.app.stage.addChild(this.loadingSpinner);
+    this.isShowingLoadingSpinner = true;
+  }
+
+  /**
+   * Hide loading spinner
+   */
+  hideLoadingSpinner() {
+    if (!this.isShowingLoadingSpinner || !this.loadingSpinner) return;
+
+    if (this.loadingSpinner.parent) {
+      this.app.stage.removeChild(this.loadingSpinner);
+    }
+    this.isShowingLoadingSpinner = false;
+    this.pendingBulkDelete = false;
+  }
+
+  /**
    * Destroy the CanvasManager and clean up resources
    */
   destroy() {
@@ -4134,6 +4410,15 @@ export class CanvasManager {
     if (this.performanceMonitor) {
       this.performanceMonitor.stop();
       this.performanceMonitor = null;
+    }
+
+    // Clean up loading spinner
+    if (this.loadingSpinner) {
+      if (this.loadingSpinner.parent) {
+        this.loadingSpinner.parent.removeChild(this.loadingSpinner);
+      }
+      this.loadingSpinner.destroy(true);
+      this.loadingSpinner = null;
     }
 
     // Clean up PixiJS application

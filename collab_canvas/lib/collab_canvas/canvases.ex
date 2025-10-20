@@ -409,6 +409,41 @@ defmodule CollabCanvas.Canvases do
   end
 
   @doc """
+  Deletes multiple objects in a single transaction.
+
+  ## Parameters
+    * `object_ids` - List of object IDs to delete
+
+  ## Returns
+    * `{:ok, deleted_count}` - Number of objects deleted
+    * `{:error, reason}` - If deletion fails
+
+  ## Examples
+
+      iex> delete_objects_batch([1, 2, 3])
+      {:ok, 3}
+
+      iex> delete_objects_batch([])
+      {:ok, 0}
+
+  """
+  def delete_objects_batch(object_ids) when is_list(object_ids) do
+    # Use a single query to delete all objects at once
+    # This is much more efficient than individual deletes
+    import Ecto.Query
+
+    try do
+      {count, _} =
+        from(o in Object, where: o.id in ^object_ids)
+        |> Repo.delete_all()
+
+      {:ok, count}
+    rescue
+      e -> {:error, e}
+    end
+  end
+
+  @doc """
   Lists all objects for a specific canvas.
 
   ## Parameters
@@ -578,6 +613,116 @@ defmodule CollabCanvas.Canvases do
         else
           {:unlocked, object}
         end
+    end
+  end
+
+  @doc """
+  Locks multiple objects for editing by a specific user in a single batch operation.
+
+  This is much more efficient than individual lock operations when locking many objects.
+  Uses a single UPDATE query to lock all objects at once.
+
+  ## Parameters
+    * `object_ids` - List of object IDs to lock
+    * `user_id` - The user ID locking the objects
+
+  ## Returns
+    * `{:ok, locked_count, locked_ids}` - Number of objects successfully locked and their IDs
+    * `{:error, reason}` - If batch lock fails
+
+  ## Examples
+
+      iex> lock_objects_batch([1, 2, 3], "user_123")
+      {:ok, 3, [1, 2, 3]}
+
+      iex> lock_objects_batch([], "user_123")
+      {:ok, 0, []}
+
+  """
+  def lock_objects_batch(object_ids, user_id) when is_list(object_ids) do
+    import Ecto.Query
+
+    try do
+      now = DateTime.utc_now()
+
+      # Lock all objects that are either:
+      # 1. Not locked (locked_by is nil)
+      # 2. Already locked by this user (refresh lock)
+      # 3. Locked by another user but lock has expired
+      locked_count =
+        from(o in Object,
+          where: o.id in ^object_ids,
+          where:
+            is_nil(o.locked_by) or
+            o.locked_by == ^user_id or
+            o.locked_at < ago(@lock_timeout_minutes, "minute")
+        )
+        |> Repo.update_all(set: [locked_by: user_id, locked_at: now])
+        |> elem(0)
+
+      # Get the IDs that were actually locked
+      locked_ids =
+        from(o in Object,
+          where: o.id in ^object_ids,
+          where: o.locked_by == ^user_id,
+          select: o.id
+        )
+        |> Repo.all()
+
+      {:ok, locked_count, locked_ids}
+    rescue
+      e ->
+        {:error, e}
+    end
+  end
+
+  @doc """
+  Unlocks multiple objects in a single batch operation.
+
+  This is much more efficient than individual unlock operations when unlocking many objects.
+  Uses a single UPDATE query to unlock all objects at once.
+
+  ## Parameters
+    * `object_ids` - List of object IDs to unlock
+    * `user_id` - The user ID unlocking the objects (optional, for validation)
+
+  ## Returns
+    * `{:ok, unlocked_count}` - Number of objects successfully unlocked
+    * `{:error, reason}` - If batch unlock fails
+
+  ## Examples
+
+      iex> unlock_objects_batch([1, 2, 3], "user_123")
+      {:ok, 3}
+
+      iex> unlock_objects_batch([], "user_123")
+      {:ok, 0}
+
+  """
+  def unlock_objects_batch(object_ids, user_id \\ nil) when is_list(object_ids) do
+    import Ecto.Query
+
+    try do
+      query =
+        if user_id do
+          # Only unlock objects locked by this user
+          from(o in Object,
+            where: o.id in ^object_ids,
+            where: o.locked_by == ^user_id
+          )
+        else
+          # Unlock all objects in the list
+          from(o in Object,
+            where: o.id in ^object_ids
+          )
+        end
+
+      {unlocked_count, _} = Repo.update_all(query, set: [locked_by: nil, locked_at: nil])
+
+      {:ok, unlocked_count}
+    rescue
+      e ->
+        {:error, e}
     end
   end
 

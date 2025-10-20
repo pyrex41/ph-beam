@@ -86,6 +86,7 @@ defmodule CollabCanvasWeb.CanvasLive do
   alias CollabCanvas.ColorPalettes
   alias CollabCanvas.AI.Agent
   alias CollabCanvas.UndoHistory
+  alias CollabCanvas.PixelDataStore
   alias CollabCanvasWeb.Presence
   alias CollabCanvasWeb.Plugs.Auth
 
@@ -120,7 +121,7 @@ defmodule CollabCanvasWeb.CanvasLive do
   - Assigns random color to user for cursor display
   """
   @impl true
-  def mount(%{"id" => canvas_id}, session, socket) do
+  def mount(%{"id" => canvas_id} = params, session, socket) do
     # Load authenticated user
     socket = Auth.assign_current_user(socket, session)
 
@@ -129,6 +130,9 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     # Load canvas data
     canvas = Canvases.get_canvas_with_preloads(canvas_id, [:objects])
+
+    # Check if we should load pixel animation data from server-side store
+    should_animate_pixels = Map.get(params, "animate_pixels") == "true"
 
     if canvas && socket.assigns.current_user do
       # Subscribe to canvas-specific PubSub topic for real-time updates
@@ -190,6 +194,23 @@ defmodule CollabCanvasWeb.CanvasLive do
             y: viewport.viewport_y,
             zoom: viewport.zoom
           })
+        else
+          socket
+        end
+
+      # If pixel animation flag is set, retrieve data from server-side store
+      socket =
+        if should_animate_pixels do
+          case PixelDataStore.pop(canvas_id, user.id) do
+            {:ok, rectangles} when is_list(rectangles) ->
+              # Send the rectangles to be animated on the server
+              send(self(), {:animate_pixel_art, rectangles, user_id})
+              socket
+
+            {:error, _reason} ->
+              # Data not found or expired, ignore
+              socket
+          end
         else
           socket
         end
@@ -454,6 +475,133 @@ defmodule CollabCanvasWeb.CanvasLive do
         end
 
       _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Handles batch object lock events from the client.
+
+  Locks multiple objects in a single operation, much more efficient than individual locks.
+  Used for multi-select operations (box select, lasso, shift-click multiple objects).
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_ids" - List of object IDs to lock
+
+  ## Broadcast
+
+  Sends `{:objects_locked_batch, locked_ids, user_info}` to PubSub topic for all clients.
+
+  ## Returns
+
+  `{:noreply, socket}` with locked objects or error flash message.
+  """
+  @impl true
+  def handle_event("lock_objects_batch", %{"object_ids" => object_ids} = _params, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id ->
+      if is_binary(id), do: String.to_integer(id), else: id
+    end)
+
+    user_id = socket.assigns.user_id
+
+    case Canvases.lock_objects_batch(object_ids, user_id) do
+      {:ok, locked_count, locked_ids} ->
+        Logger.info("Batch locked #{locked_count} objects for user #{user_id}")
+
+        # Get user presence info
+        presences = Presence.list(socket.assigns.topic)
+        user_presence = Map.get(presences, user_id, %{})
+        user_meta = user_presence[:metas] |> List.first() || %{}
+
+        user_info = %{
+          name: user_meta[:name] || "Unknown",
+          color: user_meta[:color] || "#000000",
+          avatar: user_meta[:avatar] || nil
+        }
+
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_locked_batch, locked_ids, user_info}
+        )
+
+        # Update local state - fetch the locked objects
+        locked_objects = Enum.map(locked_ids, &Canvases.get_object/1) |> Enum.filter(& &1)
+
+        objects =
+          Enum.map(socket.assigns.objects, fn obj ->
+            Enum.find(locked_objects, obj, fn locked -> locked.id == obj.id end)
+          end)
+
+        {:noreply,
+         socket
+         |> assign(:objects, objects)
+         |> push_event("objects_locked_batch", %{object_ids: locked_ids, user_info: user_info})}
+
+      {:error, reason} ->
+        Logger.error("Batch lock failed: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to lock objects")}
+    end
+  end
+
+  @doc """
+  Handles batch object unlock events from the client.
+
+  Unlocks multiple objects in a single operation, much more efficient than individual unlocks.
+  Used when clearing multi-select or deselecting multiple objects.
+
+  ## Parameters
+
+  - `params` - Map containing:
+    - "object_ids" - List of object IDs to unlock
+
+  ## Broadcast
+
+  Sends `{:objects_unlocked_batch, unlocked_ids}` to PubSub topic for all clients.
+
+  ## Returns
+
+  `{:noreply, socket}` with unlocked objects.
+  """
+  @impl true
+  def handle_event("unlock_objects_batch", %{"object_ids" => object_ids} = _params, socket) do
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id ->
+      if is_binary(id), do: String.to_integer(id), else: id
+    end)
+
+    user_id = socket.assigns.user_id
+
+    case Canvases.unlock_objects_batch(object_ids, user_id) do
+      {:ok, unlocked_count} ->
+        Logger.info("Batch unlocked #{unlocked_count} objects for user #{user_id}")
+
+        # Broadcast to all connected clients
+        Phoenix.PubSub.broadcast(
+          CollabCanvas.PubSub,
+          socket.assigns.topic,
+          {:objects_unlocked_batch, object_ids}
+        )
+
+        # Update local state - fetch the unlocked objects
+        unlocked_objects = Enum.map(object_ids, &Canvases.get_object/1) |> Enum.filter(& &1)
+
+        objects =
+          Enum.map(socket.assigns.objects, fn obj ->
+            Enum.find(unlocked_objects, obj, fn unlocked -> unlocked.id == obj.id end)
+          end)
+
+        {:noreply,
+         socket
+         |> assign(:objects, objects)
+         |> push_event("objects_unlocked_batch", %{object_ids: object_ids})}
+
+      {:error, reason} ->
+        Logger.error("Batch unlock failed: #{inspect(reason)}")
         {:noreply, socket}
     end
   end
@@ -743,62 +891,77 @@ defmodule CollabCanvasWeb.CanvasLive do
   """
   @impl true
   def handle_event("delete_object", params, socket) do
-    # Extract object_id from params (could be "id" or "object_id")
-    object_id = params["object_id"] || params["id"]
+    Logger.info("==================== DELETE_OBJECT EVENT RECEIVED ====================")
+    Logger.info("Params: #{inspect(params)}")
+    Logger.info("Params keys: #{inspect(Map.keys(params))}")
 
-    # Convert string ID to integer if needed
-    object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
-
-    user_id = socket.assigns.user_id
-
-    # Check if object is locked by another user
-    case Canvases.check_lock(object_id) do
-      {:locked, locked_by} when locked_by != user_id ->
-        {:noreply, put_flash(socket, :error, "Object is currently being edited by another user")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Object not found")}
+    # Check if this is a batch deletion (multiple object_ids)
+    case params do
+      %{"object_ids" => object_ids} when is_list(object_ids) ->
+        Logger.info("==================== BATCH DELETE ====================")
+        Logger.info("Batch delete: #{length(object_ids)} objects")
+        Logger.info("Object IDs: #{inspect(object_ids)}")
+        handle_batch_delete(object_ids, socket)
 
       _ ->
-        # Capture object state before deletion for undo/redo
-        object_before_delete = Canvases.get_object(object_id)
+        # Single object deletion
+        # Extract object_id from params (could be "id" or "object_id")
+        object_id = params["object_id"] || params["id"]
 
-        # Object is unlocked or locked by current user, proceed with deletion
-        case Canvases.delete_object(object_id) do
-          {:ok, _deleted_object} ->
-            # Capture operation for undo/redo
-            if object_before_delete do
-              operation = UndoHistory.create_operation("delete", [
-                %{
-                  id: object_id,
-                  before: %{
-                    "type" => object_before_delete.type,
-                    "position" => object_before_delete.position,
-                    "data" => object_before_delete.data
-                  },
-                  after: nil  # Object no longer exists after deletion
-                }
-              ])
-              UndoHistory.push_operation(socket.assigns.user_id, socket.assigns.canvas_id, operation)
-            end
+        # Convert string ID to integer if needed
+        object_id = if is_binary(object_id), do: String.to_integer(object_id), else: object_id
 
-            # Broadcast to all connected clients
-            Phoenix.PubSub.broadcast(
-              CollabCanvas.PubSub,
-              socket.assigns.topic,
-              {:object_deleted, object_id}
-            )
+        user_id = socket.assigns.user_id
 
-            # Update local state and push to JavaScript immediately
-            objects = Enum.reject(socket.assigns.objects, fn obj -> obj.id == object_id end)
-
-            {:noreply,
-             socket
-             |> assign(:objects, objects)
-             |> push_event("object_deleted", %{object_id: object_id})}
+        # Check if object is locked by another user
+        case Canvases.check_lock(object_id) do
+          {:locked, locked_by} when locked_by != user_id ->
+            {:noreply, put_flash(socket, :error, "Object is currently being edited by another user")}
 
           {:error, :not_found} ->
             {:noreply, put_flash(socket, :error, "Object not found")}
+
+          _ ->
+            # Capture object state before deletion for undo/redo
+            object_before_delete = Canvases.get_object(object_id)
+
+            # Object is unlocked or locked by current user, proceed with deletion
+            case Canvases.delete_object(object_id) do
+              {:ok, _deleted_object} ->
+                # Capture operation for undo/redo
+                if object_before_delete do
+                  operation = UndoHistory.create_operation("delete", [
+                    %{
+                      id: object_id,
+                      before: %{
+                        "type" => object_before_delete.type,
+                        "position" => object_before_delete.position,
+                        "data" => object_before_delete.data
+                      },
+                      after: nil  # Object no longer exists after deletion
+                    }
+                  ])
+                  UndoHistory.push_operation(socket.assigns.user_id, socket.assigns.canvas_id, operation)
+                end
+
+                # Broadcast to all connected clients
+                Phoenix.PubSub.broadcast(
+                  CollabCanvas.PubSub,
+                  socket.assigns.topic,
+                  {:object_deleted, object_id}
+                )
+
+                # Update local state and push to JavaScript immediately
+                objects = Enum.reject(socket.assigns.objects, fn obj -> obj.id == object_id end)
+
+                {:noreply,
+                 socket
+                 |> assign(:objects, objects)
+                 |> push_event("object_deleted", %{object_id: object_id})}
+
+              {:error, :not_found} ->
+                {:noreply, put_flash(socket, :error, "Object not found")}
+            end
         end
     end
   end
@@ -2047,6 +2210,31 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles batch deletion broadcasts from PubSub (from other clients).
+
+  Removes multiple objects from local state in a single operation and pushes
+  a single event to JavaScript for efficient rendering.
+
+  ## Parameters
+
+  - `object_ids` - List of object IDs that were deleted
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:objects_deleted_batch, object_ids}, socket) do
+    # Remove all deleted objects at once
+    objects = Enum.reject(socket.assigns.objects, fn obj -> obj.id in object_ids end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_deleted_batch", %{object_ids: object_ids})}
+  end
+
+  @doc """
   Handles objects_grouped broadcasts from PubSub (from other clients).
 
   Updates objects in local state with their new group_id and pushes to
@@ -2197,6 +2385,69 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles objects_locked_batch broadcasts from PubSub (from other clients).
+
+  Updates multiple objects in local state to show they're locked and pushes to
+  JavaScript for visual feedback (grayed out appearance).
+
+  ## Parameters
+
+  - `locked_ids` - List of object IDs that were locked
+  - `user_info` - Map with user's name, color, and avatar for display
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:objects_locked_batch, locked_ids, user_info}, socket) do
+    # Fetch the updated locked objects
+    locked_objects = Enum.map(locked_ids, &Canvases.get_object/1) |> Enum.filter(& &1)
+
+    # Update local state
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        Enum.find(locked_objects, obj, fn locked -> locked.id == obj.id end)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_locked_batch", %{object_ids: locked_ids, user_info: user_info})}
+  end
+
+  @doc """
+  Handles objects_unlocked_batch broadcasts from PubSub (from other clients).
+
+  Updates multiple objects in local state to show they're unlocked and pushes to
+  JavaScript for visual feedback (normal appearance).
+
+  ## Parameters
+
+  - `unlocked_ids` - List of object IDs that were unlocked
+
+  ## Returns
+
+  `{:noreply, socket}` with updated objects list and push_event to client.
+  """
+  @impl true
+  def handle_info({:objects_unlocked_batch, unlocked_ids}, socket) do
+    # Fetch the updated unlocked objects
+    unlocked_objects = Enum.map(unlocked_ids, &Canvases.get_object/1) |> Enum.filter(& &1)
+
+    # Update local state
+    objects =
+      Enum.map(socket.assigns.objects, fn obj ->
+        Enum.find(unlocked_objects, obj, fn unlocked -> unlocked.id == obj.id end)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:objects, objects)
+     |> push_event("objects_unlocked_batch", %{object_ids: unlocked_ids})}
+  end
+
+  @doc """
   Handles presence_diff broadcasts from Phoenix Presence.
 
   Triggered when users join, leave, or update their presence metadata (cursor
@@ -2335,6 +2586,26 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles animated pixel art creation.
+
+  Creates rectangles one by one with a rapid-fire effect.
+  """
+  def handle_info({:animate_pixel_art, rectangles, user_id}, socket) when is_list(rectangles) do
+    # Start the animation by creating the first rectangle
+    case rectangles do
+      [first | rest] ->
+        handle_pixel_creation(first, rest, socket, user_id)
+
+      [] ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_info({:create_next_pixel, rectangle, remaining, user_id}, socket) do
+    handle_pixel_creation(rectangle, remaining, socket, user_id)
+  end
+
+  @doc """
   Cleanup when the LiveView process terminates.
 
   Unsubscribes from PubSub topic to prevent memory leaks. Presence tracking
@@ -2382,6 +2653,144 @@ defmodule CollabCanvasWeb.CanvasLive do
 
     # Presence tracking is automatically cleaned up when process dies
     :ok
+  end
+
+  @doc false
+  # Handles batch deletion of multiple objects efficiently
+  defp handle_batch_delete(object_ids, socket) do
+    user_id = socket.assigns.user_id
+
+    # Convert string IDs to integers
+    object_ids = Enum.map(object_ids, fn id ->
+      if is_binary(id), do: String.to_integer(id), else: id
+    end)
+
+    # Capture objects before deletion for undo/redo
+    objects_before_delete = Enum.map(object_ids, &Canvases.get_object/1) |> Enum.filter(& &1)
+
+    # Check if any objects are locked by other users
+    locked_by_others = Enum.filter(object_ids, fn id ->
+      case Canvases.check_lock(id) do
+        {:locked, locked_by} when locked_by != user_id -> true
+        _ -> false
+      end
+    end)
+
+    if Enum.any?(locked_by_others) do
+      {:noreply, put_flash(socket, :error, "Some objects are locked by other users")}
+    else
+      # Perform batch deletion
+      case Canvases.delete_objects_batch(object_ids) do
+        {:ok, count} ->
+          Logger.info("Batch deleted #{count} objects")
+
+          # Capture operation for undo/redo
+          if Enum.any?(objects_before_delete) do
+            operation_objects = Enum.map(objects_before_delete, fn obj ->
+              %{
+                id: obj.id,
+                before: %{
+                  "type" => obj.type,
+                  "position" => obj.position,
+                  "data" => obj.data
+                },
+                after: nil
+              }
+            end)
+
+            operation = UndoHistory.create_operation("delete", operation_objects)
+            UndoHistory.push_operation(socket.assigns.user_id, socket.assigns.canvas_id, operation)
+          end
+
+          # Broadcast batch deletion to all connected clients
+          Phoenix.PubSub.broadcast(
+            CollabCanvas.PubSub,
+            socket.assigns.topic,
+            {:objects_deleted_batch, object_ids}
+          )
+
+          # Update local state - remove all deleted objects at once
+          remaining_objects = Enum.reject(socket.assigns.objects, fn obj -> obj.id in object_ids end)
+
+          # Push single event to JavaScript with all deleted IDs
+          {:noreply,
+           socket
+           |> assign(:objects, remaining_objects)
+           |> assign(:selected_object_ids, MapSet.new())
+           |> push_event("objects_deleted_batch", %{object_ids: object_ids})}
+
+        {:error, reason} ->
+          Logger.error("Batch deletion failed: #{inspect(reason)}")
+          {:noreply, put_flash(socket, :error, "Failed to delete objects")}
+      end
+    end
+  end
+
+  @doc false
+  # Creates pixels in large batches as fast as possible
+  defp handle_pixel_creation(rectangle, remaining, socket, user_id) do
+    canvas_id = socket.assigns.canvas_id
+    topic = socket.assigns.topic
+
+    # Large batch size for maximum speed (create 500 pixels at once)
+    batch_size = 500
+    current_batch = [rectangle | Enum.take(remaining, batch_size - 1)]
+    rest_after_batch = Enum.drop(remaining, batch_size - 1)
+
+    # Create all pixels in the batch
+    created_objects =
+      Enum.map(current_batch, fn rect ->
+        attrs = %{
+          type: "rectangle",
+          position: %{x: rect["x"], y: rect["y"]},
+          data:
+            Jason.encode!(%{
+              width: rect["width"],
+              height: rect["height"],
+              color: rect["color"]
+            })
+        }
+
+        case Canvases.create_object(canvas_id, "rectangle", attrs) do
+          {:ok, object} ->
+            # Broadcast to all connected clients
+            Phoenix.PubSub.broadcast(CollabCanvas.PubSub, topic, {:object_created, object})
+            object
+
+          {:error, reason} ->
+            Logger.error("Failed to create pixel rectangle: #{inspect(reason)}")
+            nil
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    # Send batch creation event to client (much faster than individual events)
+    socket =
+      if length(created_objects) > 0 do
+        objects_data = Enum.map(created_objects, fn object ->
+          %{
+            id: object.id,
+            type: object.type,
+            position: object.position,
+            data: Jason.decode!(object.data)
+          }
+        end)
+
+        push_event(socket, "objects_created_batch", %{objects: objects_data})
+      else
+        socket
+      end
+
+    # Schedule the next batch immediately (no delay for maximum speed)
+    case rest_after_batch do
+      [next | rest] ->
+        send(self(), {:create_next_pixel, next, rest, user_id})
+        {:noreply, assign(socket, :objects, socket.assigns.objects ++ created_objects)}
+
+      [] ->
+        # Animation complete
+        {:noreply, assign(socket, :objects, socket.assigns.objects ++ created_objects)}
+    end
   end
 
   @doc false

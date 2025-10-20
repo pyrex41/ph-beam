@@ -64,7 +64,11 @@ export default {
     });
 
     this.canvasManager.on('delete_object', (data) => {
+      console.log('[Hook] delete_object event received from CanvasManager:', data);
+      console.log('[Hook] Data keys:', Object.keys(data));
+      console.log('[Hook] Pushing event to LiveView...');
       this.safePushEvent('delete_object', data);
+      console.log('[Hook] Event pushed to LiveView');
     });
 
     this.canvasManager.on('lock_object', (data) => {
@@ -73,6 +77,17 @@ export default {
 
     this.canvasManager.on('unlock_object', (data) => {
       this.safePushEvent('unlock_object', data);
+    });
+
+    // Batch lock/unlock events for multi-select operations
+    this.canvasManager.on('lock_objects_batch', (data) => {
+      console.log('[Hook] lock_objects_batch event received:', data.object_ids.length, 'objects');
+      this.safePushEvent('lock_objects_batch', data);
+    });
+
+    this.canvasManager.on('unlock_objects_batch', (data) => {
+      console.log('[Hook] unlock_objects_batch event received:', data.object_ids.length, 'objects');
+      this.safePushEvent('unlock_objects_batch', data);
     });
 
     this.canvasManager.on('cursor_move', (data) => {
@@ -259,6 +274,17 @@ export default {
       this.canvasManager.createObject(data.object);
     });
 
+    // Handle batch object creation (for pixel art and bulk operations)
+    this.handleEvent('objects_created_batch', (data) => {
+      console.log('Batch create received:', data.objects.length, 'objects');
+      // Start history batch for undo/redo
+      this.canvasManager.startHistoryBatch();
+      // Create all objects without animation for maximum speed
+      data.objects.forEach(obj => this.canvasManager.createObject(obj));
+      // End history batch
+      this.canvasManager.endHistoryBatch();
+    });
+
     // Handle object updated events
     this.handleEvent('object_updated', (data) => {
       this.canvasManager.updateObject(data.object, { animate: data.animate });
@@ -280,6 +306,11 @@ export default {
     // Handle object deleted events
     this.handleEvent('object_deleted', (data) => {
       this.canvasManager.deleteObject(data.object_id);
+    });
+
+    // Handle batch deletion
+    this.handleEvent('objects_deleted_batch', (data) => {
+      this.canvasManager.deleteObjectsBatch(data.object_ids);
     });
 
     // Handle cursor position updates from other users
@@ -311,6 +342,28 @@ export default {
       this.canvasManager.updateObject(data.object);
       // Remove lock indicator
       this.canvasManager.hideLockIndicator(data.object.id);
+    });
+
+    // Handle batch lock updates from server
+    this.handleEvent('objects_locked_batch', (data) => {
+      console.log('[Hook] objects_locked_batch event received from server:', data.object_ids.length, 'objects');
+      if (data.object_ids && Array.isArray(data.object_ids)) {
+        data.object_ids.forEach(objectId => {
+          if (data.user_info) {
+            this.canvasManager.showLockIndicator(objectId, data.user_info);
+          }
+        });
+      }
+    });
+
+    // Handle batch unlock updates from server
+    this.handleEvent('objects_unlocked_batch', (data) => {
+      console.log('[Hook] objects_unlocked_batch event received from server:', data.object_ids.length, 'objects');
+      if (data.object_ids && Array.isArray(data.object_ids)) {
+        data.object_ids.forEach(objectId => {
+          this.canvasManager.hideLockIndicator(objectId);
+        });
+      }
     });
 
     // Handle object label toggle
