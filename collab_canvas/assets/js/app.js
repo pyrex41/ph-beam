@@ -35,6 +35,8 @@ import VoiceInput from "./hooks/voice_input"
 import AICommandInput from "./hooks/ai_command_input"
 // Import Layer Context Menu hook for layer panel right-click menu
 import LayerContextMenu from "./hooks/layer_context_menu"
+// Import Flash Auto Dismiss hook for auto-hiding flash messages
+import FlashAutoDismiss from "./hooks/flash_auto_dismiss"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 
@@ -59,7 +61,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
     ColorPicker: ColorPickerHook,
     VoiceInput: VoiceInput,
     AICommandInput: AICommandInput,
-    LayerContextMenu: LayerContextMenu
+    LayerContextMenu: LayerContextMenu,
+    FlashAutoDismiss: FlashAutoDismiss
   },
 })
 

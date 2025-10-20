@@ -54,6 +54,8 @@ defmodule CollabCanvasWeb.CoreComponents do
     <div
       :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
       id={@id}
+      phx-hook="FlashAutoDismiss"
+      data-auto-dismiss-delay="7000"
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
       class="toast toast-top toast-end z-50"

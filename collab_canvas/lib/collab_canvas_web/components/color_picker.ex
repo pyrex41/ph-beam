@@ -199,8 +199,8 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
         %{"saturation" => sat_str, "lightness" => light_str},
         socket
       ) do
-    saturation = String.to_float(sat_str) |> round()
-    lightness = String.to_float(light_str) |> round()
+    saturation = parse_number(sat_str)
+    lightness = parse_number(light_str)
 
     hex_color = hsl_to_hex(socket.assigns.hue, saturation, lightness)
 
@@ -600,6 +600,17 @@ defmodule CollabCanvasWeb.Components.ColorPicker do
     </div>
     """
   end
+
+  # Helper function to parse number strings that may be integers or floats
+  defp parse_number(str) when is_binary(str) do
+    case Float.parse(str) do
+      {num, _} -> round(num)
+      :error -> 0
+    end
+  end
+
+  defp parse_number(num) when is_number(num), do: round(num)
+  defp parse_number(_), do: 0
 
   # Color conversion helpers
 

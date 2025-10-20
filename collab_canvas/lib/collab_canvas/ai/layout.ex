@@ -661,6 +661,40 @@ defmodule CollabCanvas.AI.Layout do
     end
   end
 
+  defp get_object_color(obj) do
+    # Extract fill color from object data, return default if not found
+    # Uses 'fill' field, fallback to 'color' for backwards compatibility
+    color =
+      cond do
+        is_map(obj.data) and Map.has_key?(obj.data, :fill) ->
+          obj.data.fill
+
+        is_map(obj.data) and Map.has_key?(obj.data, "fill") ->
+          obj.data["fill"]
+
+        is_map(obj.data) and Map.has_key?(obj.data, :color) ->
+          obj.data.color
+
+        is_map(obj.data) and Map.has_key?(obj.data, "color") ->
+          obj.data["color"]
+
+        true ->
+          # Default color for sorting (objects without fill come last)
+          "#FFFFFF"
+      end
+
+    # Ensure we always return a string
+    result = case color do
+      c when is_binary(c) -> c
+      _ -> "#FFFFFF"
+    end
+
+    # Debug logging
+    require Logger
+    Logger.debug("[Layout] Object #{obj.id}: extracted fill=#{result} from data keys: #{inspect(Map.keys(obj.data))}")
+    result
+  end
+
   @doc """
   Applies flexible programmatic pattern-based layout to objects.
 
@@ -682,7 +716,7 @@ defmodule CollabCanvas.AI.Layout do
   def pattern_layout([], _pattern, _params), do: []
 
   def pattern_layout(objects, pattern, params) when is_list(objects) do
-    # Sort objects if specified
+    # First, apply sorting if specified (continuum, no extra spacing)
     sorted_objects =
       case Map.get(params, "sort_by", "none") do
         "x" ->
@@ -699,34 +733,286 @@ defmodule CollabCanvas.AI.Layout do
         "id" ->
           Enum.sort_by(objects, & &1.id)
 
+        "color" ->
+          # Sort by color on a continuum
+          Enum.sort_by(objects, fn obj ->
+            get_object_color(obj)
+          end)
+
+        "type" ->
+          # Sort by object type
+          Enum.sort_by(objects, fn obj ->
+            Map.get(obj, :type, "unknown")
+          end)
+
+        "shape" ->
+          # Alias for "type" - sort by object type
+          Enum.sort_by(objects, fn obj ->
+            Map.get(obj, :type, "unknown")
+          end)
+
         _ ->
           objects
       end
 
-    # Apply pattern-specific layout
+    # Check if grouping is requested (groups with extra spacing)
+    group_by = Map.get(params, "group_by", "none")
+
+    if group_by != "none" do
+      # Apply grouping with extra spacing between groups
+      # Pass original objects map for width/height lookups
+      objects_map = Enum.into(sorted_objects, %{}, fn obj -> {obj.id, obj} end)
+      apply_pattern_with_grouping(sorted_objects, pattern, params, group_by, objects_map)
+    else
+      # Apply pattern without grouping (standard sorting)
+      apply_pattern_to_objects(sorted_objects, pattern, params)
+    end
+  end
+
+  # Apply pattern layout to objects without grouping
+  defp apply_pattern_to_objects(objects, pattern, params) do
     case pattern do
       "line" ->
-        apply_line_pattern(sorted_objects, params)
+        apply_line_pattern(objects, params)
 
       "diagonal" ->
-        apply_diagonal_pattern(sorted_objects, params)
+        apply_diagonal_pattern(objects, params)
 
       "wave" ->
-        apply_wave_pattern(sorted_objects, params)
+        apply_wave_pattern(objects, params)
 
       "arc" ->
-        apply_arc_pattern(sorted_objects, params)
+        apply_arc_pattern(objects, params)
 
       "custom" ->
         # For custom patterns, just return objects as-is
-        # (AI would need to specify exact positions via relationships)
-        Enum.map(sorted_objects, fn obj ->
+        Enum.map(objects, fn obj ->
           %{id: obj.id, position: obj.position}
         end)
 
       _ ->
-        Enum.map(sorted_objects, fn obj ->
+        Enum.map(objects, fn obj ->
           %{id: obj.id, position: obj.position}
+        end)
+    end
+  end
+
+  # Apply pattern layout with grouping (extra spacing between groups)
+  defp apply_pattern_with_grouping(objects, pattern, params, group_by, objects_map) do
+    require Logger
+
+    # Group objects by the specified attribute
+    grouped_objects =
+      case group_by do
+        "color" ->
+          groups = Enum.group_by(objects, &get_object_color/1)
+          Logger.info("[Layout] Grouping by color: #{inspect(Map.keys(groups))} groups - #{inspect(Enum.map(Map.to_list(groups), fn {k, v} -> {k, length(v)} end))}")
+          groups
+
+        "type" ->
+          groups = Enum.group_by(objects, fn obj -> Map.get(obj, :type, "unknown") end)
+          Logger.info("[Layout] Grouping by type: #{inspect(Map.keys(groups))} groups - #{inspect(Enum.map(Map.to_list(groups), fn {k, v} -> {k, length(v)} end))}")
+          groups
+
+        "shape" ->
+          groups = Enum.group_by(objects, fn obj -> Map.get(obj, :type, "unknown") end)
+          Logger.info("[Layout] Grouping by shape: #{inspect(Map.keys(groups))} groups - #{inspect(Enum.map(Map.to_list(groups), fn {k, v} -> {k, length(v)} end))}")
+          groups
+
+        "size" ->
+          # Group by size buckets (small, medium, large)
+          groups = Enum.group_by(objects, fn obj ->
+            area = get_object_width(obj) * get_object_height(obj)
+            cond do
+              area < 2500 -> "small"
+              area < 10000 -> "medium"
+              true -> "large"
+            end
+          end)
+          Logger.info("[Layout] Grouping by size: #{inspect(Map.keys(groups))} groups - #{inspect(Enum.map(Map.to_list(groups), fn {k, v} -> {k, length(v)} end))}")
+          groups
+
+        _ ->
+          # No grouping, treat all as one group
+          %{"all" => objects}
+      end
+
+    # Get group spacing (extra spacing between groups)
+    group_spacing = Map.get(params, "group_spacing", 100)
+
+    # Apply pattern to each group and combine with spacing
+    groups_list = Map.to_list(grouped_objects)
+
+    # Apply pattern to first group to get starting position
+    {_first_group_key, first_group_objects} = List.first(groups_list)
+    first_group_result = apply_pattern_to_objects(first_group_objects, pattern, params)
+
+    # Process remaining groups with extra spacing
+    {results, _last_position} =
+      Enum.reduce(
+        Enum.drop(groups_list, 1),
+        {first_group_result, calculate_group_end_position(first_group_result, pattern, objects_map)},
+        fn {_group_key, group_objects}, {acc_results, last_end_pos} ->
+          # Apply pattern to this group
+          group_result = apply_pattern_to_objects(group_objects, pattern, params)
+
+          # Offset this group's positions based on last group's end + group spacing
+          offset_result = offset_group_positions(group_result, last_end_pos, group_spacing, pattern)
+
+          # Calculate end position of this group for next iteration
+          new_end_pos = calculate_group_end_position(offset_result, pattern, objects_map)
+
+          {acc_results ++ offset_result, new_end_pos}
+        end
+      )
+
+    results
+  end
+
+  # Calculate the end position of a group based on the pattern direction
+  # IMPORTANT: This needs to return the RIGHTMOST/BOTTOMMOST edge, not just position
+  defp calculate_group_end_position(group_results, pattern, objects_map) do
+    require Logger
+
+    if length(group_results) == 0 do
+      %{x: 0, y: 0}
+    else
+      case pattern do
+        "line" ->
+          # For line patterns, find the rightmost X position (position + width)
+          # This ensures the next group starts AFTER the last object, not overlapping it
+          max_right =
+            group_results
+            |> Enum.map(fn r ->
+              x = get_position_value(r.position, :x)
+              # Get actual width from objects_map if available
+              width = case Map.get(objects_map, r.id) do
+                nil -> 50  # Default if object not found
+                obj -> get_object_width(obj)
+              end
+              x + width
+            end)
+            |> Enum.max()
+
+          %{x: max_right, y: 0}
+
+        "diagonal" ->
+          # For diagonal, find the farthest position in both dimensions
+          max_x =
+            group_results
+            |> Enum.map(fn r ->
+              x = get_position_value(r.position, :x)
+              width = case Map.get(objects_map, r.id) do
+                nil -> 50
+                obj -> get_object_width(obj)
+              end
+              x + width
+            end)
+            |> Enum.max()
+
+          max_y =
+            group_results
+            |> Enum.map(fn r ->
+              y = get_position_value(r.position, :y)
+              height = case Map.get(objects_map, r.id) do
+                nil -> 50
+                obj -> get_object_height(obj)
+              end
+              y + height
+            end)
+            |> Enum.max()
+
+          %{x: max_x, y: max_y}
+
+        _ ->
+          # For other patterns, find the maximum x and y (including object size)
+          max_x =
+            group_results
+            |> Enum.map(fn r ->
+              x = get_position_value(r.position, :x)
+              width = case Map.get(objects_map, r.id) do
+                nil -> 50
+                obj -> get_object_width(obj)
+              end
+              x + width
+            end)
+            |> Enum.max()
+
+          max_y =
+            group_results
+            |> Enum.map(fn r ->
+              y = get_position_value(r.position, :y)
+              height = case Map.get(objects_map, r.id) do
+                nil -> 50
+                obj -> get_object_height(obj)
+              end
+              y + height
+            end)
+            |> Enum.max()
+
+          %{x: max_x, y: max_y}
+      end
+    end
+  end
+
+  # Offset group positions based on the end of the previous group
+  defp offset_group_positions(group_results, last_end_pos, group_spacing, pattern) do
+    case pattern do
+      pattern when pattern in ["line", "horizontal"] ->
+        # Horizontal pattern - offset X by last_end_pos.x + group_spacing
+        offset_x = get_position_value(last_end_pos, :x) + group_spacing
+
+        Enum.map(group_results, fn result ->
+          current_x = get_position_value(result.position, :x)
+          min_x =
+            group_results
+            |> Enum.map(fn r -> get_position_value(r.position, :x) end)
+            |> Enum.min()
+
+          new_x = current_x - min_x + offset_x
+
+          %{result | position: %{result.position | x: round(new_x)}}
+        end)
+
+      "diagonal" ->
+        # Diagonal - offset both X and Y
+        offset_x = get_position_value(last_end_pos, :x) + group_spacing
+        offset_y = get_position_value(last_end_pos, :y) + group_spacing
+
+        Enum.map(group_results, fn result ->
+          current_x = get_position_value(result.position, :x)
+          current_y = get_position_value(result.position, :y)
+
+          min_x =
+            group_results
+            |> Enum.map(fn r -> get_position_value(r.position, :x) end)
+            |> Enum.min()
+
+          min_y =
+            group_results
+            |> Enum.map(fn r -> get_position_value(r.position, :y) end)
+            |> Enum.min()
+
+          new_x = current_x - min_x + offset_x
+          new_y = current_y - min_y + offset_y
+
+          %{result | position: %{x: round(new_x), y: round(new_y)}}
+        end)
+
+      _ ->
+        # For other patterns, offset X (horizontal spacing between groups)
+        offset_x = get_position_value(last_end_pos, :x) + group_spacing
+
+        Enum.map(group_results, fn result ->
+          current_x = get_position_value(result.position, :x)
+          min_x =
+            group_results
+            |> Enum.map(fn r -> get_position_value(r.position, :x) end)
+            |> Enum.min()
+
+          new_x = current_x - min_x + offset_x
+
+          %{result | position: %{result.position | x: round(new_x)}}
         end)
     end
   end

@@ -588,7 +588,9 @@ defmodule CollabCanvas.AI.Agent do
       objects_with_names
       |> Enum.map(fn {obj, display_name} ->
         data = if is_binary(obj.data), do: Jason.decode!(obj.data), else: obj.data || %{}
-        color_info = if data["color"], do: " color: #{data["color"]}", else: ""
+        # Use 'fill' field (preferred), fall back to 'color' for backwards compatibility
+        color_value = data["fill"] || data["color"]
+        color_info = if color_value, do: " color: #{color_value}", else: ""
 
         size_info =
           cond do
@@ -1013,7 +1015,7 @@ defmodule CollabCanvas.AI.Agent do
           data = %{
             width: input["width"],
             height: input["height"],
-            color: final_color
+            fill: final_color
           }
 
           # Calculate position for this shape
@@ -1048,7 +1050,7 @@ defmodule CollabCanvas.AI.Agent do
       data = %{
         width: input["width"],
         height: input["height"],
-        color: final_color
+        fill: final_color
       }
 
       attrs = %{
@@ -1086,7 +1088,7 @@ defmodule CollabCanvas.AI.Agent do
     data = %{
       text: input["text"],
       font_size: Map.get(input, "font_size", 16),
-      color: final_color
+      fill: final_color
     }
 
     attrs = %{
@@ -1762,6 +1764,7 @@ defmodule CollabCanvas.AI.Agent do
 
             %{
               id: obj.id,
+              type: obj.type,
               position: obj.position,
               data: data
             }
@@ -1956,6 +1959,7 @@ defmodule CollabCanvas.AI.Agent do
 
             %{
               id: obj.id,
+              type: obj.type,
               position: obj.position,
               data: data
             }
@@ -2224,6 +2228,7 @@ defmodule CollabCanvas.AI.Agent do
 
             %{
               id: obj.id,
+              type: obj.type,
               position: obj.position,
               data: data
             }
@@ -2323,6 +2328,7 @@ defmodule CollabCanvas.AI.Agent do
 
             %{
               id: obj.id,
+              type: obj.type,
               position: obj.position,
               data: data
             }

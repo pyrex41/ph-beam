@@ -573,6 +573,55 @@ defmodule CollabCanvasWeb.CanvasLive do
   end
 
   @doc """
+  Handles color update events for selected objects.
+
+  When the user changes the color picker while objects are selected, this updates
+  the fill color of the specified object in the database and broadcasts the change.
+  """
+  @impl true
+  def handle_event("update_object_color", %{"object_id" => object_id, "color" => color}, socket) do
+    require Logger
+
+    # Get the existing object
+    case Canvases.get_object(object_id) do
+      nil ->
+        Logger.warning("Object #{object_id} not found for color update")
+        {:noreply, socket}
+
+      object ->
+        # Decode existing data
+        existing_data =
+          if is_binary(object.data) do
+            Jason.decode!(object.data)
+          else
+            object.data || %{}
+          end
+
+        # Update fill field (color and fill have been consolidated)
+        updated_data = Map.put(existing_data, "fill", color)
+
+        # Update object in database
+        case Canvases.update_object(object_id, %{data: Jason.encode!(updated_data)}) do
+          {:ok, updated_object} ->
+            Logger.info("Updated object #{object_id} color to #{color}")
+
+            # Broadcast to all clients
+            Phoenix.PubSub.broadcast(
+              CollabCanvas.PubSub,
+              "canvas:#{socket.assigns.canvas_id}",
+              {:object_updated, updated_object}
+            )
+
+            {:noreply, socket}
+
+          {:error, _changeset} ->
+            Logger.error("Failed to update object #{object_id} color")
+            {:noreply, socket}
+        end
+    end
+  end
+
+  @doc """
   Handles batch object update events from the client (for multi-object dragging).
 
   Updates multiple canvas objects in a single database transaction and broadcasts
@@ -2721,21 +2770,34 @@ defmodule CollabCanvasWeb.CanvasLive do
     case error_type do
       :missing_api_key ->
         """
-        I couldn't process your command because the AI service isn't configured yet.
-        Please ask your administrator to set up the AI API key.
+        🔐 Hmm, it looks like the AI service isn't set up yet.
+
+        Could you ask your administrator to configure the API key? Once that's done, I'll be ready to help you create amazing things on the canvas!
         """
 
       :canvas_not_found ->
         """
-        I couldn't find the canvas to work with. This usually happens if the canvas
-        was deleted. Try refreshing the page or navigating back to the dashboard.
+        🤔 I can't seem to find the canvas you're working on. This sometimes happens if the canvas was deleted or there's a connection issue.
+
+        **What you can try:**
+        • Refresh the page to reconnect
+        • Go back to the dashboard and reopen this canvas
+        • Check if the canvas still exists
+
+        Let me know if you need help with anything else!
         """
 
       :invalid_response_format ->
         """
-        I received a response from the AI but couldn't understand it. This might be
-        a temporary issue. Could you try again? If the problem persists, try rephrasing
-        your command with more specific details.
+        😅 Oops! I got a response back but couldn't quite understand it. This is usually temporary.
+
+        **Let's try again:**
+        • Resubmit your command exactly as before
+        • Or rephrase it with more specific details
+
+        For example, instead of "#{command}", try something like:
+        • "Create 3 blue circles in a row at the center"
+        • "Arrange selected objects in a 3x3 grid with 20px spacing"
         """
 
       {:api_error, status, body} ->
@@ -2752,58 +2814,105 @@ defmodule CollabCanvasWeb.CanvasLive do
           String.contains?(error_message, "Invalid") or
               String.contains?(error_message, "validation") ->
             """
-            Your command "#{command}" couldn't be processed because of a validation error:
+            ⚠️ I had trouble understanding "#{command}". Here's what went wrong:
             #{error_message}
 
-            Try being more specific. For example:
-            - Instead of "create a shape", try "create a blue rectangle at x:100 y:100"
-            - Specify positions (x and y coordinates)
-            - Specify dimensions (width and height for rectangles)
-            - Use specific colors (red, blue, #FF0000, etc.)
+            **Let me help you fix this!** Try being more specific:
+
+            ✅ **Good examples:**
+            • "Create a blue rectangle at x:200 y:100 with width 150 and height 100"
+            • "Add 5 red circles in a row"
+            • "Create a login form at the center"
+
+            ❌ **What doesn't work:**
+            • "Create a shape" (too vague - what type? where?)
+            • "Make something blue" (what should I make?)
+
+            **What would you like to create?** Give me details on:
+            • Type (circle, rectangle, text, form, etc.)
+            • Color (red, blue, #FF5733, etc.)
+            • Position (x:100 y:200, or "at the top", "in the center")
+            • Size (width and height for rectangles)
             """
 
           # Handle rate limiting
           String.contains?(error_message, "rate") or status == 429 ->
             """
-            The AI service is currently rate limited. Please wait a moment and try again.
+            ⏸️ Hold on! The AI service needs a quick breather - we're being rate limited.
+
+            **What to do:**
+            Wait about 10-20 seconds, then try your command again. I'll be ready to help!
             """
 
           # Handle overloaded errors
           String.contains?(error_message, "overloaded") or status == 529 ->
             """
-            The AI service is currently overloaded. Please try again in a few seconds.
+            ⏳ The AI service is getting a lot of requests right now and needs a moment to catch up.
+
+            **Please try again in 5-10 seconds.** Your command "#{command}" will work, it just needs better timing!
             """
 
           # Generic error with suggestion
           true ->
             """
-            I encountered an error processing "#{command}":
+            ❌ Something went wrong with "#{command}":
             #{error_message}
 
-            Try rephrasing your command with more details. For example:
-            - "create 3 blue circles in a row at x:100 y:100"
-            - "arrange all rectangles in a grid with 20px spacing"
-            - "create a login form with username and password fields"
+            **Let's try a different approach!** Here are some commands that work great:
+
+            **Creating objects:**
+            • "Create 3 blue circles in a row"
+            • "Add a red rectangle at x:100 y:200"
+            • "Make a login form"
+
+            **Arranging objects:** (Select objects first!)
+            • "Arrange selected in a grid"
+            • "Align selected to top"
+            • "Distribute horizontally with 30px spacing"
+
+            **Editing objects:**
+            • "Change selected to green"
+            • "Resize selected to 200x100"
+            • "Rotate selected 45 degrees"
+
+            **What would you like to do?**
             """
         end
 
       {:request_failed, _reason} ->
         """
-        I couldn't connect to the AI service. This might be a network issue.
-        Please check your internet connection and try again.
+        🌐 I'm having trouble connecting to the AI service. This is usually a network issue.
+
+        **What to try:**
+        • Check your internet connection
+        • Wait a moment and try again
+        • Refresh the page if the problem persists
+
+        Once we're reconnected, I'll be happy to help with your command: "#{command}"
         """
 
       _other ->
         """
-        Something unexpected went wrong with your command "#{command}".
+        🤷 Something unexpected happened with "#{command}". Let me help you get it right!
 
-        Try being more specific with:
-        - Object types (circle, rectangle, text, etc.)
-        - Positions (x and y coordinates)
-        - Colors and sizes
-        - Arrangement patterns (grid, row, column, circle)
+        **I work best when you're specific:**
 
-        Example: "create 5 red squares in a grid"
+        **Creating:**
+        • "Create 5 red circles in a row at x:100 y:200"
+        • "Add a blue rectangle with width 200 and height 100"
+        • "Make a button component"
+
+        **Arranging:** (Select objects with Shift+click first!)
+        • "Arrange selected in a 3x3 grid"
+        • "Align selected to center"
+        • "Distribute vertically with 50px spacing"
+
+        **Editing:**
+        • "Change color of selected to #FF5733"
+        • "Resize all circles to 50px diameter"
+        • "Group selected objects"
+
+        **What are you trying to create or modify?** Give me some details and I'll make it happen! ✨
         """
     end
   end
@@ -3705,6 +3814,25 @@ defmodule CollabCanvasWeb.CanvasLive do
                     </span>
                   </button>
                 </div>
+                <!-- Voice Input Hint -->
+                <div class="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                  <svg
+                    class="w-4 h-4 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span>
+                    💡 <strong>Tip:</strong> Press <kbd class="px-1.5 py-0.5 text-xs font-semibold bg-gray-100 border border-gray-300 rounded">Space</kbd> to start/stop voice recording, or click the microphone button
+                  </span>
+                </div>
               </form>
 
               <button
@@ -3752,17 +3880,54 @@ defmodule CollabCanvasWeb.CanvasLive do
             <!-- Example Commands -->
             <div class="mt-6">
               <h3 class="text-sm font-medium text-gray-700 mb-2">Example Commands:</h3>
-              <ul class="text-sm text-gray-600 space-y-1">
-                <li>• "Create a rectangle"</li>
-                <li>• "Add a circle"</li>
-                <li>• "Make a blue square"</li>
-                <li class="text-blue-600 font-medium">• "Arrange selected horizontally"</li>
-                <li class="text-blue-600 font-medium">• "Align selected objects to top"</li>
-                <li class="text-blue-600 font-medium">• "Distribute vertically with 20px spacing"</li>
-              </ul>
+
+              <!-- Creating Objects -->
+              <div class="mb-3">
+                <p class="text-xs font-semibold text-gray-600 mb-1">Creating:</p>
+                <ul class="text-sm text-gray-600 space-y-1 ml-2">
+                  <li>• "Create 5 blue circles in a row"</li>
+                  <li>• "Add a red rectangle at x:100 y:200"</li>
+                  <li>• "Make a login form"</li>
+                  <li>• "Create text saying 'Hello World'"</li>
+                </ul>
+              </div>
+
+              <!-- Arranging & Layout -->
+              <div class="mb-3">
+                <p class="text-xs font-semibold text-blue-600 mb-1">Layout & Arrangement:</p>
+                <ul class="text-sm text-gray-600 space-y-1 ml-2">
+                  <li class="text-blue-600">• "Arrange selected in a grid"</li>
+                  <li class="text-blue-600">• "Align selected to top"</li>
+                  <li class="text-blue-600">• "Distribute horizontally with 30px spacing"</li>
+                  <li class="text-blue-600">• "Arrange in a circle pattern"</li>
+                  <li class="text-blue-600">• "Arrange in a star shape"</li>
+                </ul>
+              </div>
+
+              <!-- Editing -->
+              <div class="mb-3">
+                <p class="text-xs font-semibold text-gray-600 mb-1">Editing:</p>
+                <ul class="text-sm text-gray-600 space-y-1 ml-2">
+                  <li>• "Change selected to red"</li>
+                  <li>• "Resize selected to 100x100"</li>
+                  <li>• "Rotate selected 45 degrees"</li>
+                  <li>• "Group selected objects"</li>
+                </ul>
+              </div>
+
+              <!-- Selection -->
+              <div class="mb-3">
+                <p class="text-xs font-semibold text-gray-600 mb-1">Selection:</p>
+                <ul class="text-sm text-gray-600 space-y-1 ml-2">
+                  <li>• "Select all red circles"</li>
+                  <li>• "Select large rectangles"</li>
+                  <li>• "Show labels for all objects"</li>
+                </ul>
+              </div>
+
               <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <p class="text-xs text-blue-700">
-                  Tip: Select multiple objects (Shift+click) before using layout commands!
+                  💡 Tip: Select multiple objects (Shift+click) before using layout commands! The AI can understand natural language, so be descriptive.
                 </p>
               </div>
             </div>

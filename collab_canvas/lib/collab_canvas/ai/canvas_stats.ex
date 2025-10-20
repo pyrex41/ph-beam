@@ -147,7 +147,8 @@ defmodule CollabCanvas.AI.CanvasStats do
     objects
     |> Enum.map(fn object ->
       data = decode_data(object.data)
-      Map.get(data, "color")
+      # Use 'fill' field (preferred), fall back to 'color' for backwards compatibility
+      Map.get(data, "fill") || Map.get(data, "color")
     end)
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
@@ -186,7 +187,9 @@ defmodule CollabCanvas.AI.CanvasStats do
 
   defp matches_color?(object, %{"color" => color}) when not is_nil(color) do
     data = decode_data(object.data)
-    Map.get(data, "color") == color
+    # Use 'fill' field (preferred), fall back to 'color' for backwards compatibility
+    object_color = Map.get(data, "fill") || Map.get(data, "color")
+    object_color == color
   end
 
   defp matches_color?(_object, _criteria), do: true

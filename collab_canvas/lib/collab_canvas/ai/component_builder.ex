@@ -544,7 +544,7 @@ defmodule CollabCanvas.AI.ComponentBuilder do
       text: text,
       font_size: font_size,
       font_family: font_family,
-      color: color,
+      fill: color,
       align: align
     }
 

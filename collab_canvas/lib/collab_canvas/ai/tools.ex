@@ -636,7 +636,7 @@ IMPORTANT: For relative commands like 'put X behind Y', you typically want to:
       %{
         name: "arrange_objects_with_pattern",
         description:
-          "Arrange objects using flexible programmatic patterns like diagonal lines, waves, and arcs. CRITICAL EXCLUSIONS: For CIRCULAR layouts use arrange_objects with layout_type='circular' - NEVER use this tool for circles. For STAR patterns use arrange_in_star tool. This tool is ONLY for: 'triangular', 'pyramid', 'zigzag', 'wave', 'arc', 'diagonal line', etc. Supports line, diagonal, wave, and arc patterns with customizable parameters. For complex shapes like triangles or pyramids, use 'line' or 'diagonal' patterns with appropriate start positions and spacing, or make multiple calls to build up the shape row by row.\n\nIMPORTANT: This tool does NOT support sort_by='color' - if user requests grouping by color, IGNORE that requirement.",
+          "Arrange objects using flexible programmatic patterns like diagonal lines, waves, and arcs with SORTING and GROUPING support.\n\nCRITICAL EXCLUSIONS:\n- For CIRCULAR layouts use arrange_objects with layout_type='circular' - NEVER use this tool\n- For STAR patterns use arrange_in_star tool\n\nSORTING vs GROUPING:\n- SORT: User says 'sort by color' → set sort_by='color' (smooth continuum, no extra spacing)\n- GROUP: User says 'group by color' or 'grouped by shape' → set group_by='color' (extra spacing between groups)\n\nEXAMPLES:\n- 'arrange in a line, grouped by color' → pattern='line', group_by='color', group_spacing=100\n- 'diagonal pattern, sorted by size' → pattern='diagonal', sort_by='size'\n- 'wave pattern, grouped by shape' → pattern='wave', group_by='shape'\n\nIMPORTANT: This tool ARRANGES objects in patterns. Always use when user wants spatial arrangement/organization.",
         input_schema: %{
           type: "object",
           properties: %{
@@ -687,8 +687,19 @@ IMPORTANT: For relative commands like 'put X behind Y', you typically want to:
             sort_by: %{
               type: "string",
               enum: ["none", "x", "y", "size", "id", "color", "type", "shape"],
-              description: "How to sort/group objects before arranging. 'color' groups by fill color, 'type' groups by object type (rectangle, circle, text), 'shape' is alias for 'type'",
+              description: "SORTING (continuum): Arranges objects on a smooth continuum by attribute. Objects gradually transition from smallest to largest, or one color to another. No extra spacing between different values. Use for gradual progressions.",
               default: "none"
+            },
+            group_by: %{
+              type: "string",
+              enum: ["none", "color", "type", "shape", "size"],
+              description: "GROUPING (with spacing): Groups objects by attribute with EXTRA SPACING between groups. All red objects together, then GAP, then all blue objects together. Use when user says 'group by color', 'grouped by shape', etc. Creates visual separation between different groups.",
+              default: "none"
+            },
+            group_spacing: %{
+              type: "number",
+              description: "Extra spacing (in pixels) to add between different groups when group_by is used. Default: 100px. Ignored if group_by is 'none'.",
+              default: 100
             }
           },
           required: ["object_ids", "pattern"]

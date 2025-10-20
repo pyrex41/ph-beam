@@ -16,6 +16,7 @@ export class CanvasManager {
     this.objectContainer = null;
     this.labelContainer = null; // Separate container for labels (renders on top)
     this.cursorContainer = null;
+    this.uiContainer = null; // Separate container for UI elements (not affected by zoom)
     this.selectionContainer = null; // Container for selected objects (enables group transforms)
 
     // Object and cursor storage
@@ -69,7 +70,8 @@ export class CanvasManager {
 
     // Lasso selection state
     this.isLassoSelecting = false;
-    this.lassoStart = { x: 0, y: 0 };
+    this.lassoStart = { x: 0, y: 0 }; // Canvas/world coordinates for selection logic
+    this.lassoStartScreen = { x: 0, y: 0 }; // Screen coordinates for drawing
     this.lassoRect = null; // Graphics object for lasso visualization
 
     // Clipboard state for copy/paste
@@ -156,6 +158,12 @@ export class CanvasManager {
     this.cursorContainer = new PIXI.Container();
     this.cursorContainer.isRenderGroup = true; // v8 render groups for cursor batching
     this.app.stage.addChild(this.cursorContainer);
+
+    // Create UI container for zoom-independent elements (lasso selection, etc.)
+    // This container does NOT get scaled with zoom, so UI elements stay consistent size
+    this.uiContainer = new PIXI.Container();
+    this.uiContainer.isRenderGroup = true;
+    this.app.stage.addChild(this.uiContainer);
 
     // Create shared TextStyle for cursor labels (performance optimization)
     this.sharedCursorLabelStyle = new PIXI.TextStyle({
@@ -420,11 +428,11 @@ export class CanvasManager {
     const width = data.width || 100;
     const height = data.height || 100;
 
-    // Check for both 'fill' and 'color' fields for backwards compatibility
-    // Validate that the color is a valid string before using it
+    // Use 'fill' field for object color (color and fill have been consolidated)
+    // Fallback to 'color' for backwards compatibility with existing objects
     const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = this.validateColor(data.stroke || data.color) || '#1e40af';
+    const strokeColor = this.validateColor(data.stroke) || '#1e40af';
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -462,11 +470,11 @@ export class CanvasManager {
     const graphics = new PIXI.Graphics();
     const radius = (data.width || 100) / 2;
 
-    // Check for both 'fill' and 'color' fields for backwards compatibility
-    // Validate that the color is a valid string before using it
+    // Use 'fill' field for object color (color and fill have been consolidated)
+    // Fallback to 'color' for backwards compatibility with existing objects
     const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = this.validateColor(data.stroke || data.color) || '#1e40af';
+    const strokeColor = this.validateColor(data.stroke) || '#1e40af';
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -510,9 +518,10 @@ export class CanvasManager {
     const type = graphics.objectType;
 
     // Get fill and stroke from stored data
+    // Fallback to 'color' for backwards compatibility with existing objects
     const fillColor = data.fill || data.color || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
-    const strokeColor = data.stroke || data.color || '#1e40af';
+    const strokeColor = data.stroke || '#1e40af';
     const stroke = parseInt(strokeColor.replace('#', '0x'));
     const strokeWidth = data.stroke_width || 2;
 
@@ -545,8 +554,9 @@ export class CanvasManager {
    * @returns {PIXI.Text}
    */
   createText(position, data) {
-    // Validate color before using
-    const textColor = this.validateColor(data.color) || '#000000';
+    // Use 'fill' field for text color (color and fill have been consolidated)
+    // Fallback to 'color' for backwards compatibility with existing objects
+    const textColor = this.validateColor(data.fill || data.color) || '#000000';
 
     const style = new PIXI.TextStyle({
       fontFamily: data.font_family || 'Arial',
@@ -592,7 +602,7 @@ export class CanvasManager {
     const innerRadius = outerRadius * (data.innerRatio || 0.5);
 
     // Validate colors
-    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
+    const fillColor = this.validateColor(data.fill) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
     const strokeColor = this.validateColor(data.stroke) || fillColor;
     const stroke = parseInt(strokeColor.replace('#', '0x'));
@@ -639,7 +649,7 @@ export class CanvasManager {
     const height = data.height || 100;
 
     // Validate colors
-    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
+    const fillColor = this.validateColor(data.fill) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
     const strokeColor = this.validateColor(data.stroke) || fillColor;
     const stroke = parseInt(strokeColor.replace('#', '0x'));
@@ -681,7 +691,7 @@ export class CanvasManager {
     const radius = (data.width || 100) / 2;
 
     // Validate colors
-    const fillColor = this.validateColor(data.fill || data.color) || '#3b82f6';
+    const fillColor = this.validateColor(data.fill) || '#3b82f6';
     const fill = parseInt(fillColor.replace('#', '0x'));
     const strokeColor = this.validateColor(data.stroke) || fillColor;
     const stroke = parseInt(strokeColor.replace('#', '0x'));
@@ -1403,8 +1413,9 @@ export class CanvasManager {
         }
         // Start lasso selection
         this.isLassoSelecting = true;
-        this.lassoStart = position;
-        this.createLassoRect(position);
+        this.lassoStart = position; // Canvas coordinates for selection logic
+        this.lassoStartScreen = this.getScreenPosition(event); // Screen coordinates for drawing
+        this.createLassoRect(this.lassoStartScreen);
       }
     } else if (this.currentTool === 'delete') {
       if (clickedObject) {
@@ -1584,8 +1595,9 @@ export class CanvasManager {
         this.lastResizeUpdate = Date.now();
       }
     } else if (this.isLassoSelecting) {
-      // Update lasso selection rectangle
-      this.updateLassoRect(position);
+      // Update lasso selection rectangle in screen space
+      const screenPos = this.getScreenPosition(event);
+      this.updateLassoRect(screenPos);
     } else if (this.isCreating) {
       // Update temp object while creating
       this.updateTempObject(position);
@@ -2131,37 +2143,38 @@ export class CanvasManager {
 
   /**
    * Create lasso selection rectangle for visual feedback
-   * @param {Object} position - {x, y} starting position
+   * @param {Object} screenPos - {x, y} starting position in screen coordinates
    */
-  createLassoRect(position) {
+  createLassoRect(screenPos) {
     if (this.lassoRect) {
-      this.objectContainer.removeChild(this.lassoRect);
+      this.uiContainer.removeChild(this.lassoRect);
       this.lassoRect.destroy();
     }
 
     this.lassoRect = new PIXI.Graphics();
-    this.lassoRect.x = position.x;
-    this.lassoRect.y = position.y;
+    this.lassoRect.x = screenPos.x;
+    this.lassoRect.y = screenPos.y;
     this.lassoRect.alpha = 0.3;
-    this.objectContainer.addChild(this.lassoRect);
+    this.uiContainer.addChild(this.lassoRect);
   }
 
   /**
    * Update lasso selection rectangle during drag
-   * @param {Object} currentPosition - {x, y} current position
+   * @param {Object} currentScreenPos - {x, y} current position in screen coordinates
    */
-  updateLassoRect(currentPosition) {
+  updateLassoRect(currentScreenPos) {
     if (!this.lassoRect || !this.isLassoSelecting) return;
 
-    const width = currentPosition.x - this.lassoStart.x;
-    const height = currentPosition.y - this.lassoStart.y;
+    const width = currentScreenPos.x - this.lassoStartScreen.x;
+    const height = currentScreenPos.y - this.lassoStartScreen.y;
 
     this.lassoRect.clear();
-    
+
     // Draw selection rectangle with dashed border effect
+    // Width is now constant (2px) regardless of zoom level
     this.lassoRect.rect(0, 0, width, height)
       .fill({ color: 0x3b82f6, alpha: 0.1 })
-      .stroke({ width: 1, color: 0x1e40af });
+      .stroke({ width: 2, color: 0x1e40af });
   }
 
   /**
@@ -2233,8 +2246,8 @@ export class CanvasManager {
 
     console.log('[CanvasManager] AFTER lasso loop, selectionContainer children:', this.selectionContainer.children.length, 'children IDs:', this.selectionContainer.children.map(c => c.objectId));
 
-    // Remove lasso rect
-    this.objectContainer.removeChild(this.lassoRect);
+    // Remove lasso rect from UI container
+    this.uiContainer.removeChild(this.lassoRect);
     this.lassoRect.destroy();
     this.lassoRect = null;
     this.isLassoSelecting = false;
@@ -3222,6 +3235,49 @@ export class CanvasManager {
   }
 
   /**
+   * Convert canvas/world position to screen position
+   * @param {Object} canvasPos - {x, y} in canvas/world coordinates
+   * @returns {Object} {x, y} in screen coordinates
+   */
+  canvasToScreen(canvasPos) {
+    return {
+      x: canvasPos.x * this.zoomLevel + this.viewOffset.x,
+      y: canvasPos.y * this.zoomLevel + this.viewOffset.y
+    };
+  }
+
+  /**
+   * Get mouse position in screen coordinates (relative to canvas element)
+   * @param {MouseEvent} event
+   * @returns {Object} {x, y} position in screen space
+   */
+  getScreenPosition(event) {
+    try {
+      if (!event) {
+        console.warn('[CanvasManager] getScreenPosition called with null/undefined event');
+        return { x: 0, y: 0 };
+      }
+
+      const clientX = event.clientX;
+      const clientY = event.clientY;
+
+      if (typeof clientX !== 'number' || typeof clientY !== 'number') {
+        console.warn('[CanvasManager] getScreenPosition called with invalid coordinates:', { clientX, clientY, event });
+        return { x: 0, y: 0 };
+      }
+
+      const rect = this.app.canvas.getBoundingClientRect();
+      return {
+        x: clientX - rect.left,
+        y: clientY - rect.top
+      };
+    } catch (error) {
+      console.warn('[CanvasManager] getScreenPosition caught error:', error, event);
+      return { x: 0, y: 0 };
+    }
+  }
+
+  /**
    * Get mouse position relative to canvas
    * @param {MouseEvent} event
    * @returns {Object} {x, y} position
@@ -4186,16 +4242,24 @@ export class CanvasManager {
 
     objects.forEach(obj => {
       // Objects in this.objects are PixiJS containers/sprites directly
-      if (!obj || typeof obj.getBounds !== 'function') {
-        console.warn('[CanvasManager] Skipping object without valid getBounds method:', obj);
+      if (!obj || typeof obj.getLocalBounds !== 'function') {
+        console.warn('[CanvasManager] Skipping object without valid getLocalBounds method:', obj);
         return;
       }
 
-      const bounds = obj.getBounds();
-      minX = Math.min(minX, bounds.x);
-      minY = Math.min(minY, bounds.y);
-      maxX = Math.max(maxX, bounds.x + bounds.width);
-      maxY = Math.max(maxY, bounds.y + bounds.height);
+      // Use getLocalBounds() instead of getBounds() to get bounds in object's own coordinate space
+      // This prevents the bounds from being affected by the current zoom/pan transformations
+      const localBounds = obj.getLocalBounds();
+
+      // Object position is in world/canvas coordinates
+      const objX = obj.x || 0;
+      const objY = obj.y || 0;
+
+      // Calculate world-space bounds
+      minX = Math.min(minX, objX + localBounds.x);
+      minY = Math.min(minY, objY + localBounds.y);
+      maxX = Math.max(maxX, objX + localBounds.x + localBounds.width);
+      maxY = Math.max(maxY, objY + localBounds.y + localBounds.height);
     });
 
     // Check if we found any valid objects with bounds
@@ -4219,6 +4283,14 @@ export class CanvasManager {
       this.emit('viewport_changed');
       return;
     }
+
+    console.log('[CanvasManager] Calculated bounds:', {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      objectCount: objects.length
+    });
 
     // Add padding (50px on each side)
     const padding = 50;
@@ -4255,13 +4327,34 @@ export class CanvasManager {
     const offsetX = (canvasWidth / 2) - (centerX * newZoom);
     const offsetY = (canvasHeight / 2) - (centerY * newZoom);
 
-    console.log('[CanvasManager] Applying viewport:', {
-      zoom: newZoom,
-      offsetX,
-      offsetY,
-      centerX,
-      centerY
+    // Check if we're already at the target viewport (within tolerance)
+    // This makes the reset button idempotent - clicking it repeatedly won't change anything
+    const zoomTolerance = 0.01; // 1% zoom difference
+    const offsetTolerance = 5; // 5 pixels
+
+    const zoomDiff = Math.abs(this.zoomLevel - newZoom);
+    const offsetXDiff = Math.abs(this.viewOffset.x - offsetX);
+    const offsetYDiff = Math.abs(this.viewOffset.y - offsetY);
+
+    const alreadyAtTarget =
+      zoomDiff < zoomTolerance &&
+      offsetXDiff < offsetTolerance &&
+      offsetYDiff < offsetTolerance;
+
+    console.log('[CanvasManager] Viewport comparison:', {
+      current: { zoom: this.zoomLevel, x: this.viewOffset.x, y: this.viewOffset.y },
+      target: { zoom: newZoom, x: offsetX, y: offsetY },
+      diff: { zoom: zoomDiff, x: offsetXDiff, y: offsetYDiff },
+      alreadyAtTarget
     });
+
+    if (alreadyAtTarget) {
+      console.log('[CanvasManager] Already at target viewport - no change needed');
+      return;
+    }
+
+    console.log('[CanvasManager] Applying new viewport');
+
 
     // Apply zoom and offset
     this.zoomLevel = newZoom;

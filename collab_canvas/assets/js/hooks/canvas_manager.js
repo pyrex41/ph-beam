@@ -30,6 +30,9 @@ export default {
     this.loadInitialObjects();
     this.loadInitialPresences();
 
+    // Auto-fit all objects on page load
+    this.canvasManager.resetView();
+
     // Setup server event handlers
     this.setupServerEventHandlers();
   },
@@ -327,6 +330,20 @@ export default {
     // Handle color changes from color picker
     this.handleEvent('color_changed', (data) => {
       this.canvasManager.setCurrentColor(data.color);
+
+      // If objects are selected, update their colors
+      const selectedIds = this.canvasManager.getSelectedObjectIds();
+      if (selectedIds.length > 0) {
+        console.log(`[Hook] Updating color of ${selectedIds.length} selected objects to ${data.color}`);
+
+        // Update each selected object's color
+        selectedIds.forEach(id => {
+          this.safePushEvent('update_object_color', {
+            object_id: id,
+            color: data.color
+          });
+        });
+      }
     });
 
     // Handle reset view command (fit all objects on screen)
