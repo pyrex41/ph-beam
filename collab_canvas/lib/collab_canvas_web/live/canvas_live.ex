@@ -3509,11 +3509,8 @@ defmodule CollabCanvasWeb.CanvasLive do
       </div>
       
     <!-- Layers Panel -->
-      <div class={[
-        "bg-white border-r border-gray-200 flex flex-col transition-all duration-300",
-        @layers_panel_visible && "w-64",
-        !@layers_panel_visible && "w-0 overflow-hidden"
-      ]}>
+      <%= if @layers_panel_visible do %>
+        <div class="w-64 bg-white border-r border-gray-200 flex flex-col">
         <div class="p-3 border-b border-gray-200">
           <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-gray-800">Layers</h2>
@@ -3737,7 +3734,8 @@ defmodule CollabCanvasWeb.CanvasLive do
           </div>
         </div>
       </div>
-      
+      <% end %>
+
     <!-- Main Canvas Area -->
       <div class="flex-1 flex flex-col">
         <!-- Top Bar -->
