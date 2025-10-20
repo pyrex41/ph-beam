@@ -2847,26 +2847,26 @@ export class CanvasManager {
    * Handle window resize
    */
   handleResize() {
-    // Use requestAnimationFrame to ensure we get accurate dimensions
-    requestAnimationFrame(() => {
-      if (!this.app || !this.app.renderer) return;
+    if (!this.app || !this.app.renderer) return;
 
-      const container = this.app.canvas.parentElement;
-      if (!container) return;
+    const container = this.app.canvas.parentElement;
+    if (!container) return;
 
-      const width = container.clientWidth;
-      const height = container.clientHeight;
+    const width = container.clientWidth;
+    const height = container.clientHeight;
 
-      // Only resize if we have valid dimensions
-      if (width > 0 && height > 0) {
-        this.app.renderer.resize(width, height);
-        this.canvasWidth = width;
-        this.canvasHeight = height;
+    // Only resize if we have valid dimensions and dimensions have actually changed
+    if (width > 0 && height > 0 && (width !== this.canvasWidth || height !== this.canvasHeight)) {
+      this.app.renderer.resize(width, height);
+      this.canvasWidth = width;
+      this.canvasHeight = height;
 
-        // Update culling after resize (disabled for now)
-        // this.updateVisibleObjects();
-      }
-    });
+      // Force an immediate render to prevent black screen during transitions
+      this.app.renderer.render(this.app.stage);
+
+      // Update culling after resize (disabled for now)
+      // this.updateVisibleObjects();
+    }
   }
 
   /**

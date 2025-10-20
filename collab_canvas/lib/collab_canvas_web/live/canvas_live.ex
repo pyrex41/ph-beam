@@ -182,6 +182,7 @@ defmodule CollabCanvasWeb.CanvasLive do
         |> assign(:operation_initial_states, %{})
         |> assign(:play_error_sound, ColorPalettes.get_play_error_sound(user.id))
         |> assign(:layers_panel_visible, false)
+        |> assign(:ai_panel_collapsed, false)
 
       # If viewport position exists, push it to the client to restore position
       socket =
@@ -1752,6 +1753,14 @@ defmodule CollabCanvasWeb.CanvasLive do
   @impl true
   def handle_event("toggle_layers_panel", _params, socket) do
     {:noreply, assign(socket, :layers_panel_visible, !socket.assigns.layers_panel_visible)}
+  end
+
+  @doc """
+  Toggles the collapsed state of the AI panel.
+  """
+  @impl true
+  def handle_event("toggle_ai_panel", _params, socket) do
+    {:noreply, assign(socket, :ai_panel_collapsed, !socket.assigns.ai_panel_collapsed)}
   end
 
   @doc """
@@ -3842,7 +3851,7 @@ defmodule CollabCanvasWeb.CanvasLive do
       <% end %>
 
     <!-- Main Canvas Area -->
-      <div class="flex-1 flex flex-col">
+      <div class="flex-1 flex flex-col" style="will-change: width;">
         <!-- Top Bar -->
         <div class="h-14 bg-white border-b border-gray-200 flex items-center px-4">
           <h1 class="text-lg font-semibold text-gray-800">{@canvas.name}</h1>
@@ -3868,28 +3877,75 @@ defmodule CollabCanvasWeb.CanvasLive do
         </div>
       </div>
       <!-- AI Panel -->
-      <div class="w-80 bg-white border-l border-gray-200 flex flex-col overflow-y-auto">
-        <div class="p-4 border-b border-gray-200">
-          <h2 class="text-lg font-semibold text-gray-800">AI Assistant</h2>
-          <p class="text-sm text-gray-500 mt-1">Describe what you want to create</p>
+      <div
+        id="ai-panel"
+        data-ai-panel-collapsed={@ai_panel_collapsed}
+        class={[
+          "bg-white border-l border-gray-200 flex flex-col transition-all duration-300 ease-in-out relative",
+          @ai_panel_collapsed && "w-12 overflow-hidden",
+          !@ai_panel_collapsed && "w-80 overflow-y-auto"
+        ]}
+      >
+        <%= if @ai_panel_collapsed do %>
+          <!-- Collapsed State - Vertical Buttons -->
+          <div class="flex flex-col items-center py-4 space-y-4">
+            <!-- Expand Button -->
+            <button
+              phx-click="toggle_ai_panel"
+              class="p-2 rounded-lg hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors"
+              title="Expand AI panel"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
 
-          <!-- Error Sound Settings -->
-          <div class="mt-3 flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="error-sound-toggle"
-              checked={@play_error_sound}
-              phx-click="toggle_error_sound"
-              phx-value-enabled={!@play_error_sound}
-              class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer"
-            />
-            <label for="error-sound-toggle" class="text-sm text-gray-700 cursor-pointer select-none">
-              Play sound on errors
-            </label>
+            <!-- AI Icon Button with Microphone -->
+            <button
+              phx-click="toggle_ai_panel"
+              class="p-2 rounded-lg hover:bg-blue-50 text-blue-600 hover:text-blue-700 transition-colors"
+              title="Open AI Assistant (or press Space)"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+            </button>
           </div>
-        </div>
+        <% else %>
+          <!-- Expanded State Header -->
+          <div class="relative p-4 border-b border-gray-200">
+            <!-- Collapse/Expand Button -->
+            <button
+              phx-click="toggle_ai_panel"
+              class="absolute top-2 right-2 p-2 rounded-lg hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors z-10"
+              title="Collapse AI panel"
+            >
+              <!-- Left chevron (collapse) -->
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
 
-        <div class="flex-1 flex flex-col">
+            <h2 class="text-lg font-semibold text-gray-800">AI Assistant</h2>
+            <p class="text-sm text-gray-500 mt-1">Describe what you want to create</p>
+
+            <!-- Error Sound Settings -->
+            <div class="mt-3 flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="error-sound-toggle"
+                checked={@play_error_sound}
+                phx-click="toggle_error_sound"
+                phx-value-enabled={!@play_error_sound}
+                class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer"
+              />
+              <label for="error-sound-toggle" class="text-sm text-gray-700 cursor-pointer select-none">
+                Play sound on errors
+              </label>
+            </div>
+          </div>
+
+          <div class="flex-1 flex flex-col">
           <!-- AI Interaction History -->
           <div class="p-4 border-b border-gray-200">
             <h3 class="text-sm font-medium text-gray-700 mb-3">AI Interaction History</h3>
@@ -3950,14 +4006,14 @@ defmodule CollabCanvasWeb.CanvasLive do
                     rows="4"
                     placeholder="e.g., 'Create a blue rectangle' or 'Add a green circle' (Enter to submit, Shift+Enter for new line)"
                   ><%= @ai_command %></textarea>
-                  
+
     <!-- Voice Input Button (Push-to-Talk) -->
                   <button
                     type="button"
                     id="voice-input-button"
                     phx-hook="VoiceInput"
                     class="absolute right-2 top-2 p-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors"
-                    title="Hold to speak (push-to-talk)"
+                    title="Click to speak (or press Space)"
                     disabled={@ai_loading}
                   >
                     <svg
@@ -4149,8 +4205,9 @@ defmodule CollabCanvasWeb.CanvasLive do
             </div>
           </div>
         </div>
+        <% end %>
       </div>
-      
+
     <!-- Color Picker Popup -->
       <%= if @show_color_picker do %>
         <div class="fixed inset-0 z-50">
